@@ -73,7 +73,7 @@ require (
 	k8s.io/kube-openapi v0.31.0 // indirect
 	k8s.io/utils v0.0.0-20241210054802-24370beab758 // indirect
 	kubevirt.io/containerized-data-importer-api v1.63.1 // indirect
-	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
+	kubevirt.io/controller-lifecycle-operator-sdk/api v0.2.4 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 )
