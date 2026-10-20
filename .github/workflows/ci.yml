@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - main
+  merge_group:
   pull_request:
     branches:
       - main
 
 permissions:
+  pull-requests: read
   contents: read
 
 env:
@@ -71,69 +73,14 @@ jobs:
         working-directory: ui
         run: bun run build
 
-  gofmt:
-    name: gofmt
+  lint:
+    name: golangci-lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Check gofmt
-        run: |
-          test -z "$(git ls-files '*.go' | xargs gofmt -l)"
-
-  gofumpt:
-    name: gofumpt
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Install gofumpt
-        run: go install mvdan.cc/gofumpt@latest
-
-      - name: Check gofumpt
-        run: |
-          test -z "$(git ls-files '*.go' | xargs gofumpt -l)"
-
-  goimports:
-    name: goimports
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Install goimports
-        run: go install golang.org/x/tools/cmd/goimports@latest
-
-      - name: Check goimports
-        run: |
-          test -z "$(git ls-files '*.go' | xargs goimports -l)"
-
-  go-vet:
-    name: go vet
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+          fetch-depth: 0
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -154,40 +101,12 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Run go vet
-        run: go vet ./...
-
-  staticcheck:
-    name: staticcheck
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
         with:
-          bun-version: latest
-
-      - name: Install frontend dependencies
-        working-directory: ui
-        run: bun install --frozen-lockfile
-
-      - name: Build frontend assets for embed
-        working-directory: ui
-        run: bun run build
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
-
-      - name: Run staticcheck
-        run: staticcheck ./...
+          version: latest
+          only-new-issues: true
+          args: ./...
 
   go-test:
     name: go test
