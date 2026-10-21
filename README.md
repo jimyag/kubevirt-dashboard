@@ -65,7 +65,12 @@ kubectl port-forward -n kubevirt-dashboard svc/kubevirt-dashboard 8080:80
 
 ### Prerequisites
 
-- Go 1.26+
+- Go 1.27+
+
+The KubeVirt client SDK and its Kubernetes dependencies are updated together.
+KubeVirt SDK 1.9 uses Kubernetes 0.34; OpenShift and kube-openapi replacements
+follow the SDK's own `go.mod`. Review those compatibility pins when upgrading the
+SDK instead of updating the replacement modules independently.
 - Node.js & Bun (for frontend build)
 
 ### Build from source

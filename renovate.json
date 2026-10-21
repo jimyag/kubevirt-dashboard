@@ -3,6 +3,7 @@
   "extends": [
     "config:recommended"
   ],
+  "postUpdateOptions": ["gomodTidy"],
   "packageRules": [
     {
       "matchManagers": [
@@ -33,6 +34,23 @@
         "go"
       ],
       "enabled": true
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["kubevirt.io/**", "k8s.io/**", "sigs.k8s.io/**", "github.com/openshift/**"],
+      "groupName": "KubeVirt and Kubernetes"
+    },
+    {
+      "description": "KubeVirt client-go 1.9 uses Kubernetes 0.34; allow compatible patch updates.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["k8s.io/api", "k8s.io/apimachinery", "k8s.io/apiextensions-apiserver", "k8s.io/client-go"],
+      "allowedVersions": "<0.35.0"
+    },
+    {
+      "description": "These are compatibility pins copied from the KubeVirt SDK go.mod; update them with the SDK rather than independently.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/openshift/api", "github.com/openshift/client-go", "k8s.io/kube-openapi"],
+      "enabled": false
     }
   ]
 }
