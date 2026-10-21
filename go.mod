@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/spf13/cobra v1.10.1
+	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.34.12
 	k8s.io/apimachinery v0.34.12
 	k8s.io/client-go v0.34.12
