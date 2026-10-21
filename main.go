@@ -508,7 +508,7 @@ func handleWebsocket(client kubecli.KubevirtClient, w http.ResponseWriter, r *ht
 		var err error
 		if wsType == "vnc" {
 			log.Printf("Attempting VNC connection for %s/%s", namespace, vmi)
-			vnc, vncErr := client.VirtualMachineInstance(namespace).VNC(vmi)
+			vnc, vncErr := client.VirtualMachineInstance(namespace).VNC(vmi, false)
 			err = vncErr
 			runningChan <- err
 			if err == nil {
