@@ -11,6 +11,8 @@ import { OverviewPage } from "./pages/overview";
 import { EventsPage } from "./pages/events";
 import { SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
 import { CatalogPage, SettingsPage } from "./pages/settings";
+import { MonitoringSettingsPage } from "./pages/monitoring-settings";
+import { HelmReleaseDetailPage, HelmReleaseListPage } from "./pages/helm";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
 import { DnatRulePage, ElasticIpPage, FloatingIpPage, NatGatewayDetailPage, NatGatewayPage, SnatRulePage } from "./pages/nat";
 import { ReservedIpListPage } from "./pages/reserved-ips";
@@ -45,6 +47,9 @@ function App() {
               <Route path="/catalog" element={<CatalogPage />} />
               <Route path="/events" element={<EventsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings/monitoring" element={<MonitoringSettingsPage />} />
+              <Route path="/catalog/helm" element={<HelmReleaseListPage />} />
+              <Route path="/catalog/helm/:namespace/:name" element={<HelmReleaseDetailPage />} />
               <Route path="/vpc/vpcs" element={<VpcListPage />} />
               <Route path="/vpc/vpcs/:name" element={<VpcDetailPage />} />
               <Route path="/vpc/subnets" element={<SubnetListPage />} />

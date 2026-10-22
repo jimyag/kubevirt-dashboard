@@ -32,6 +32,8 @@ import (
 	kvv1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	kvcorev1 "kubevirt.io/client-go/kubevirt/typed/core/v1"
+
+	"github.com/jimyag/kubevirt-dashboard/internal/helm"
 )
 
 var (
@@ -430,6 +432,8 @@ func runServer(cm *ClusterManager, addr string) error {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(nss)
 	})
+
+	helm.Register(mux, cm.getRESTConfig)
 
 	mux.HandleFunc("/apis/", func(w http.ResponseWriter, r *http.Request) {
 		_, _, proxy, err := cm.getClient(r)

@@ -202,7 +202,7 @@ export function VmMonitoring({ namespace, name, running }: { namespace: string; 
   if (config) return <PrometheusCharts config={config} namespace={namespace} name={name} />
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t("Live samples from metrics-server, kept while this page is open.")} <Link to="/settings" className="text-primary hover:underline">{t("Set up monitoring")}</Link> {t("for history, network and disk charts.")}
+      <p className="text-xs text-muted-foreground">{t("Live samples from metrics-server, kept while this page is open.")} <Link to="/settings/monitoring" className="text-primary hover:underline">{t("Set up monitoring")}</Link> {t("for history, network and disk charts.")}
       </p>
       {running ? <LiveCharts namespace={namespace} name={name} /> : <EmptyState icon={Activity} title={t("Instance is not running")} />}
     </div>
