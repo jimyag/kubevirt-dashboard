@@ -37,7 +37,7 @@ kubevirt-console/
 颜色有三种用途，不要用于其他装饰：
 - 主色：主操作按钮、选中项、链接悬停
 - 状态色：绿 / 琥珀 / 红，只通过 `StatusDot` 等共享组件使用
-- 分区色：每个导航分区一个色相（Compute=blue、Storage=amber、Networking=teal、Security=rose、Platform=violet），定义在 `ui/src/lib/navigation.ts` 的 `toneClasses`，用于侧边栏图标、面包屑、页面标题图标和总览指标；新增分区色只在这里加
+- 分区色：每个导航分区一个色相，由 `ui/src/index.css` 中的 `--tone-*` token 定义（同一亮度与彩度，色相在主色附近的冷色区间：Networking 190、Storage 222、Compute 255、Platform 285、Security 315），通过 `ui/src/lib/navigation.ts` 的 `toneClasses` 使用（`text-tone-*` / `bg-tone-*`），用于侧边栏图标、面包屑、页面标题图标和总览指标；不要改用 Tailwind 调色板颜色，新增分区时保持相同亮度与彩度
 
 禁止使用的 class：`bg-white`、`text-zinc-*`、`bg-zinc-*`、`border-zinc-*`、`text-gray-*`、`bg-gray-*`
 

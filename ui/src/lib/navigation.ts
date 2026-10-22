@@ -35,32 +35,32 @@ export type NavItem = {
   visible?: (profile: NetworkProfile) => boolean
 }
 
-export type SectionTone = "slate" | "blue" | "amber" | "teal" | "rose" | "violet"
+export type SectionTone = "home" | "compute" | "storage" | "network" | "security" | "platform"
 
 export type NavSection = { label: string; tone: SectionTone; items: NavItem[] }
 
 /**
- * Per-section accent classes. Each console area keeps one hue across the sidebar icon,
- * header breadcrumb and overview metrics, so color doubles as orientation.
+ * Per-section accent classes, backed by the --tone-* tokens in index.css. Each console area keeps
+ * one hue across the sidebar icon, header breadcrumb, page title icon and overview metrics.
  */
 export const toneClasses: Record<SectionTone, { text: string; bg: string; dot: string; soft: string }> = {
-  slate: { text: "text-slate-600 dark:text-slate-300", bg: "bg-slate-500", dot: "bg-slate-400", soft: "bg-slate-500/10" },
-  blue: { text: "text-blue-600 dark:text-blue-400", bg: "bg-blue-600 dark:bg-blue-500", dot: "bg-blue-500", soft: "bg-blue-500/10" },
-  amber: { text: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500", dot: "bg-amber-500", soft: "bg-amber-500/10" },
-  teal: { text: "text-teal-600 dark:text-teal-400", bg: "bg-teal-600 dark:bg-teal-500", dot: "bg-teal-500", soft: "bg-teal-500/10" },
-  rose: { text: "text-rose-600 dark:text-rose-400", bg: "bg-rose-600 dark:bg-rose-500", dot: "bg-rose-500", soft: "bg-rose-500/10" },
-  violet: { text: "text-violet-600 dark:text-violet-400", bg: "bg-violet-600 dark:bg-violet-500", dot: "bg-violet-500", soft: "bg-violet-500/10" },
+  home: { text: "text-tone-home", bg: "bg-tone-home", dot: "bg-tone-home", soft: "bg-tone-home/12" },
+  compute: { text: "text-tone-compute", bg: "bg-tone-compute", dot: "bg-tone-compute", soft: "bg-tone-compute/12" },
+  storage: { text: "text-tone-storage", bg: "bg-tone-storage", dot: "bg-tone-storage", soft: "bg-tone-storage/12" },
+  network: { text: "text-tone-network", bg: "bg-tone-network", dot: "bg-tone-network", soft: "bg-tone-network/12" },
+  security: { text: "text-tone-security", bg: "bg-tone-security", dot: "bg-tone-security", soft: "bg-tone-security/12" },
+  platform: { text: "text-tone-platform", bg: "bg-tone-platform", dot: "bg-tone-platform", soft: "bg-tone-platform/12" },
 }
 
 export const navSections: NavSection[] = [
   {
     label: "Home",
-    tone: "slate",
+    tone: "home",
     items: [{ name: "Overview", path: "/", icon: LayoutDashboard }],
   },
   {
     label: "Compute",
-    tone: "blue",
+    tone: "compute",
     items: [
       { name: "Instances", path: "/kubevirt/virtualization/virtual-machines", icon: Cpu, match: ["/kubevirt/virtualization/virtual-machine-instances"] },
       { name: "Instance Types", path: "/kubevirt/templates/cluster-instance-types", icon: Layers, match: ["/kubevirt/templates"], requires: ["instancetype.kubevirt.io/v1beta1", "virtualmachineclusterinstancetypes"] },
@@ -73,7 +73,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Storage",
-    tone: "amber",
+    tone: "storage",
     items: [
       { name: "Disks", path: "/kubevirt/cdi/data-volumes", icon: HardDrive, requires: ["cdi.kubevirt.io/v1beta1", "datavolumes"] },
       { name: "Volumes", path: "/storage/kubernetes/persistent-volume-claims", icon: Database, match: ["/storage/kubernetes/persistent-volumes"] },
@@ -83,7 +83,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Networking",
-    tone: "teal",
+    tone: "network",
     items: [
       { name: "VPCs", path: "/vpc/vpcs", icon: Network, visible: (p) => p.vpc },
       { name: "Subnets", path: "/vpc/subnets", icon: Split, visible: (p) => p.vpc },
@@ -95,7 +95,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Security",
-    tone: "rose",
+    tone: "security",
     items: [
       { name: "Security Groups", path: "/vpc/security-groups", icon: ShieldCheck, visible: (p) => p.acl !== "networkpolicy" },
       { name: "Network Policies", path: "/networks/kubernetes/network-policies", icon: Shield, match: ["/networks/cilium/network-policies", "/networks/cilium/clusterwide-network-policies"] },
@@ -103,7 +103,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Platform",
-    tone: "violet",
+    tone: "platform",
     items: [
       { name: "Resource Catalog", path: "/catalog", icon: ListChecks, match: ["/kubernetes", "/kubevirt", "/storage", "/networks"] },
       { name: "Settings", path: "/settings", icon: Settings },

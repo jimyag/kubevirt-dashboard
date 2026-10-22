@@ -135,11 +135,11 @@ export function OverviewPage() {
       />
 
       <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border bg-card md:grid-cols-5 md:divide-y-0">
-        <Metric tone="slate" label="Hosts" value={data.nodes.length} detail={`${readyNodes} ready`} to="/nodes" />
-        <Metric tone="blue" label="Instances" value={data.vms.length} detail={`${statusCounts.running} running`} to="/kubevirt/virtualization/virtual-machines" />
-        <Metric tone="blue" label="vCPU allocated" value={pct(allocation.vcpu, allocation.capacityCpu)} ratio={allocation.capacityCpu ? allocation.vcpu / allocation.capacityCpu : 0} detail={`${allocation.vcpu} of ${allocation.capacityCpu}`} />
-        <Metric tone="violet" label="Memory allocated" value={pct(allocation.memoryGi, allocation.capacityMemory)} ratio={allocation.capacityMemory ? allocation.memoryGi / allocation.capacityMemory : 0} detail={`${formatGi(Math.round(allocation.memoryGi))} of ${formatGi(Math.round(allocation.capacityMemory))}`} />
-        <Metric tone="amber" label="Disks" value={formatGi(diskGi)} detail={`${data.dvs.length} volumes`} to="/kubevirt/cdi/data-volumes" />
+        <Metric tone="compute" label="Hosts" value={data.nodes.length} detail={`${readyNodes} ready`} to="/nodes" />
+        <Metric tone="compute" label="Instances" value={data.vms.length} detail={`${statusCounts.running} running`} to="/kubevirt/virtualization/virtual-machines" />
+        <Metric tone="compute" label="vCPU allocated" value={pct(allocation.vcpu, allocation.capacityCpu)} ratio={allocation.capacityCpu ? allocation.vcpu / allocation.capacityCpu : 0} detail={`${allocation.vcpu} of ${allocation.capacityCpu}`} />
+        <Metric tone="compute" label="Memory allocated" value={pct(allocation.memoryGi, allocation.capacityMemory)} ratio={allocation.capacityMemory ? allocation.memoryGi / allocation.capacityMemory : 0} detail={`${formatGi(Math.round(allocation.memoryGi))} of ${formatGi(Math.round(allocation.capacityMemory))}`} />
+        <Metric tone="storage" label="Disks" value={formatGi(diskGi)} detail={`${data.dvs.length} volumes`} to="/kubevirt/cdi/data-volumes" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
