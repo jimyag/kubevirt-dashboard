@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/sidebar"
 import { useNetworkProfile } from "@/lib/kube"
 import { findActiveNav, toneClasses, useNavSections } from "@/lib/navigation"
+import { BrandMark, productName } from "@/components/brand"
 import { t } from "@/lib/i18n"
 
 const navButtonClass = [
@@ -35,8 +36,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton asChild className="h-9 hover:bg-transparent active:bg-transparent">
               <Link to="/">
-                <div className="flex aspect-square size-7 shrink-0 items-center justify-center rounded-md bg-primary font-mono text-xs font-semibold text-primary-foreground">kv</div>
-                <span className="text-sm font-semibold text-sidebar-accent-foreground">{t("virt console")}</span>
+                <BrandMark />
+                <span className="truncate text-sm font-semibold text-sidebar-accent-foreground">{productName}</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

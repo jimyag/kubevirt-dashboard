@@ -1,4 +1,4 @@
-# AGENTS.md — kubevirt-console
+# AGENTS.md — kubevirt-dashboard
 
 本文件为 Coding Agent（Claude Code、Codex、Cursor 等）在此仓库工作时提供约束。
 
@@ -7,7 +7,7 @@
 ## 项目结构
 
 ```
-kubevirt-console/
+kubevirt-dashboard/
 ├── ui/              # kubevirt-dashboard 前端（本文件约束范围）
 │   └── src/
 │       ├── components/ui/   # shadcn/ui 组件，勿直接修改组件本体
