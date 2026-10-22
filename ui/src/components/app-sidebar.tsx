@@ -204,7 +204,7 @@ export function AppSidebar() {
           <div className="text-xs text-muted-foreground">Network stack</div>
           <div className="truncate text-sm font-semibold">{profile.loaded ? profile.label : "Detecting..."}</div>
           <div className="text-xs text-muted-foreground">
-            ACL: {profile.acl === "kube-ovn" ? "Kube-OVN security groups" : profile.acl === "cilium" ? "Cilium policies" : "NetworkPolicy"}
+            ACL: {profile.aclEngines.length ? profile.aclEngines.map((engine) => engine === "cilium" ? "Cilium" : "Kube-OVN").join(" / ") : "NetworkPolicy"}
           </div>
         </Link>
       </SidebarFooter>

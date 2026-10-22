@@ -422,8 +422,42 @@ export const setVmSecurityGroups = async (vm: VmLike, provider: SgProvider, grou
 export const sgDetailPath = (sg: Pick<SecurityGroup, "provider" | "name" | "namespace">) =>
   sg.provider === "kube-ovn" ? `/vpc/security-groups/kube-ovn/${sg.name}` : `/vpc/security-groups/cilium/${sg.namespace}/${sg.name}`
 
-/** Which security group provider to use for the current network stack, or null when ACLs use NetworkPolicy. */
-export function useSgProvider(): { provider: SgProvider | null; loaded: boolean } {
+export const engineLabel: Record<SgProvider, string> = {
+  "kube-ovn": "Kube-OVN",
+  cilium: "Cilium",
+}
+
+export const engineResource: Record<SgProvider, string> = {
+  "kube-ovn": "Kube-OVN SecurityGroup",
+  cilium: "CiliumNetworkPolicy",
+}
+
+/**
+ * Security group engines of the current network stack. `provider` is the default engine (null when
+ * ACLs use NetworkPolicy); `providers` lists every engine the user may pick, e.g. Cilium and Kube-OVN
+ * on the Kube-OVN + Cilium stack.
+ */
+export function useSgProvider(): { provider: SgProvider | null; providers: SgProvider[]; loaded: boolean } {
   const profile = useNetworkProfile()
-  return { provider: profile.acl === "networkpolicy" ? null : profile.acl, loaded: profile.loaded }
+  return { provider: profile.aclEngines[0] ?? null, providers: profile.aclEngines, loaded: profile.loaded }
+}
+
+export type SgRef = { provider: SgProvider; name: string }
+
+export const sgRefKey = (ref: SgRef) => `${ref.provider}:${ref.name}`
+
+export const vmSecurityGroupRefs = (vm: VmLike, providers: SgProvider[]): SgRef[] =>
+  providers.flatMap((provider) => vmSecurityGroups(vm, provider).map((name) => ({ provider, name })))
+
+export const listAllSecurityGroups = async (providers: SgProvider[], namespace?: string) =>
+  (await Promise.all(providers.map((provider) => listSecurityGroups(provider, namespace)))).flat()
+
+/** Applies the full set of security groups across engines, leaving engines without changes untouched. */
+export const setVmSecurityGroupRefs = async (vm: VmLike, providers: SgProvider[], refs: SgRef[]) => {
+  for (const provider of providers) {
+    const next = refs.filter((ref) => ref.provider === provider).map((ref) => ref.name)
+    const current = vmSecurityGroups(vm, provider)
+    if (next.length === current.length && next.every((name) => current.includes(name))) continue
+    await setVmSecurityGroups(vm, provider, next)
+  }
 }

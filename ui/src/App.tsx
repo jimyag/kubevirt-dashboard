@@ -30,7 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
 import { kubeOvnAnnotations, useNetworkProfile, type KubeObject } from "./lib/kube";
-import { sgDetailPath, useSgProvider, vmSecurityGroups } from "./lib/security-groups";
+import { engineLabel, sgDetailPath, useSgProvider, vmSecurityGroupRefs } from "./lib/security-groups";
 import { CreateInstancePage, InstanceListPage } from "./pages/instances";
 import { OverviewPage } from "./pages/overview";
 import { InstanceSecurityGroupsDialog, SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
@@ -327,7 +327,7 @@ function DVList() {
 }
 
 function VMDetailContent() {
-  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [vmYaml, setVmYaml] = useState(""); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [events, setEvents] = useState<K8sEvent[]>([]); const [metrics, setMetrics] = useState<MetricPoint[]>([]); const [loading, setLoading] = useState(true); const [mStrategy, setMStrategy] = useState<string | null>(null); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider } = useSgProvider(); const profile = useNetworkProfile();
+  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [vmYaml, setVmYaml] = useState(""); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [events, setEvents] = useState<K8sEvent[]>([]); const [metrics, setMetrics] = useState<MetricPoint[]>([]); const [loading, setLoading] = useState(true); const [mStrategy, setMStrategy] = useState<string | null>(null); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider, providers: sgProviders } = useSgProvider(); const profile = useNetworkProfile();
   const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
   const fetchData = useCallback(async () => {
     try {
@@ -378,7 +378,7 @@ function VMDetailContent() {
   const currentMemory = vm.spec.template?.spec?.domain?.resources?.requests?.memory || "1Gi";
   const isRunning = vmi?.status.phase === "Running";
   const templateAnnotations = vm.spec.template?.metadata?.annotations || {};
-  const securityGroups = sgProvider ? vmSecurityGroups(vm as unknown as KubeObject, sgProvider) : [];
+  const securityGroups = vmSecurityGroupRefs(vm as unknown as KubeObject, sgProviders);
 
   const tabs = [
     { id: "overview", name: "Overview", icon: Info },
@@ -931,15 +931,16 @@ function VMDetailContent() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <CardTitle className="text-base">Security groups</CardTitle>
-                    <CardDescription>{sgProvider === "cilium" ? "Enforced by Cilium" : sgProvider === "kube-ovn" ? "Enforced by Kube-OVN" : "Not available on this network stack"}</CardDescription>
+                    <CardDescription>{sgProviders.length ? `Enforced by ${sgProviders.map((engine) => engineLabel[engine]).join(" or ")}` : "Not available on this network stack"}</CardDescription>
                   </div>
                   {sgProvider && <Button size="sm" variant="outline" onClick={() => setDialog("Security Groups")}>Change</Button>}
                 </div>
               </CardHeader>
               <CardContent className="space-y-2">
                 {securityGroups.map((group) => (
-                  <Link key={group} to={sgDetailPath({ provider: sgProvider!, name: group, namespace })} className="flex items-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition-colors hover:bg-muted/50 hover:text-primary">
-                    <ShieldCheck className="size-4 text-muted-foreground" />{group}
+                  <Link key={`${group.provider}:${group.name}`} to={sgDetailPath({ ...group, namespace })} className="flex items-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition-colors hover:bg-muted/50 hover:text-primary">
+                    <ShieldCheck className="size-4 text-muted-foreground" />{group.name}
+                    {sgProviders.length > 1 && <Badge variant="outline" className="ml-auto">{engineLabel[group.provider]}</Badge>}
                   </Link>
                 ))}
                 {sgProvider && securityGroups.length === 0 && <p className="text-sm text-muted-foreground">No security groups attached. Traffic is not filtered by security groups.</p>}

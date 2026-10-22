@@ -73,13 +73,16 @@ export type WizardState = {
   subnet: string
   fixedIp: string
   binding: "masquerade" | "bridge"
+  /** Engine enforcing the selected security groups; chosen per instance on the Kube-OVN + Cilium stack. */
+  sgEngine: "kube-ovn" | "cilium" | null
   securityGroups: string[]
   username: string
   password: string
   sshKey: string
 }
 
-export const buildVirtualMachine = (state: WizardState, aclProvider: "kube-ovn" | "cilium" | null, vpcEnabled: boolean) => {
+export const buildVirtualMachine = (state: WizardState, vpcEnabled: boolean) => {
+  const aclProvider = state.sgEngine
   const rootDv = `${state.name}-root`
   const dataVolumeTemplates: UnknownRecord[] = []
   const disks: UnknownRecord[] = [{ name: "rootdisk", disk: { bus: "virtio" }, bootOrder: 1 }]

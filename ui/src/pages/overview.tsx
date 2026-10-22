@@ -29,7 +29,7 @@ import {
   useNetworkProfile,
   type KubeObject,
 } from "@/lib/kube"
-import { listSecurityGroups, useSgProvider } from "@/lib/security-groups"
+import { engineLabel, listAllSecurityGroups, useSgProvider } from "@/lib/security-groups"
 import { vmShape, vmStatus, vmStatusGroup } from "@/lib/instances"
 
 type EventLike = KubeObject & { type?: string; reason?: string; message?: string; lastTimestamp?: string; eventTime?: string; involvedObject?: { kind?: string; name?: string; namespace?: string } }
@@ -45,7 +45,7 @@ const nodeReady = (node: KubeObject) => asList(asRecord(node.status).conditions)
 
 export function OverviewPage() {
   const profile = useNetworkProfile()
-  const { provider } = useSgProvider()
+  const { provider, providers } = useSgProvider()
 
   const { data, loading } = useAsync(async () => {
     const [vms, vmis, dvs, nodes, kvPods, events, vpcs, subnets, eips] = await Promise.all([
@@ -59,12 +59,12 @@ export function OverviewPage() {
       profile.vpc ? listItems("/apis/kubeovn.io/v1/subnets") : Promise.resolve([]),
       profile.vpc ? listItems("/apis/kubeovn.io/v1/ovn-eips") : Promise.resolve([]),
     ])
-    const securityGroups = provider ? await listSecurityGroups(provider) : []
+    const securityGroups = await listAllSecurityGroups(providers)
     return { vms, vmis, dvs, nodes, kvPods, events, vpcs, subnets, eips, securityGroups }
   }, {
     vms: [] as KubeObject[], vmis: [] as KubeObject[], dvs: [] as KubeObject[], nodes: [] as KubeObject[], kvPods: [] as KubeObject[],
-    events: [] as EventLike[], vpcs: [] as KubeObject[], subnets: [] as KubeObject[], eips: [] as KubeObject[], securityGroups: [] as Awaited<ReturnType<typeof listSecurityGroups>>,
-  }, [profile.vpc, provider])
+    events: [] as EventLike[], vpcs: [] as KubeObject[], subnets: [] as KubeObject[], eips: [] as KubeObject[], securityGroups: [] as Awaited<ReturnType<typeof listAllSecurityGroups>>,
+  }, [profile.vpc, providers.join(",")])
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = { running: 0, stopped: 0, transitioning: 0, error: 0 }
@@ -200,7 +200,7 @@ export function OverviewPage() {
                 { icon: Split, label: "Subnets", value: data.subnets.length, to: "/vpc/subnets" },
                 { icon: Network, label: "Elastic IPs", value: data.eips.length, to: "/networks/kube-ovn/ovn-eips" },
               ] : []),
-              ...(provider ? [{ icon: ShieldCheck, label: `Security groups (${provider === "cilium" ? "Cilium" : "Kube-OVN"})`, value: data.securityGroups.length, to: "/vpc/security-groups" }] : [
+              ...(provider ? [{ icon: ShieldCheck, label: `Security groups (${providers.map((engine) => engineLabel[engine]).join(" + ")})`, value: data.securityGroups.length, to: "/vpc/security-groups" }] : [
                 { icon: ShieldCheck, label: "Network policies", value: "View", to: "/networks/kubernetes/network-policies" },
               ]),
             ].map((item) => (

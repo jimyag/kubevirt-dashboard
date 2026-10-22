@@ -14,6 +14,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  ShieldCheck,
   Square,
   Trash2,
 } from "lucide-react"
@@ -57,7 +58,7 @@ import {
   useNetworkProfile,
   type KubeObject,
 } from "@/lib/kube"
-import { listSecurityGroups, useSgProvider, vmSecurityGroups, type SecurityGroup } from "@/lib/security-groups"
+import { engineLabel, listSecurityGroups, useSgProvider, vmSecurityGroupRefs, type SecurityGroup } from "@/lib/security-groups"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
 
 const VM_API = "/apis/kubevirt.io/v1"
@@ -81,7 +82,7 @@ const statusTabs = [
 export function InstanceListPage() {
   const namespaces = useNamespaces()
   const profile = useNetworkProfile()
-  const { provider } = useSgProvider()
+  const { provider, providers } = useSgProvider()
   const [namespace, setNamespace] = useState(() => readLocal("instances-namespace") || "all")
   const [statusTab, setStatusTab] = useState<(typeof statusTabs)[number]["id"]>("all")
   const [search, setSearch] = useState("")
@@ -235,7 +236,7 @@ export function InstanceListPage() {
                 const shape = vmShape(vm, data.instanceTypes)
                 const network = vmNetworkLabel(vm)
                 const status = vmStatus(vm)
-                const groups = provider ? vmSecurityGroups(vm, provider) : []
+                const groups = vmSecurityGroupRefs(vm, providers)
                 return (
                   <tr key={key(vm)} className="border-b transition-colors hover:bg-muted/50">
                     <td className="px-3 py-2">
@@ -262,7 +263,11 @@ export function InstanceListPage() {
                     {provider && (
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
-                          {groups.length ? groups.map((group) => <Badge key={group} variant="outline">{group}</Badge>) : <span className="text-sm text-muted-foreground">-</span>}
+                          {groups.length ? groups.map((group) => (
+                            <Badge key={`${group.provider}:${group.name}`} variant="outline" title={engineLabel[group.provider]}>
+                              {group.name}{providers.length > 1 && <span className="text-muted-foreground">{group.provider === "cilium" ? "cil" : "ovn"}</span>}
+                            </Badge>
+                          )) : <span className="text-sm text-muted-foreground">-</span>}
                         </div>
                       </td>
                     )}
@@ -374,7 +379,7 @@ export function CreateInstancePage() {
   const navigate = useNavigate()
   const namespaces = useNamespaces()
   const profile = useNetworkProfile()
-  const { provider: aclProvider } = useSgProvider()
+  const { provider: defaultEngine, providers: engines } = useSgProvider()
   const [step, setStep] = useState<StepId>("basics")
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState("")
@@ -400,12 +405,14 @@ export function CreateInstancePage() {
     subnet: "",
     fixedIp: "",
     binding: "masquerade",
+    sgEngine: null,
     securityGroups: [],
     username: "cloud-user",
     password: "",
     sshKey: "",
   }))
   const set = (patch: Partial<WizardState>) => setState((current) => ({ ...current, ...patch }))
+  const aclProvider = state.sgEngine && engines.includes(state.sgEngine) ? state.sgEngine : defaultEngine
 
   const { data: catalog, loading: catalogLoading } = useAsync(async () => {
     const [instanceTypes, dataSources, storageClasses, vpcs, subnets, pvcs] = await Promise.all([
@@ -443,7 +450,7 @@ export function CreateInstancePage() {
 
   const vpcSubnets = catalog.subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === state.vpc && !["join"].includes(subnet.metadata.name))
   const defaultStorageClass = catalog.storageClasses.find((sc) => sc.metadata.annotations?.["storageclass.kubernetes.io/is-default-class"] === "true")?.metadata.name
-  const vm = useMemo(() => buildVirtualMachine(state, aclProvider, profile.vpc), [state, aclProvider, profile.vpc])
+  const vm = useMemo(() => buildVirtualMachine({ ...state, sgEngine: aclProvider }, profile.vpc), [state, aclProvider, profile.vpc])
 
   const problems: Partial<Record<StepId, string>> = {}
   if (!dnsName.test(state.name)) problems.basics = "Name must be lowercase letters, digits and dashes."
@@ -494,7 +501,7 @@ export function CreateInstancePage() {
     { label: "Data disks", value: state.dataDisks.length ? state.dataDisks.join(", ") : "None" },
     { label: "Network", value: profile.vpc ? `${state.vpc} / ${state.subnet || "N/A"}${state.fixedIp ? ` (${state.fixedIp})` : ""}` : "Pod network" },
     { label: "Interface binding", value: state.binding },
-    { label: "Security groups", value: aclProvider ? state.securityGroups.join(", ") || "None" : "Not available" },
+    { label: "Security groups", value: aclProvider ? `${state.securityGroups.join(", ") || "None"}${engines.length > 1 ? ` (${engineLabel[aclProvider]})` : ""}` : "Not available" },
     { label: "Login", value: `${state.username || "default user"}${state.password ? " / password" : ""}${state.sshKey.trim() ? " / SSH key" : ""}` },
     { label: "Power on", value: state.startAfterCreate ? "After creation" : "Stay stopped" },
   ]
@@ -681,6 +688,23 @@ export function CreateInstancePage() {
               <StepSection title="Security groups" description={aclProvider === "kube-ovn" ? "Enforced by Kube-OVN port ACLs." : aclProvider === "cilium" ? `Enforced by Cilium. Groups from namespace ${state.namespace}.` : "Security groups require Kube-OVN or Cilium."}>
                 {aclProvider ? (
                   <>
+                    {engines.length > 1 && (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">Enforcement engine</div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {engines.map((engine) => (
+                            <ChoiceCard
+                              key={engine}
+                              selected={aclProvider === engine}
+                              onClick={() => set({ sgEngine: engine, securityGroups: [] })}
+                              icon={ShieldCheck}
+                              title={<span className="flex items-center gap-2">{engineLabel[engine]}{engine === defaultEngine && <Badge variant="outline">Default</Badge>}</span>}
+                              description={engine === "cilium" ? "CiliumNetworkPolicy in this namespace. Supports deny rules." : "Kube-OVN SecurityGroup on the OVN port. Enables port security."}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {securityGroups.length === 0 && <p className="text-sm text-muted-foreground">No security groups yet. <Link to="/vpc/security-groups" className="text-primary hover:underline">Create one</Link>, or continue without.</p>}
                     <div className="grid gap-2 sm:grid-cols-2">
                       {securityGroups.map((sg) => (

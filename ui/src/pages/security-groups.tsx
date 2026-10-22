@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArrowDownToLine, ArrowUpFromLine, Info, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -57,11 +57,19 @@ import {
   type SgDirection,
   type SgProvider,
   type SgRule,
+  engineLabel,
+  engineResource,
+  listAllSecurityGroups,
+  setVmSecurityGroupRefs,
+  sgRefKey,
+  vmSecurityGroupRefs,
 } from "@/lib/security-groups"
 
-const providerLabel: Record<SgProvider, string> = {
-  "kube-ovn": "Kube-OVN SecurityGroup",
-  cilium: "CiliumNetworkPolicy",
+const providerLabel = engineResource
+
+const engineDescription: Record<SgProvider, string> = {
+  cilium: "eBPF policy per namespace. Supports deny rules and cross-group references. Default on Kube-OVN + Cilium.",
+  "kube-ovn": "OVN port ACLs, cluster wide, with explicit rule priorities. Requires port security on the instance.",
 }
 
 function ProviderNote({ provider }: { provider: SgProvider }) {
@@ -178,17 +186,20 @@ function RuleTable({ rules, direction, provider }: { rules: SgRule[]; direction:
 function CreateSecurityGroupDialog({
   open,
   onOpenChange,
-  provider,
+  providers,
+  defaultProvider,
   defaultNamespace,
   onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  provider: SgProvider
+  providers: SgProvider[]
+  defaultProvider: SgProvider
   defaultNamespace: string
-  onCreated: (sg: { name: string; namespace?: string }) => void
+  onCreated: (sg: { provider: SgProvider; name: string; namespace?: string }) => void
 }) {
   const namespaces = useNamespaces()
+  const [provider, setProvider] = useState(defaultProvider)
   const [name, setName] = useState("")
   const [namespace, setNamespace] = useState(defaultNamespace)
   const [description, setDescription] = useState("")
@@ -198,8 +209,10 @@ function CreateSecurityGroupDialog({
   const [error, setError] = useState("")
 
   useEffect(() => {
-    if (open) setNamespace(defaultNamespace)
-  }, [defaultNamespace, open])
+    if (!open) return
+    setNamespace(defaultNamespace)
+    setProvider(defaultProvider)
+  }, [defaultNamespace, defaultProvider, open])
 
   const submit = async () => {
     setBusy(true)
@@ -208,7 +221,7 @@ function CreateSecurityGroupDialog({
       const rules = ruleTemplates.find((item) => item.id === template)?.rules || []
       await createSecurityGroup(provider, { name: name.trim(), namespace, description: description.trim(), rules, allowSameGroup })
       onOpenChange(false)
-      onCreated({ name: name.trim(), namespace: provider === "cilium" ? namespace : undefined })
+      onCreated({ provider, name: name.trim(), namespace: provider === "cilium" ? namespace : undefined })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create security group")
     } finally {
@@ -223,6 +236,22 @@ function CreateSecurityGroupDialog({
           <DialogTitle>Create security group</DialogTitle>
           <DialogDescription>A stateful firewall for instances. Backed by {providerLabel[provider]}.</DialogDescription>
         </DialogHeader>
+        {providers.length > 1 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Enforcement engine</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {providers.map((item) => (
+                <ChoiceCard
+                  key={item}
+                  selected={provider === item}
+                  onClick={() => setProvider(item)}
+                  title={<span className="flex items-center gap-2">{engineLabel[item]}{item === defaultProvider && <Badge variant="outline">Default</Badge>}</span>}
+                  description={engineDescription[item]}
+                />
+              ))}
+            </div>
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <FieldRow label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="sg-web" /></FieldRow>
           {provider === "cilium" ? (
@@ -266,7 +295,10 @@ function CreateSecurityGroupDialog({
 // --- List ---
 
 export function SecurityGroupListPage() {
-  const { provider, loaded } = useSgProvider()
+  const { provider: defaultProvider, providers, loaded } = useSgProvider()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requested = searchParams.get("engine") as SgProvider | null
+  const provider = requested && providers.includes(requested) ? requested : defaultProvider
   const navigate = useNavigate()
   const namespaces = useNamespaces()
   const [namespace, setNamespace] = useState("all")
@@ -317,9 +349,28 @@ export function SecurityGroupListPage() {
       <PageHeader
         title="Security Groups"
         subtitle="Stateful firewalls that control inbound and outbound traffic of instances"
-        badge={<Badge variant="outline">{providerLabel[provider]}</Badge>}
+        badge={providers.length === 1 ? <Badge variant="outline">{providerLabel[provider]}</Badge> : undefined}
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create security group</Button>}
       />
+      {providers.length > 1 && (
+        <div className="flex flex-wrap gap-1 border-b">
+          {providers.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setSearchParams(item === defaultProvider ? {} : { engine: item })}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                provider === item ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {engineLabel[item]}
+              <span className="text-xs font-normal text-muted-foreground">{engineResource[item]}</span>
+              {item === defaultProvider && <Badge variant="outline">Default</Badge>}
+            </button>
+          ))}
+        </div>
+      )}
       <ProviderNote provider={provider} />
       <Toolbar
         right={
@@ -373,9 +424,10 @@ export function SecurityGroupListPage() {
       <CreateSecurityGroupDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        provider={provider}
+        providers={providers}
+        defaultProvider={provider}
         defaultNamespace={namespace === "all" ? "default" : namespace}
-        onCreated={(sg) => navigate(sgDetailPath({ provider, ...sg }))}
+        onCreated={(sg) => navigate(sgDetailPath(sg))}
       />
       <ConfirmDialog
         open={deleting !== null}
@@ -452,7 +504,7 @@ export function SecurityGroupDetailPage() {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <PageHeader
-        breadcrumbs={[{ label: "Security Groups", to: "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
+        breadcrumbs={[{ label: "Security Groups", to: provider === "kube-ovn" ? "/vpc/security-groups?engine=kube-ovn" : "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
         title={sg.name}
         subtitle={sg.description || undefined}
         badge={<Badge variant="outline">{providerLabel[provider]}</Badge>}
@@ -629,43 +681,58 @@ function AttachInstancesDialog({ open, onOpenChange, sg, vms, onDone }: { open: 
 
 /** Dialog used from the instance detail page to choose its security groups. */
 export function InstanceSecurityGroupsDialog({ open, onOpenChange, vm, onDone }: { open: boolean; onOpenChange: (open: boolean) => void; vm: KubeObject; onDone: () => void }) {
-  const { provider } = useSgProvider()
+  const { providers } = useSgProvider()
   const [groups, setGroups] = useState<SecurityGroup[]>([])
   const [selected, setSelected] = useState<string[]>([])
+  const providerKey = providers.join(",")
   useEffect(() => {
-    if (!open || !provider) return
-    listSecurityGroups(provider, vm.metadata.namespace).then((items) => {
+    if (!open || providerKey === "") return
+    const engines = providerKey.split(",") as SgProvider[]
+    listAllSecurityGroups(engines, vm.metadata.namespace).then((items) => {
       setGroups(items.filter((item) => item.managed))
-      setSelected(vmSecurityGroups(vm, provider))
+      setSelected(vmSecurityGroupRefs(vm, engines).map(sgRefKey))
     })
-  }, [open, provider, vm])
-  if (!provider) return null
+  }, [open, providerKey, vm])
+  if (providers.length === 0) return null
   return (
     <ConfirmDialog
       open={open}
       onOpenChange={onOpenChange}
       title="Change security groups"
-      description="Updates the instance template and its running pod."
+      description={providers.length > 1 ? "Pick groups from either engine. Cilium and Kube-OVN rules both apply when an instance uses groups from both." : "Updates the instance template and its running pod."}
       confirmLabel="Save"
       onConfirm={async () => {
-        await setVmSecurityGroups(vm, provider, selected)
+        const refs = groups.filter((sg) => selected.includes(sgRefKey(sg))).map((sg) => ({ provider: sg.provider, name: sg.name }))
+        await setVmSecurityGroupRefs(vm, providers, refs)
         onDone()
       }}
     >
-      <div className="max-h-72 space-y-1 overflow-y-auto">
+      <div className="max-h-80 space-y-3 overflow-y-auto">
         {groups.length === 0 && <p className="text-sm text-muted-foreground">No security groups available. <Link to="/vpc/security-groups" className="text-primary hover:underline">Create one</Link>.</p>}
-        {groups.map((sg) => (
-          <label key={sg.name} className="flex items-center gap-3 rounded-lg border p-2 text-sm hover:bg-muted/50">
-            <input
-              type="checkbox"
-              className="size-4 accent-primary"
-              checked={selected.includes(sg.name)}
-              onChange={(e) => setSelected((current) => e.target.checked ? [...current, sg.name] : current.filter((item) => item !== sg.name))}
-            />
-            <span className="font-medium">{sg.name}</span>
-            <span className="text-muted-foreground">{sg.description || `${sg.rules.length} rules`}</span>
-          </label>
-        ))}
+        {providers.map((engine) => {
+          const items = groups.filter((sg) => sg.provider === engine)
+          if (items.length === 0) return null
+          return (
+            <div key={engine} className="space-y-1">
+              {providers.length > 1 && <div className="text-xs font-semibold text-muted-foreground">{engineLabel[engine]}</div>}
+              {items.map((sg) => {
+                const key = sgRefKey(sg)
+                return (
+                  <label key={key} className="flex items-center gap-3 rounded-lg border p-2 text-sm hover:bg-muted/50">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={selected.includes(key)}
+                      onChange={(e) => setSelected((current) => e.target.checked ? [...current, key] : current.filter((item) => item !== key))}
+                    />
+                    <span className="font-medium">{sg.name}</span>
+                    <span className="truncate text-muted-foreground">{sg.description || `${sg.rules.length} rules`}</span>
+                  </label>
+                )
+              })}
+            </div>
+          )
+        })}
       </div>
     </ConfirmDialog>
   )

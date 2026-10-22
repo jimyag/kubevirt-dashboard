@@ -151,11 +151,13 @@ export function useDiscovery(): Discovery {
  * How VM networking and ACLs are managed on this cluster:
  * - pod: KubeVirt on the default pod network, ACLs via Kubernetes NetworkPolicy
  * - kube-ovn: Kube-OVN VPCs/subnets, ACLs via Kube-OVN SecurityGroups
- * - kube-ovn-cilium: Kube-OVN VPCs/subnets, ACLs via CiliumNetworkPolicy (CNI chaining)
+ * - kube-ovn-cilium: Kube-OVN VPCs/subnets; ACLs via CiliumNetworkPolicy by default, with Kube-OVN
+ *   SecurityGroups available as an alternative engine chosen per security group
  * - cilium: Cilium networking, ACLs via CiliumNetworkPolicy
  */
 export type NetworkProfileId = "pod" | "kube-ovn" | "kube-ovn-cilium" | "cilium"
 export type AclProvider = "networkpolicy" | "kube-ovn" | "cilium"
+export type AclEngine = Exclude<AclProvider, "networkpolicy">
 
 export type NetworkProfile = {
   id: NetworkProfileId
@@ -163,6 +165,8 @@ export type NetworkProfile = {
   description: string
   vpc: boolean
   acl: AclProvider
+  /** Security group engines usable on this stack, default first. */
+  aclEngines: AclEngine[]
   detected: NetworkProfileId
   override: NetworkProfileId | "auto"
   kubeOvnInstalled: boolean
@@ -170,30 +174,35 @@ export type NetworkProfile = {
   loaded: boolean
 }
 
-export const networkProfiles: Record<NetworkProfileId, { label: string; description: string; vpc: boolean; acl: AclProvider }> = {
+export const networkProfiles: Record<NetworkProfileId, { label: string; description: string; vpc: boolean; acl: AclProvider; engines: AclEngine[]; recommended?: boolean }> = {
   pod: {
     label: "KubeVirt",
     description: "VMs use the default pod network. Access control uses Kubernetes NetworkPolicy.",
     vpc: false,
     acl: "networkpolicy",
+    engines: [],
   },
   "kube-ovn": {
     label: "KubeVirt + Kube-OVN",
     description: "VMs are placed in Kube-OVN VPCs and subnets. Access control uses Kube-OVN security groups.",
     vpc: true,
     acl: "kube-ovn",
+    engines: ["kube-ovn"],
   },
   "kube-ovn-cilium": {
     label: "KubeVirt + Kube-OVN + Cilium",
-    description: "Kube-OVN provides VPCs, subnets and IPAM. Cilium enforces security groups as CiliumNetworkPolicy.",
+    description: "Kube-OVN provides VPCs, subnets and IPAM. Security groups default to Cilium policies; Kube-OVN security groups can be chosen per group.",
     vpc: true,
     acl: "cilium",
+    engines: ["cilium", "kube-ovn"],
+    recommended: true,
   },
   cilium: {
     label: "KubeVirt + Cilium",
     description: "VMs use the Cilium pod network. Security groups are enforced as CiliumNetworkPolicy.",
     vpc: false,
     acl: "cilium",
+    engines: ["cilium"],
   },
 }
 
@@ -236,7 +245,11 @@ export function useNetworkProfile(): NetworkProfile {
     ? "kube-ovn-cilium"
     : kubeOvnInstalled ? "kube-ovn" : ciliumInstalled ? "cilium" : "pod"
   const id = override === "auto" ? detected : override
-  return { id, ...networkProfiles[id], detected, override, kubeOvnInstalled, ciliumInstalled, loaded: discovery.loaded }
+  const { engines, ...profile } = networkProfiles[id]
+  // Only offer engines whose CRDs are served; fall back to the profile's list before discovery loads.
+  const installed = engines.filter((engine) => !discovery.loaded || (engine === "cilium" ? ciliumInstalled : kubeOvnInstalled))
+  const aclEngines = installed.length ? installed : engines
+  return { id, ...profile, acl: aclEngines[0] ?? "networkpolicy", aclEngines, detected, override, kubeOvnInstalled, ciliumInstalled, loaded: discovery.loaded }
 }
 
 // --- Data hooks ---

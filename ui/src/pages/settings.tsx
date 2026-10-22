@@ -11,6 +11,7 @@ import {
   writeProfileOverride,
   type NetworkProfileId,
 } from "@/lib/kube"
+import { engineResource } from "@/lib/security-groups"
 
 const components: Array<{ name: string; description: string; check: [string, string] }> = [
   { name: "KubeVirt", description: "Virtual machine runtime", check: ["kubevirt.io/v1", "virtualmachines"] },
@@ -57,7 +58,7 @@ export function SettingsPage() {
                   selected={profile.override === id}
                   onClick={() => writeProfileOverride(id)}
                   icon={Network}
-                  title={<span className="flex flex-wrap items-center gap-2">{item.label}{missing && profile.loaded && <Badge variant="warning">Not installed</Badge>}</span>}
+                  title={<span className="flex flex-wrap items-center gap-2">{item.label}{item.recommended && <Badge variant="success">Recommended</Badge>}{missing && profile.loaded && <Badge variant="warning">Not installed</Badge>}</span>}
                   description={item.description}
                 />
               )
@@ -74,7 +75,12 @@ export function SettingsPage() {
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Security groups</div>
-              <div className="font-semibold">{profile.acl === "kube-ovn" ? "Kube-OVN SecurityGroup" : profile.acl === "cilium" ? "CiliumNetworkPolicy" : "Kubernetes NetworkPolicy"}</div>
+              <div className="font-semibold">
+                {profile.aclEngines.length === 0
+                  ? "Kubernetes NetworkPolicy"
+                  : profile.aclEngines.map((engine, index) => `${engineResource[engine]}${index === 0 && profile.aclEngines.length > 1 ? " (default)" : ""}`).join(" or ")}
+              </div>
+              {profile.aclEngines.length > 1 && <div className="text-xs text-muted-foreground">Choose the engine per security group and per instance.</div>}
             </div>
           </div>
         </CardContent>
