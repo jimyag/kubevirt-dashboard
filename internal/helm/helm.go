@@ -528,7 +528,7 @@ func (h *handler) loadChart(cfg *action.Configuration, source chartSource) (*cha
 	install := action.NewInstall(cfg)
 	install.ChartPathOptions = options
 	install.SetRegistryClient(cfg.RegistryClient)
-	path, err := install.ChartPathOptions.LocateChart(source.ref(), h.settings)
+	path, err := install.LocateChart(source.ref(), h.settings)
 	if err != nil {
 		return nil, err
 	}
