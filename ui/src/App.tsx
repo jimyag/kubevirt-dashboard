@@ -1,8 +1,8 @@
-import { useCallback, useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, Navigate } from "react-router-dom";
 import {
   Terminal, FileCode, Info, ShieldCheck, Bell, Activity,
-  Search, Check, Copy, MousePointer2, RefreshCw, Play, Square, RotateCcw, MonitorPlay, ChevronDown
+  Check, Copy, MousePointer2, RefreshCw, Play, Square, RotateCcw, MonitorPlay, ChevronDown
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +17,8 @@ import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import { Button } from "./components/ui/button";
 import { dvCreateConfig, jsonPost, jsonPut, keyValueText, mergePatch, numberValue, parseKeyValueText, resourceConfigs, stringValue } from "./resources/configs";
-import { DataTable, EmptyState, KeyValueGrid, LoadingState, NativeSelect, PageHeader, Panel, StatusDot, Toolbar } from "./components/console";
+import { Combobox, DataTable, EmptyState, FilterInput, KeyValueGrid, LoadingState, PageHeader, Panel, StatusDot, Toolbar } from "./components/console";
+import { namespaceScope, useFilteredRows, type FilterField } from "./lib/filter";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,7 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
-import { kubeOvnAnnotations, relativeTime, replaceMap, useNetworkProfile, type KubeObject } from "./lib/kube";
+import { kubeOvnAnnotations, relativeTime, replaceMap, useNamespaces, useNetworkProfile, type KubeObject } from "./lib/kube";
 import { engineLabel, sgDetailPath, useSgProvider, vmSecurityGroupRefs } from "./lib/security-groups";
 import { CreateInstancePage, InstanceListPage } from "./pages/instances";
 import { OverviewPage } from "./pages/overview";
@@ -37,6 +38,7 @@ import { eventsUrl } from "./lib/events";
 import { InstanceSecurityGroupsDialog, SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
 import { CatalogPage, SettingsPage } from "./pages/settings";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
+import { ElasticIpPage, NatGatewayPage } from "./pages/nat";
 import { KubernetesCategoryPage, KubernetesManagementPage, KubeVirtCategoryPage, KubeVirtManagementPage, NetworkCategoryPage, NetworkManagementPage, StorageCategoryPage, StorageManagementPage } from "./resources/group-pages";
 import {
   Dialog,
@@ -214,75 +216,78 @@ const dvAttachments = (vms: VM[]) => {
   return index;
 };
 
+type DiskRow = { dv: DV; attachedTo: string }
+
+const diskFields: FilterField<DiskRow>[] = [
+  { key: "name", label: "Name", value: (row) => row.dv.metadata.name },
+  { key: "namespace", label: "Namespace", aliases: ["ns"], value: (row) => row.dv.metadata.namespace },
+  { key: "status", label: "Status", value: (row) => row.dv.status?.phase },
+  { key: "size", label: "Size", value: (row) => dvSize(row.dv) },
+  { key: "storageclass", label: "Storage class", aliases: ["sc"], value: (row) => dvStorageClass(row.dv) },
+  { key: "source", label: "Source", value: (row) => dvSource(row.dv) },
+  { key: "vm", label: "Attached to", aliases: ["attached"], value: (row) => row.attachedTo },
+]
+
 function DVList() {
-  const [dvs, setDvs] = useState<DV[]>([]); const [vms, setVms] = useState<VM[]>([]); const [loading, setLoading] = useState(true); const [searchTerm, setSearchTerm] = useState(""); const [nss, setNss] = useState<string[]>(["all"]); const [namespaceFilter, setNamespaceFilter] = useState("all");
+  const [dvs, setDvs] = useState<DV[]>([]); const [vms, setVms] = useState<VM[]>([]); const [loading, setLoading] = useState(true); const [searchTerm, setSearchTerm] = useState(""); const namespaces = useNamespaces(); const [namespaceFilter, setNamespaceFilter] = useState("");
+  const ns = useMemo(() => namespaceScope(namespaceFilter, namespaces), [namespaceFilter, namespaces]);
+  const scope = ns.scope;
   const loadDvs = useCallback(async () => {
     setLoading(true);
     try {
-      const scope = namespaceFilter === "all" ? "" : `/namespaces/${namespaceFilter}`;
+      const prefix = scope === "all" ? "" : `/namespaces/${scope}`;
       const [dvData, vmData] = await Promise.all([
-        apiFetch(`/apis/cdi.kubevirt.io/v1beta1${scope}/datavolumes`).then(r => r.ok ? r.json() : { items: [] }),
-        apiFetch(`/apis/kubevirt.io/v1${scope}/virtualmachines`).then(r => r.ok ? r.json() : { items: [] }),
+        apiFetch(`/apis/cdi.kubevirt.io/v1beta1${prefix}/datavolumes`).then(r => r.ok ? r.json() : { items: [] }),
+        apiFetch(`/apis/kubevirt.io/v1${prefix}/virtualmachines`).then(r => r.ok ? r.json() : { items: [] }),
       ]);
       setDvs(dvData.items || []);
       setVms(vmData.items || []);
     } finally { setLoading(false); }
-  }, [namespaceFilter]);
-  useEffect(() => {
-    apiFetch("/api/v1/namespaces-list").then(r => r.json()).then((data) => setNss(Array.from(new Set(["all", ...(data || []).filter(Boolean)]))));
-  }, []);
+  }, [scope]);
   useEffect(() => { loadDvs(); }, [loadDvs]);
-  const attachedTo = dvAttachments(vms);
-  const needle = searchTerm.toLowerCase();
-  const filtered = dvs.filter(dv => dv.metadata.name.toLowerCase().includes(needle) || dv.metadata.namespace.toLowerCase().includes(needle));
+  const rows = useMemo(() => {
+    const attachedTo = dvAttachments(vms);
+    return dvs.filter((dv) => ns.match(dv.metadata.namespace)).map((dv): DiskRow => ({ dv, attachedTo: attachedTo[`${dv.metadata.namespace}/${dv.metadata.name}`] || "" }));
+  }, [dvs, vms, ns]);
+  const filtered = useFilteredRows(rows, diskFields, searchTerm);
   return (
     <div className="space-y-4">
       <PageHeader
         title="Disks"
         badge={!loading && <span className="text-sm text-muted-foreground tabular-nums">{dvs.length}</span>}
         subtitle="CDI DataVolumes"
-        actions={<ResourceCreateDialog config={dvCreateConfig} onCreated={loadDvs} defaultNamespace={namespaceFilter === "all" ? "default" : namespaceFilter} />}
+        actions={<ResourceCreateDialog config={dvCreateConfig} onCreated={loadDvs} defaultNamespace={scope === "all" ? "default" : scope} />}
       />
-      <Toolbar
-        right={
-          <div className="relative w-full md:w-[280px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Filter by name or namespace" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-          </div>
-        }
-      >
+      <Toolbar right={<FilterInput value={searchTerm} onChange={setSearchTerm} fields={diskFields} rows={rows} placeholder="Filter, e.g. status:succeeded sc:ceph" />}>
         <Button size="sm" variant="outline" onClick={loadDvs} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
-        <NativeSelect className="min-w-[160px]" value={namespaceFilter} onChange={e => setNamespaceFilter(e.target.value)} aria-label="Namespace">
-          {nss.map(ns => <option key={ns} value={ns}>{ns === "all" ? "All namespaces" : ns}</option>)}
-        </NativeSelect>
+        <Combobox value={namespaceFilter} onChange={setNamespaceFilter} options={namespaces} placeholder="All namespaces" aria-label="Namespace" />
       </Toolbar>
-      <DataTable
+      <DataTable<DiskRow>
         loading={loading}
         rows={filtered}
-        rowKey={(dv) => dv.metadata.uid}
-        empty={<EmptyState title={searchTerm ? "No matching disks" : "No disks"} />}
+        rowKey={({ dv }) => dv.metadata.uid}
+        empty={<EmptyState title={searchTerm || namespaceFilter ? "No matching disks" : "No disks"} />}
         columns={[
           {
             header: "Name",
-            cell: (dv) => (
+            cell: ({ dv }) => (
               <div>
                 <Link to={`/kubevirt/cdi/data-volumes/${dv.metadata.namespace}/${dv.metadata.name}/overview`} className="font-medium hover:text-primary transition-colors">{dv.metadata.name}</Link>
                 <div className="text-xs text-muted-foreground">{dv.metadata.namespace}</div>
               </div>
             ),
           },
-          { header: "Status", cell: (dv) => <StatusDot status={dv.status?.phase} label={dv.status?.phase && dv.status.progress && dv.status.phase !== "Succeeded" ? `${dv.status.phase} ${dv.status.progress}` : undefined} /> },
-          { header: "Size", cell: (dv) => <span className="font-mono text-xs">{dvSize(dv)}</span> },
-          { header: "Storage class", cell: (dv) => <span className="text-sm text-muted-foreground">{dvStorageClass(dv)}</span> },
-          { header: "Source", cell: (dv) => <span className="text-sm text-muted-foreground">{dvSource(dv)}</span> },
+          { header: "Status", cell: ({ dv }) => <StatusDot status={dv.status?.phase} label={dv.status?.phase && dv.status.progress && dv.status.phase !== "Succeeded" ? `${dv.status.phase} ${dv.status.progress}` : undefined} /> },
+          { header: "Size", cell: ({ dv }) => <span className="font-mono text-xs">{dvSize(dv)}</span> },
+          { header: "Storage class", cell: ({ dv }) => <span className="text-sm text-muted-foreground">{dvStorageClass(dv)}</span> },
+          { header: "Source", cell: ({ dv }) => <span className="text-sm text-muted-foreground">{dvSource(dv)}</span> },
           {
             header: "Attached to",
-            cell: (dv) => {
-              const vm = attachedTo[`${dv.metadata.namespace}/${dv.metadata.name}`];
+            cell: ({ dv, attachedTo: vm }) => {
               return vm ? <Link to={`/kubevirt/virtualization/virtual-machines/${dv.metadata.namespace}/${vm}/overview`} className="text-sm hover:text-primary transition-colors">{vm}</Link> : <span className="text-sm text-muted-foreground">-</span>;
             },
           },
-          { header: "Age", className: "text-right", cell: (dv) => <span className="text-sm text-muted-foreground tabular-nums" title={dv.metadata.creationTimestamp}>{relativeTime(dv.metadata.creationTimestamp)}</span> },
+          { header: "Age", className: "text-right", cell: ({ dv }) => <span className="text-sm text-muted-foreground tabular-nums" title={dv.metadata.creationTimestamp}>{relativeTime(dv.metadata.creationTimestamp)}</span> },
         ]}
       />
     </div>
@@ -955,6 +960,8 @@ function App() {
               <Route path="/vpc/vpcs/:name" element={<VpcDetailPage />} />
               <Route path="/vpc/subnets" element={<SubnetListPage />} />
               <Route path="/vpc/subnets/:name" element={<SubnetDetailPage />} />
+              <Route path="/vpc/elastic-ips" element={<ElasticIpPage />} />
+              <Route path="/vpc/nat-gateways" element={<NatGatewayPage />} />
               <Route path="/vpc/security-groups" element={<SecurityGroupListPage />} />
               <Route path="/vpc/security-groups/:provider/:name" element={<SecurityGroupDetailPage />} />
               <Route path="/vpc/security-groups/:provider/:namespace/:name" element={<SecurityGroupDetailPage />} />

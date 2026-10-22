@@ -65,6 +65,7 @@ kubevirt-console/
   - `StatTile`、`UsageBar`：指标与容量
   - `KeyValueGrid`：详情字段
   - `ChoiceCard`、`TabBar`、`FieldRow`、`NativeSelect`：表单与选项
+  - `Combobox`、`FilterInput`、`Pager`：列表筛选。筛选一律用可输入的 `Combobox`（不用下拉选择）；搜索框用 `FilterInput` + `lib/filter.ts` 的 `useFilteredRows`，支持对展示列做 `field:value` 筛选；长列表用 `usePaged` + `Pager` 分页
   - `ConfirmDialog`、`ErrorNote`、`EmptyState`、`LoadingState`：交互反馈
 - 导航数据集中在 `ui/src/lib/navigation.ts`，侧边栏、顶栏面包屑和 ⌘K 命令面板共用
 

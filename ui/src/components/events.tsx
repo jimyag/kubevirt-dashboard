@@ -1,30 +1,44 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
-import { Bell, RefreshCw, Search } from "lucide-react"
+import { Bell, RefreshCw } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { DataTable, EmptyState, NativeSelect, StatusDot, Toolbar } from "@/components/console"
+import { Combobox, DataTable, EmptyState, FilterInput, StatusDot, Toolbar } from "@/components/console"
 import { relativeTime } from "@/lib/kube"
+import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { eventCount, eventTime, fetchEvents, involvedObjectPath, type KubeEvent } from "@/lib/events"
 
-/** Event table with type filter, search and auto refresh. Shows the object column only when not scoped to one object. */
+const eventFields: FilterField<KubeEvent>[] = [
+  { key: "type", label: "Type", value: (event) => event.type || "Normal" },
+  { key: "reason", label: "Reason", value: (event) => event.reason },
+  { key: "kind", label: "Object kind", value: (event) => event.involvedObject?.kind },
+  { key: "object", label: "Object name", aliases: ["name"], value: (event) => event.involvedObject?.name },
+  { key: "namespace", label: "Namespace", aliases: ["ns"], value: (event) => event.involvedObject?.namespace },
+  { key: "message", label: "Message", aliases: ["msg"], value: (event) => event.message },
+]
+
+/**
+ * Event table with type filter, field search and auto refresh. Shows the object column only when
+ * not scoped to one object. `prefilter` narrows events locally, e.g. by a partially typed namespace.
+ */
 export function EventList({
   url,
   showObject = true,
   refreshMs = 15000,
   toolbarExtra,
+  prefilter,
 }: {
   url: string
   showObject?: boolean
   refreshMs?: number
   toolbarExtra?: ReactNode
+  prefilter?: (event: KubeEvent) => boolean
 }) {
   const [events, setEvents] = useState<KubeEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [type, setType] = useState("all")
+  const [type, setType] = useState("")
   const [search, setSearch] = useState("")
   const [tick, setTick] = useState(0)
 
@@ -55,43 +69,37 @@ export function EventList({
     return () => clearInterval(timer)
   }, [refreshMs])
 
-  const rows = useMemo(() => {
-    const needle = search.trim().toLowerCase()
-    return events.filter((event) => {
-      if (type !== "all" && event.type !== type) return false
-      if (!needle) return true
-      return [event.reason, event.message, event.involvedObject?.kind, event.involvedObject?.name, event.involvedObject?.namespace]
-        .some((value) => (value || "").toLowerCase().includes(needle))
-    })
-  }, [events, search, type])
+  const scoped = useMemo(() => {
+    const typeNeedle = type.trim().toLowerCase()
+    return events.filter((event) => (!prefilter || prefilter(event)) && (!typeNeedle || (event.type || "Normal").toLowerCase().includes(typeNeedle)))
+  }, [events, prefilter, type])
+  const rows = useFilteredRows(scoped, eventFields, search)
 
   const warnings = events.filter((event) => event.type === "Warning").length
 
   return (
     <div className="space-y-3">
       <Toolbar
-        right={
-          <div className="relative w-full md:w-[280px]">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Filter by reason, object or message" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        }
+        right={<FilterInput value={search} onChange={setSearch} fields={showObject ? eventFields : eventFields.filter((field) => !["kind", "object", "namespace"].includes(field.key))} rows={scoped} placeholder="Filter, e.g. reason:failed kind:pod" />}
       >
         <Button size="sm" variant="outline" onClick={() => setTick((current) => current + 1)} className="gap-2">
           <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           Refresh
         </Button>
-        <NativeSelect value={type} onChange={(e) => setType(e.target.value)} aria-label="Event type" className="min-w-[150px]">
-          <option value="all">All types ({events.length})</option>
-          <option value="Warning">Warning ({warnings})</option>
-          <option value="Normal">Normal ({events.length - warnings})</option>
-        </NativeSelect>
+        <Combobox
+          value={type}
+          onChange={setType}
+          options={[{ value: "Warning", hint: String(warnings) }, { value: "Normal", hint: String(events.length - warnings) }]}
+          placeholder={`All types (${events.length})`}
+          aria-label="Event type"
+          className="w-[160px]"
+        />
         {toolbarExtra}
       </Toolbar>
       {error && <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm break-all text-destructive">{error}</div>}
       <DataTable
         loading={loading && events.length === 0}
-        rows={rows.slice(0, 500)}
+        rows={rows}
         rowKey={(event) => event.metadata.uid || `${event.metadata.namespace}/${event.metadata.name}`}
         minWidth={showObject ? 900 : 640}
         empty={<EmptyState icon={Bell} title={events.length ? "No matching events" : "No events"} />}
@@ -117,7 +125,6 @@ export function EventList({
           { header: "Last seen", className: "w-24 text-right", cell: (event) => <span className="text-sm text-muted-foreground tabular-nums" title={eventTime(event)}>{relativeTime(eventTime(event))}</span> },
         ]}
       />
-      {rows.length > 500 && <p className="text-xs text-muted-foreground">Showing the latest 500 of {rows.length} events.</p>}
     </div>
   )
 }

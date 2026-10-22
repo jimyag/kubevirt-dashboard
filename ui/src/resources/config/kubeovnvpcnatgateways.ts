@@ -8,22 +8,23 @@ export const kubeOvnVpcNatGatewaysConfig: ResourceConfig = shared.kubeOvnResourc
     subtitle: "Manage Kube-OVN VpcNatGateway resources",
     kind: "VpcNatGateway",
     createFields: [
-      { name: "namespace", label: "Workload Namespace", section: "Gateway", defaultValue: "default" },
-      { name: "vpc", label: "VPC", section: "Gateway", defaultValue: "ovn-cluster" },
-      { name: "subnet", label: "Subnet", section: "Gateway", defaultValue: "example-subnet" },
-      { name: "lanIp", label: "LAN IP", section: "Gateway", defaultValue: "", placeholder: "optional" },
-      { name: "externalSubnets", label: "External Subnets", section: "Gateway", defaultValue: "", placeholder: "comma separated" },
-      { name: "replicas", label: "Replicas", section: "Gateway", type: "number", defaultValue: "1" },
+      { name: "vpc", label: "VPC", section: "Gateway", defaultValue: "", placeholder: "custom VPC name" },
+      { name: "subnet", label: "Subnet", section: "Gateway", defaultValue: "", placeholder: "subnet in the VPC" },
+      { name: "lanIp", label: "LAN IP", section: "Gateway", defaultValue: "", placeholder: "unused IP in the subnet" },
+      { name: "externalSubnets", label: "External Subnets", section: "Gateway", defaultValue: "", placeholder: "comma separated, optional" },
+      { name: "qosPolicy", label: "QoS Policy", section: "Gateway", defaultValue: "", placeholder: "optional" },
     ],
-    buildSpec: (values) => ({
-      namespace: shared.stringValue(values.namespace, "default"),
-      vpc: shared.stringValue(values.vpc, "ovn-cluster"),
-      subnet: shared.stringValue(values.subnet, "example-subnet"),
-      ...(shared.stringValue(values.lanIp) ? { lanIp: shared.stringValue(values.lanIp) } : {}),
-      externalSubnets: shared.csvList(values.externalSubnets),
-      replicas: shared.numberValue(values.replicas, 1),
-    }),
-    statusPath: ["status", "ready"],
+    // VpcNatGateway spec (kubeovn.io/v1): vpc, subnet, lanIp, externalSubnets, qosPolicy, selector, ...
+    buildSpec: (values) => {
+      const externalSubnets = shared.csvList(values.externalSubnets)
+      return {
+        vpc: shared.stringValue(values.vpc),
+        subnet: shared.stringValue(values.subnet),
+        lanIp: shared.stringValue(values.lanIp),
+        ...(externalSubnets.length ? { externalSubnets } : {}),
+        ...(shared.stringValue(values.qosPolicy) ? { qosPolicy: shared.stringValue(values.qosPolicy) } : {}),
+      }
+    },
     extraColumns: [
       { label: "VPC", value: (r) => String(shared.getRecord(r.spec).vpc || "N/A") },
       { label: "Subnet", value: (r) => String(shared.getRecord(r.spec).subnet || "N/A") },

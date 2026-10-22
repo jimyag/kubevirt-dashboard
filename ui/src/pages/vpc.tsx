@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { Network, Plus, RefreshCw, Search, Split, Trash2 } from "lucide-react"
+import { Network, Plus, RefreshCw, Split, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -16,8 +16,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  Combobox,
   ConfirmDialog,
   DataTable,
+  FilterInput,
   EmptyState,
   FieldRow,
   KeyValueGrid,
@@ -29,6 +31,7 @@ import {
   UsageBar,
   Panel,
 } from "@/components/console"
+import { useFilteredRows, type FilterField } from "@/lib/filter"
 import {
   apiFetch,
   asList,
@@ -288,7 +291,17 @@ export function VpcListPage() {
     return { vpcs, subnets, natGateways }
   }, { vpcs: [] as KubeObject[], subnets: [] as KubeObject[], natGateways: [] as KubeObject[] }, [])
 
-  const rows = useMemo(() => data.vpcs.filter((vpc) => vpc.metadata.name.includes(search.trim())), [data.vpcs, search])
+  const vpcFields = useMemo<FilterField<KubeObject>[]>(() => {
+    const cidrs: Record<string, string[]> = {}
+    for (const subnet of data.subnets) (cidrs[str(asRecord(subnet.spec).vpc, "ovn-cluster")] ||= []).push(str(asRecord(subnet.spec).cidrBlock))
+    return [
+      { key: "name", label: "Name", value: (vpc) => vpc.metadata.name },
+      { key: "status", label: "Status", value: (vpc) => (asRecord(vpc.status).standby === true ? "Available" : "Pending") },
+      { key: "cidr", label: "CIDRs", value: (vpc) => cidrs[vpc.metadata.name] },
+      { key: "namespace", label: "Namespaces", aliases: ["ns"], value: (vpc) => asRecord(vpc.spec).namespaces as string[] | undefined },
+    ]
+  }, [data.subnets])
+  const rows = useFilteredRows(data.vpcs, vpcFields, search)
 
   if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="VPCs" /><KubeOvnMissing /></div>
 
@@ -299,12 +312,7 @@ export function VpcListPage() {
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create VPC</Button>}
       />
       <Toolbar
-        right={
-          <div className="relative w-full md:w-[280px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Filter by name" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        }
+        right={<FilterInput value={search} onChange={setSearch} fields={vpcFields} rows={data.vpcs} placeholder="Filter, e.g. cidr:10.16" />}
       >
         <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
         <span className="text-sm text-muted-foreground">{data.vpcs.length} VPCs, {data.subnets.length} subnets</span>
@@ -430,7 +438,7 @@ export function VpcDetailPage() {
                 <span className="font-mono text-xs text-muted-foreground">{str(asRecord(gw.spec).subnet)} / {str(asRecord(gw.spec).lanIp, "auto")}</span>
               </div>
             ))}
-            {data.natGateways.length === 0 && <p className="text-sm text-muted-foreground">No NAT gateways. <Link to="/networks/kube-ovn/vpc-nat-gateways" className="text-primary hover:underline">Create one</Link> to give instances internet access or elastic IPs.</p>}
+            {data.natGateways.length === 0 && <p className="text-sm text-muted-foreground">No NAT gateways. <Link to="/vpc/nat-gateways" className="text-primary hover:underline">Create one</Link> to give instances internet access or elastic IPs.</p>}
           </Panel>
         <Panel title="Route table" bodyClassName="space-y-2">
             {staticRoutes.map((route, index) => (
@@ -500,10 +508,20 @@ function SubnetTable({ subnets, loading, vms, onCreate, onDelete }: { subnets: K
   )
 }
 
+const subnetFields: FilterField<KubeObject>[] = [
+  { key: "name", label: "Name", value: (subnet) => subnet.metadata.name },
+  { key: "status", label: "Status", value: (subnet) => subnetReady(subnet) },
+  { key: "vpc", label: "VPC", value: (subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") },
+  { key: "cidr", label: "CIDR", value: (subnet) => str(asRecord(subnet.spec).cidrBlock) },
+  { key: "gateway", label: "Gateway", aliases: ["gw"], value: (subnet) => str(asRecord(subnet.spec).gateway) },
+  { key: "protocol", label: "Protocol", value: (subnet) => str(asRecord(subnet.spec).protocol) },
+  { key: "namespace", label: "Bound namespaces", aliases: ["ns"], value: (subnet) => asRecord(subnet.spec).namespaces as string[] | undefined },
+]
+
 export function SubnetListPage() {
   const profile = useNetworkProfile()
   const [search, setSearch] = useState("")
-  const [vpcFilter, setVpcFilter] = useState("all")
+  const [vpcFilter, setVpcFilter] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<KubeObject | null>(null)
   const { data, loading, reload } = useAsync(async () => {
@@ -511,12 +529,17 @@ export function SubnetListPage() {
     return { subnets, vpcs, vms }
   }, { subnets: [] as KubeObject[], vpcs: [] as KubeObject[], vms: [] as KubeObject[] }, [])
 
-  const vpcNames = data.vpcs.map((vpc) => vpc.metadata.name)
-  const rows = data.subnets.filter((subnet) => {
-    const vpc = str(asRecord(subnet.spec).vpc, "ovn-cluster")
-    const needle = search.trim()
-    return (vpcFilter === "all" || vpc === vpcFilter) && (!needle || subnet.metadata.name.includes(needle) || str(asRecord(subnet.spec).cidrBlock).includes(needle))
-  })
+  const vpcNames = useMemo(() => data.vpcs.map((vpc) => vpc.metadata.name), [data.vpcs])
+  const exactVpc = vpcNames.includes(vpcFilter.trim()) ? vpcFilter.trim() : ""
+  const inVpc = useMemo(() => {
+    const needle = vpcFilter.trim().toLowerCase()
+    if (!needle) return data.subnets
+    return data.subnets.filter((subnet) => {
+      const vpc = str(asRecord(subnet.spec).vpc, "ovn-cluster")
+      return exactVpc ? vpc === exactVpc : vpc.toLowerCase().includes(needle)
+    })
+  }, [data.subnets, vpcFilter, exactVpc])
+  const rows = useFilteredRows(inVpc, subnetFields, search)
 
   if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="Subnets" /><KubeOvnMissing /></div>
 
@@ -527,21 +550,13 @@ export function SubnetListPage() {
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create subnet</Button>}
       />
       <Toolbar
-        right={
-          <div className="relative w-full md:w-[280px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Filter by name or CIDR" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        }
+        right={<FilterInput value={search} onChange={setSearch} fields={subnetFields} rows={inVpc} placeholder="Filter, e.g. cidr:10.16 ns:prod" />}
       >
         <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
-        <NativeSelect value={vpcFilter} onChange={(e) => setVpcFilter(e.target.value)} aria-label="Filter by VPC" className="min-w-[160px]">
-          <option value="all">All VPCs</option>
-          {vpcNames.map((vpc) => <option key={vpc} value={vpc}>{vpc}</option>)}
-        </NativeSelect>
+        <Combobox value={vpcFilter} onChange={setVpcFilter} options={vpcNames} placeholder="All VPCs" aria-label="VPC" />
       </Toolbar>
       <SubnetTable subnets={rows} loading={loading} vms={data.vms} onCreate={() => setCreateOpen(true)} onDelete={setDeleting} />
-      <CreateSubnetDialog open={createOpen} onOpenChange={setCreateOpen} vpcs={vpcNames} defaultVpc={vpcFilter === "all" ? undefined : vpcFilter} existingSubnets={data.subnets} onCreated={reload} />
+      <CreateSubnetDialog open={createOpen} onOpenChange={setCreateOpen} vpcs={vpcNames} defaultVpc={exactVpc || undefined} existingSubnets={data.subnets} onCreated={reload} />
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}

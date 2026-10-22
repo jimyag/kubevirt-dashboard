@@ -7,13 +7,13 @@ import {
   Copy,
   Plus,
   RefreshCw,
-  Search,
   Trash2,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { relativeTime, replaceMap } from "@/lib/kube"
-import { ConfirmDialog, EmptyState, ErrorNote, LoadingState, NativeSelect, PageHeader, StatusDot, Toolbar } from "@/components/console"
+import { Combobox, ConfirmDialog, EmptyState, ErrorNote, FilterInput, LoadingState, PageHeader, Pager, StatusDot, Toolbar } from "@/components/console"
+import { namespaceScope, useFilteredRows, usePaged, type FilterField } from "@/lib/filter"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -606,15 +606,28 @@ const relatedPodsForResource = (resource: KubeResource) => {
   return undefined
 }
 
-function ResourceStatus({ resource, config }: { resource: KubeResource; config: ResourceConfig }) {
-  const value =
+const resourceStatusText = (resource: KubeResource, config: ResourceConfig) =>
+  String(
     getValue(resource, config.statusPath) ??
     getValue(resource, ["status", "phase"]) ??
     getValue(resource, ["status", "conditions", "0", "type"]) ??
     "Active"
+  )
 
-  return <StatusDot status={String(value)} />
+function ResourceStatus({ resource, config }: { resource: KubeResource; config: ResourceConfig }) {
+  return <StatusDot status={resourceStatusText(resource, config)} />
 }
+
+const fieldKey = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+
+/** Filterable fields of a generic resource list: the columns shown plus labels. */
+const resourceFilterFields = (config: ResourceConfig): FilterField<KubeResource>[] => [
+  { key: "name", label: "Name", value: (r) => r.metadata.name },
+  ...(config.namespaced ? [{ key: "namespace", label: "Namespace", aliases: ["ns"], value: (r: KubeResource) => r.metadata.namespace }] : []),
+  { key: "status", label: "Status", value: (r) => resourceStatusText(r, config) },
+  ...(config.extraColumns || []).map((column) => ({ key: fieldKey(column.label), label: column.label, value: (r: KubeResource) => column.value(r) })),
+  { key: "label", label: "Labels", value: (r) => Object.entries(r.metadata.labels || {}).map(([key, value]) => `${key}=${value}`) },
+]
 
 function PodDetailOverview({ resource }: { resource: KubeResource }) {
   const spec = asRecord(resource.spec)
@@ -2153,8 +2166,10 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
   const [items, setItems] = useState<KubeResource[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const [namespaces, setNamespaces] = useState<string[]>(["all"])
+  const [namespaces, setNamespaces] = useState<string[]>([])
   const [namespaceFilter, setNamespaceFilter] = useState("default")
+  const ns = useMemo(() => namespaceScope(namespaceFilter, namespaces), [namespaceFilter, namespaces])
+  const scope = ns.scope
   const [error, setError] = useState("")
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<KubeResource | null>(null)
@@ -2169,17 +2184,13 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
       })
       .then((data) => {
         if (cancelled) return
-        const next = Array.from(new Set(["all", ...(data || []).filter(Boolean)]))
+        const next = Array.from(new Set((data || []).filter(Boolean)))
         setNamespaces(next)
-        setNamespaceFilter((current) => {
-          if (current && next.includes(current)) return current
-          return next.includes("default") ? "default" : next.find((ns) => ns !== "all") || "all"
-        })
+        // Fall back to all namespaces when the initial "default" does not exist.
+        setNamespaceFilter((current) => (current === "default" && !next.includes("default") ? "" : current))
       })
       .catch(() => {
-        if (cancelled) return
-        setNamespaces(["all", "default"])
-        setNamespaceFilter("default")
+        if (!cancelled) setNamespaces(["default"])
       })
     return () => {
       cancelled = true
@@ -2194,7 +2205,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
       let lastError = ""
       const paths = await servedPaths(config)
       for (const path of paths) {
-        const res = await apiFetch(resourceListUrl(config, path, namespaceFilter))
+        const res = await apiFetch(resourceListUrl(config, path, scope))
         if (res.ok) {
           const data = await res.json()
           setItems(data.items || [])
@@ -2212,26 +2223,24 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
     } finally {
       setLoading(false)
     }
-  }, [config, namespaceFilter])
+  }, [config, scope])
 
   useEffect(() => {
     load()
   }, [load])
 
-  const filtered = useMemo(() => {
-    const needle = search.toLowerCase()
-    return items.filter((item) => {
-      const ns = item.metadata.namespace || ""
-      return item.metadata.name.toLowerCase().includes(needle) || ns.toLowerCase().includes(needle)
-    })
-  }, [items, search])
+  const fields = useMemo(() => resourceFilterFields(config), [config])
+  const inScope = useMemo(() => (config.namespaced ? items.filter((item) => ns.match(item.metadata.namespace)) : items), [items, ns, config.namespaced])
+  const filtered = useFilteredRows(inScope, fields, search)
+  const { rows: pageRows, ...paging } = usePaged(filtered)
 
-  const emptyTitle = search ? "No matching resources" : `No ${config.title.toLowerCase()} found`
-  const emptyDescription = search
-    ? "Clear or change the search text to see other resources."
-    : config.namespaced && namespaceFilter !== "all"
-      ? `This API returned an empty list for namespace ${namespaceFilter}.`
-      : "This API returned an empty list for the current cluster context."
+  const filtering = Boolean(search.trim()) || (config.namespaced && scope === "all" && Boolean(namespaceFilter.trim()))
+  const emptyTitle = filtering ? "No matching resources" : `No ${config.title.toLowerCase()} found`
+  const emptyDescription = filtering
+    ? undefined
+    : config.namespaced && scope !== "all"
+      ? `Namespace ${scope} has none.`
+      : undefined
   const tableColumnCount = 5 + (config.namespaced ? 1 : 0) + (config.extraColumns?.length || 0)
   const selectedCount = Object.values(selected).filter(Boolean).length
 
@@ -2255,25 +2264,18 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
         title={config.title}
         badge={!loading && <span className="text-sm text-muted-foreground tabular-nums">{items.length}</span>}
         subtitle={<span className="font-mono text-xs">{config.kind} · {config.listPath.split("/").slice(1, -1).join("/")}</span>}
-        actions={canCreateResource(config) && <ResourceCreateDialog config={config} onCreated={load} defaultNamespace={namespaceFilter} />}
+        actions={canCreateResource(config) && <ResourceCreateDialog config={config} onCreated={load} defaultNamespace={scope === "all" ? "default" : scope} />}
       />
 
       <Toolbar
-        right={
-          <div className="relative w-full md:w-[280px]">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Filter by name or namespace" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        }
+        right={<FilterInput value={search} onChange={setSearch} fields={fields} rows={inScope} />}
       >
         <Button size="sm" variant="outline" onClick={load} className="gap-2">
           <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           Refresh
         </Button>
         {config.namespaced && (
-          <NativeSelect className="min-w-[160px]" value={namespaceFilter} onChange={(event) => setNamespaceFilter(event.target.value)} aria-label="Namespace">
-            {namespaces.map((ns) => <option key={ns} value={ns}>{ns === "all" ? "All namespaces" : ns}</option>)}
-          </NativeSelect>
+          <Combobox value={namespaceFilter} onChange={setNamespaceFilter} options={namespaces} placeholder="All namespaces" aria-label="Namespace" />
         )}
         {selectedCount > 0 && <span className="text-sm text-muted-foreground">{selectedCount} selected</span>}
       </Toolbar>
@@ -2322,7 +2324,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
                     <EmptyState title={emptyTitle} description={emptyDescription} />
                   </TableCell>
                 </TableRow>
-              ) : filtered.map((item) => {
+              ) : pageRows.map((item) => {
                 const rowKey = item.metadata.uid || `${item.metadata.namespace || "_cluster"}-${item.metadata.name}`
                 return (
                 <TableRow key={rowKey} className="hover:bg-muted/50">
@@ -2370,6 +2372,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
             </TableBody>
           </Table>
         </div>
+        <Pager {...paging} />
       </div>
       <ConfirmDialog
         open={deleting !== null}

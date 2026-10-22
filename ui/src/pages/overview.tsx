@@ -79,7 +79,8 @@ export function OverviewPage() {
       listItems<EventLike>("/api/v1/events"),
       profile.vpc ? listItems("/apis/kubeovn.io/v1/vpcs") : Promise.resolve([]),
       profile.vpc ? listItems("/apis/kubeovn.io/v1/subnets") : Promise.resolve([]),
-      profile.vpc ? listItems("/apis/kubeovn.io/v1/ovn-eips") : Promise.resolve([]),
+      // Both Kube-OVN NAT models: VPC NAT gateway (iptables) and OVN native EIPs.
+      profile.vpc ? Promise.all([listItems("/apis/kubeovn.io/v1/iptables-eips"), listItems("/apis/kubeovn.io/v1/ovn-eips")]).then((lists) => lists.flat()) : Promise.resolve([]),
     ])
     const securityGroups = await listAllSecurityGroups(providers)
     return { vms, vmis, dvs, nodes, kvPods, events, vpcs, subnets, eips, securityGroups }
@@ -216,7 +217,7 @@ export function OverviewPage() {
               <>
                 <CountRow label="VPCs" value={data.vpcs.length} to="/vpc/vpcs" />
                 <CountRow label="Subnets" value={data.subnets.length} to="/vpc/subnets" />
-                <CountRow label="Elastic IPs" value={data.eips.length} to="/networks/kube-ovn/ovn-eips" />
+                <CountRow label="Elastic IPs" value={data.eips.length} to="/vpc/elastic-ips" />
               </>
             )}
             {providers.length > 0 ? (
