@@ -343,10 +343,10 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
   const [items, setItems] = useState<PodSummary[]>(pods || [])
   const [loading, setLoading] = useState(!pods)
   const [error, setError] = useState("")
-  const selectorValues = useMemo(
-    () => (selectors && selectors.length > 0 ? selectors : selector ? [selector] : []).map(selectorText).filter(Boolean),
-    [selector, selectors]
-  )
+  // Callers often build selectors inline on every render (the VM page refreshes every 5s); key on
+  // the selector text so a new array with the same content does not reload the list.
+  const selectorKey = JSON.stringify((selectors && selectors.length > 0 ? selectors : selector ? [selector] : []).map(selectorText).filter(Boolean))
+  const selectorValues = useMemo(() => JSON.parse(selectorKey) as string[], [selectorKey])
   const load = useCallback(async () => {
     if (pods) {
       setItems(pods)
@@ -404,7 +404,8 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
       </header>
       {error ? (
         <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm break-words text-destructive">{error}</div>
-      ) : loading ? (
+      ) : loading && items.length === 0 ? (
+        // Keep the rows (and any open log or shell dialog) mounted while refreshing.
         <div className="flex h-20 items-center justify-center gap-2">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
           <span className="text-sm text-muted-foreground">{t("Loading...")}</span>
