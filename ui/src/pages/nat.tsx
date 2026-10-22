@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import * as YAML from "js-yaml"
-import { Globe, Plus, RefreshCw, Trash2, Waypoints } from "lucide-react"
+import { Plus, RefreshCw, Trash2, Waypoints } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -16,25 +16,21 @@ import {
   ErrorNote,
   FieldRow,
   FilterInput,
+  KeyValueGrid,
+  LoadingState,
   PageHeader,
+  Panel,
   StatusDot,
   TabBar,
   Toolbar,
   type Column,
 } from "@/components/console"
-import { asRecord, listItems, relativeTime, requestJson, useAsync, useDiscovery, useNetworkProfile, type KubeObject } from "@/lib/kube"
+import { apiFetch, asRecord, listItems, relativeTime, requestJson, str, useAsync, useDiscovery, useNetworkProfile, type KubeObject } from "@/lib/kube"
+import { ManifestPanel } from "@/components/manifest"
 import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { isDnsLabel } from "@/lib/validate"
 import { OVN_API, natEngineLabel, natKinds, natManifest, natReady, type NatEngine, type NatKind, type NatRefs, type NatTab } from "@/lib/nat"
 import { t } from "@/lib/i18n"
-
-const tabLabels: Record<NatTab, string> = {
-  gateways: "NAT gateways",
-  eips: "Elastic IPs",
-  snat: "SNAT",
-  dnat: "DNAT",
-  fip: "Floating IPs",
-}
 
 /** Engines whose CRDs the cluster serves; iptables first since custom VPCs use it. */
 function useNatEngines(): NatEngine[] {
@@ -74,13 +70,18 @@ const loadRefs = async (): Promise<NatRefs> => {
 
 const emptyRefs: NatRefs = { gateways: [], iptablesEips: [], ovnEips: [], vpcs: [], subnets: [], ips: [], qosPolicies: [] }
 
-function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKind; open: boolean; onOpenChange: (open: boolean) => void; onCreated: () => void }) {
+/** Narrows suggestions and presets fields, e.g. to one NAT gateway on its detail page. */
+type NatScope = { defaults?: Record<string, string>; refs?: (refs: NatRefs) => NatRefs }
+
+function CreateNatDialog({ kind, scope, open, onOpenChange, onCreated }: { kind: NatKind; scope?: NatScope; open: boolean; onOpenChange: (open: boolean) => void; onCreated: () => void }) {
+  const initial = { ...kind.defaults, ...scope?.defaults }
   const [name, setName] = useState("")
-  const [values, setValues] = useState<Record<string, string>>(kind.defaults || {})
+  const [values, setValues] = useState<Record<string, string>>(initial)
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
   // References for suggestions are only fetched while the dialog is open.
-  const { data: refs } = useAsync(() => (open ? loadRefs() : Promise.resolve(emptyRefs)), emptyRefs, [open])
+  const { data: loaded } = useAsync(() => (open ? loadRefs() : Promise.resolve(emptyRefs)), emptyRefs, [open])
+  const refs = scope?.refs ? scope.refs(loaded) : loaded
 
   const set = (field: string, value: string) => setValues((current) => ({ ...current, [field]: value }))
   const manifest = natManifest(kind, name || "<name>", values)
@@ -102,7 +103,7 @@ function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKin
       })
       onOpenChange(false)
       setName("")
-      setValues(kind.defaults || {})
+      setValues(initial)
       onCreated()
     } catch (err) {
       setError(err instanceof Error ? err.message : t("Create failed"))
@@ -158,8 +159,11 @@ function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKin
   )
 }
 
-/** List, filter, create and delete one NAT kind. */
-function NatTable({ kind }: { kind: NatKind }) {
+/** Detail route of a NAT object: NAT gateways have their own page, the rest use the Resource Catalog. */
+const natDetailPath = (kind: NatKind, name: string) => (kind.plural === "vpc-nat-gateways" ? `/vpc/nat-gateways/${name}` : `${kind.catalogPath}/_cluster/${name}`)
+
+/** List, filter, create and delete one NAT kind; `only` limits it to the objects of one gateway. */
+function NatTable({ kind, only, scope, onChanged }: { kind: NatKind; only?: (item: KubeObject) => boolean; scope?: NatScope; onChanged?: () => void }) {
   const [search, setSearch] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<KubeObject | null>(null)
@@ -167,25 +171,32 @@ function NatTable({ kind }: { kind: NatKind }) {
     const res = await requestJson(`${OVN_API}/${kind.plural}`, { method: "GET" })
     return ((asRecord(res).items as KubeObject[] | undefined) || []).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name))
   }, [] as KubeObject[], [kind.plural])
+  const items = useMemo(() => (only ? data.filter(only) : data), [data, only])
+  const changed = () => {
+    reload()
+    onChanged?.()
+  }
 
   const fields = useMemo<FilterField<KubeObject>[]>(() => [
     { key: "name", label: t("Name"), value: (item) => item.metadata.name },
     ...(kind.hasReady ? [{ key: "status", label: t("Status"), value: natReady }] : []),
     ...kind.columns.map((column) => ({ key: column.key, label: column.header, value: column.value })),
   ], [kind])
-  const rows = useFilteredRows(data, fields, search)
+  const rows = useFilteredRows(items, fields, search)
 
   const columns: Column<KubeObject>[] = [
     {
       header: t("Name"),
-      cell: (item) => <Link to={`${kind.catalogPath}/_cluster/${item.metadata.name}`} className="font-medium hover:text-primary transition-colors">{item.metadata.name}</Link>,
+      cell: (item) => <Link to={natDetailPath(kind, item.metadata.name)} className="font-medium hover:text-primary transition-colors">{item.metadata.name}</Link>,
     },
     ...(kind.hasReady ? [{ header: t("Status"), cell: (item: KubeObject) => <StatusDot status={natReady(item)} label={natReady(item) === "NotReady" ? t("Not ready") : undefined} /> }] : []),
     ...kind.columns.map((column): Column<KubeObject> => ({
       header: t(column.header),
       cell: (item) => {
         const value = column.value(item)
-        return value ? <span className={cn("text-sm", column.mono && "font-mono text-xs")}>{value}</span> : <span className="text-sm text-muted-foreground">-</span>
+        if (!value) return <span className="text-sm text-muted-foreground">-</span>
+        const text = <span className={cn("text-sm", column.mono && "font-mono text-xs")}>{value}</span>
+        return column.link ? <Link to={column.link(value)} className="hover:text-primary transition-colors">{text}</Link> : text
       },
     })),
     { header: t("Created"), className: "text-right", cell: (item) => <span className="text-sm text-muted-foreground tabular-nums" title={item.metadata.creationTimestamp}>{relativeTime(item.metadata.creationTimestamp)}</span> },
@@ -198,7 +209,7 @@ function NatTable({ kind }: { kind: NatKind }) {
 
   return (
     <div className="space-y-3">
-      <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={fields} rows={data} />}>
+      <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={fields} rows={items} />}>
         <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("size-4", loading && "animate-spin")} />{t("Refresh")}</Button>
         <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />{t("Create {noun}", { noun: t(kind.label) })}</Button>
       </Toolbar>
@@ -208,10 +219,10 @@ function NatTable({ kind }: { kind: NatKind }) {
         rows={rows}
         rowKey={(item) => item.metadata.name}
         minWidth={900}
-        empty={<EmptyState title={data.length ? t("No matching {noun}s", { noun: t(kind.label) }) : t("No {noun}s", { noun: t(kind.label) })} />}
+        empty={<EmptyState title={items.length ? t("No matching {noun}s", { noun: t(kind.label) }) : t("No {noun}s", { noun: t(kind.label) })} />}
         columns={columns}
       />
-      <CreateNatDialog key={kind.plural} kind={kind} open={createOpen} onOpenChange={setCreateOpen} onCreated={reload} />
+      <CreateNatDialog key={kind.plural} kind={kind} scope={scope} open={createOpen} onOpenChange={setCreateOpen} onCreated={changed} />
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
@@ -221,7 +232,7 @@ function NatTable({ kind }: { kind: NatKind }) {
         confirmLabel={t("Delete")}
         onConfirm={async () => {
           await requestJson(`${OVN_API}/${kind.plural}/${deleting?.metadata.name}`, { method: "DELETE" })
-          reload()
+          changed()
         }}
       />
     </div>
@@ -254,16 +265,18 @@ function useEngine(engines: NatEngine[]) {
   return { engine, setEngine, params, setParams }
 }
 
-export function ElasticIpPage() {
+/** Shared layout of the NAT pages: header with the kind and, when both are served, the engine switch. */
+function NatKindPage({ title, tab, engines: allowed }: { title: string; tab: NatTab; engines?: NatEngine[] }) {
   const profile = useNetworkProfile()
-  const engines = useNatEngines()
+  const served = useNatEngines()
+  const engines = served.filter((engine) => natKinds[engine][tab] && (!allowed || allowed.includes(engine)))
   const { engine, setEngine } = useEngine(engines)
-  if ((profile.loaded && !profile.vpc) || !engine) return <KubeOvnRequired title={t("Elastic IPs")} />
-  const kind = natKinds[engine].eips!
+  if ((profile.loaded && !profile.vpc) || !engine) return <KubeOvnRequired title={title} />
+  const kind = natKinds[engine][tab]!
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("Elastic IPs")}
+        title={title}
         subtitle={<span className="font-mono text-xs">{kind.kind} · kubeovn.io/v1</span>}
         actions={<EngineSwitch engines={engines} value={engine} onChange={setEngine} />}
       />
@@ -272,35 +285,110 @@ export function ElasticIpPage() {
   )
 }
 
-export function NatGatewayPage() {
-  const profile = useNetworkProfile()
-  const engines = useNatEngines()
-  const { engine, setEngine, params, setParams } = useEngine(engines)
-  if ((profile.loaded && !profile.vpc) || !engine) return <KubeOvnRequired title={t("NAT Gateways")} />
-  const tabs: NatTab[] = (Object.keys(natKinds[engine]) as NatTab[]).filter((tab) => tab !== "eips")
-  const requestedTab = params.get("tab") as NatTab | null
-  const tab = requestedTab && tabs.includes(requestedTab) ? requestedTab : tabs[0]
-  const kind = natKinds[engine][tab]!
-  const setTab = (next: NatTab) => {
-    const updated = new URLSearchParams(params)
-    if (next === tabs[0]) updated.delete("tab")
-    else updated.set("tab", next)
-    setParams(updated, { replace: true })
+export const ElasticIpPage = () => <NatKindPage title={t("Elastic IPs")} tab="eips" />
+export const NatGatewayPage = () => <NatKindPage title={t("NAT Gateways")} tab="gateways" engines={["iptables"]} />
+export const SnatRulePage = () => <NatKindPage title={t("SNAT Rules")} tab="snat" />
+export const DnatRulePage = () => <NatKindPage title={t("DNAT Rules")} tab="dnat" />
+export const FloatingIpPage = () => <NatKindPage title={t("Floating IPs")} tab="fip" />
+
+type GatewayTab = "eips" | "snat" | "dnat" | "fip" | "manifest"
+
+const gatewayTabLabels: Record<GatewayTab, string> = {
+  eips: "Elastic IPs",
+  snat: "SNAT rules",
+  dnat: "DNAT rules",
+  fip: "Floating IPs",
+  manifest: "Manifest",
+}
+
+/**
+ * One VPC NAT gateway with the objects that hang off it: its elastic IPs (spec.natGwDp) and the
+ * SNAT, DNAT and floating IP rules on those addresses.
+ */
+export function NatGatewayDetailPage() {
+  const { name = "" } = useParams()
+  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const kinds = natKinds.iptables
+  const { data, loading, reload } = useAsync(async () => {
+    const [res, eips, snat, dnat, fip] = await Promise.all([
+      apiFetch(`${OVN_API}/vpc-nat-gateways/${name}`),
+      ...(["iptables-eips", "iptables-snat-rules", "iptables-dnat-rules", "iptables-fip-rules"].map((plural) => listItems(`${OVN_API}/${plural}`).catch(() => [] as KubeObject[]))),
+    ])
+    const gateway = res.ok ? await res.json() as KubeObject : null
+    return { gateway, eips, snat, dnat, fip }
+  }, { gateway: null as KubeObject | null, eips: [] as KubeObject[], snat: [] as KubeObject[], dnat: [] as KubeObject[], fip: [] as KubeObject[] }, [name])
+
+  const eipNames = useMemo(() => new Set(data.eips.filter((eip) => str(asRecord(eip.spec).natGwDp) === name).map((eip) => eip.metadata.name)), [data.eips, name])
+  const onGateway = useMemo(() => ({
+    eips: (item: KubeObject) => str(asRecord(item.spec).natGwDp) === name,
+    rule: (item: KubeObject) => eipNames.has(str(asRecord(item.spec).eip)) || str(asRecord(item.status).natGwDp) === name,
+  }), [eipNames, name])
+  // New EIPs land on this gateway; new rules can only pick its EIPs.
+  const scopes = useMemo<Record<"eips" | "rule", NatScope>>(() => ({
+    eips: { defaults: { natGwDp: name }, refs: (refs) => ({ ...refs, gateways: refs.gateways.filter((gw) => gw.metadata.name === name) }) },
+    rule: { refs: (refs) => ({ ...refs, iptablesEips: refs.iptablesEips.filter((eip) => str(asRecord(eip.spec).natGwDp) === name) }) },
+  }), [name])
+
+  if (loading && !data.gateway) return <LoadingState />
+  if (!data.gateway) return <EmptyState icon={Waypoints} title={t("NAT gateway not found")} action={<Button asChild variant="outline" size="sm"><Link to="/vpc/nat-gateways">{t("Back")}</Link></Button>} />
+
+  const gateway = data.gateway
+  const spec = asRecord(gateway.spec)
+  const counts: Record<GatewayTab, number | null> = {
+    eips: data.eips.filter(onGateway.eips).length,
+    snat: data.snat.filter(onGateway.rule).length,
+    dnat: data.dnat.filter(onGateway.rule).length,
+    fip: data.fip.filter(onGateway.rule).length,
+    manifest: null,
   }
+  const tabs = Object.keys(gatewayTabLabels) as GatewayTab[]
+  const requested = params.get("tab") as GatewayTab | null
+  const tab = requested && tabs.includes(requested) ? requested : "eips"
+  const setTab = (next: GatewayTab) => setParams(next === "eips" ? {} : { tab: next }, { replace: true })
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <PageHeader
-        title={t("NAT Gateways")}
-        subtitle={<span className="font-mono text-xs">{kind.kind} · kubeovn.io/v1</span>}
+        breadcrumbs={[{ label: t("NAT Gateways"), to: "/vpc/nat-gateways" }, { label: name }]}
+        title={name}
+        subtitle={<span className="font-mono text-xs">VpcNatGateway · kubeovn.io/v1</span>}
         actions={
           <>
-            <Button asChild size="sm" variant="outline" className="gap-1.5"><Link to={engine === engines[0] ? "/vpc/elastic-ips" : `/vpc/elastic-ips?engine=${engine}`}><Globe className="size-4" />{t("Elastic IPs")}</Link></Button>
-            <EngineSwitch engines={engines} value={engine} onChange={setEngine} />
+            <Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
+            <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>{t("Delete")}</Button>
           </>
         }
       />
-      <TabBar<NatTab> tabs={tabs.map((id) => ({ id, label: t(tabLabels[id]) }))} value={tab} onChange={setTab} />
-      <NatTable key={kind.plural} kind={kind} />
+      <Panel title={t("Basic information")}>
+        <KeyValueGrid items={[
+          { label: t("VPC"), value: <Link to={`/vpc/vpcs/${str(spec.vpc)}`} className="hover:text-primary transition-colors">{str(spec.vpc, "-")}</Link> },
+          { label: t("Subnet"), value: <Link to={`/vpc/subnets/${str(spec.subnet)}`} className="hover:text-primary transition-colors">{str(spec.subnet, "-")}</Link> },
+          { label: t("LAN IP"), value: <span className="font-mono">{str(spec.lanIp, "-")}</span> },
+          { label: t("External subnets"), value: ((spec.externalSubnets as string[] | undefined) || []).join(", ") || t("Default") },
+          { label: t("QoS policy"), value: str(spec.qosPolicy, "-") },
+          { label: t("Created"), value: <span title={gateway.metadata.creationTimestamp}>{relativeTime(gateway.metadata.creationTimestamp)}</span> },
+        ]} />
+      </Panel>
+      <TabBar<GatewayTab> tabs={tabs.map((id) => ({ id, label: counts[id] === null ? t(gatewayTabLabels[id]) : `${t(gatewayTabLabels[id])} (${counts[id]})` }))} value={tab} onChange={setTab} />
+      {tab === "eips" && <NatTable key="eips" kind={kinds.eips!} only={onGateway.eips} scope={scopes.eips} onChanged={reload} />}
+      {tab === "snat" && <NatTable key="snat" kind={kinds.snat!} only={onGateway.rule} scope={scopes.rule} onChanged={reload} />}
+      {tab === "dnat" && <NatTable key="dnat" kind={kinds.dnat!} only={onGateway.rule} scope={scopes.rule} onChanged={reload} />}
+      {tab === "fip" && <NatTable key="fip" kind={kinds.fip!} only={onGateway.rule} scope={scopes.rule} onChanged={reload} />}
+      {tab === "manifest" && <ManifestPanel object={gateway} url={`${OVN_API}/vpc-nat-gateways/${name}`} onSaved={reload} />}
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={t("Delete NAT gateway {name}?", { name })}
+        description={t("Its elastic IPs and NAT rules stop working. This cannot be undone.")}
+        destructive
+        confirmLabel={t("Delete")}
+        onConfirm={async () => {
+          await requestJson(`${OVN_API}/vpc-nat-gateways/${name}`, { method: "DELETE" })
+          navigate("/vpc/nat-gateways")
+        }}
+      />
     </div>
   )
 }

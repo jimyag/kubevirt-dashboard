@@ -1,5 +1,8 @@
 import type { ComponentType } from "react"
 import {
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpFromLine,
   Bell,
   Bookmark,
   Boxes,
@@ -134,7 +137,10 @@ export const navSections: NavSection[] = [
         visible: (p) => p.vpc,
         children: [
           { name: "Elastic IPs", path: "/vpc/elastic-ips", icon: Globe, match: ["/networks/kube-ovn/iptables-eips", "/networks/kube-ovn/ovn-eips"] },
-          { name: "NAT Gateways", path: "/vpc/nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/vpc-nat-gateways", "/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/iptables-fip-rules", "/networks/kube-ovn/ovn-snat-rules", "/networks/kube-ovn/ovn-dnat-rules", "/networks/kube-ovn/ovn-fips"] },
+          { name: "NAT Gateways", path: "/vpc/nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/vpc-nat-gateways"] },
+          { name: "SNAT Rules", path: "/vpc/nat/snat-rules", icon: ArrowUpFromLine, match: ["/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/ovn-snat-rules"] },
+          { name: "DNAT Rules", path: "/vpc/nat/dnat-rules", icon: ArrowDownToLine, match: ["/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/ovn-dnat-rules"] },
+          { name: "Floating IPs", path: "/vpc/nat/floating-ips", icon: ArrowLeftRight, match: ["/networks/kube-ovn/iptables-fip-rules", "/networks/kube-ovn/ovn-fips"] },
         ],
       },
       { name: "Load Balancers", path: "/networks/kubernetes/services", icon: Scale },

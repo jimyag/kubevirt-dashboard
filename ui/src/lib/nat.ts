@@ -46,7 +46,14 @@ export type NatColumn = {
   header: string
   value: (item: KubeObject) => string
   mono?: boolean
+  /** Page of the referenced object, so references open the same way from every table. */
+  link?: (value: string) => string
 }
+
+const gatewayLink = (name: string) => `/vpc/nat-gateways/${name}`
+const vpcLink = (name: string) => `/vpc/vpcs/${name}`
+const subnetLink = (name: string) => `/vpc/subnets/${name}`
+const eipLink = (plural: string) => (name: string) => `/networks/kube-ovn/${plural}/_cluster/${name}`
 
 export type NatKind = {
   plural: string
@@ -122,8 +129,8 @@ const gateway: NatKind = {
   catalogPath: "/networks/kube-ovn/vpc-nat-gateways",
   hasReady: false,
   columns: [
-    { key: "vpc", header: "VPC", value: (item) => str(spec(item).vpc) },
-    { key: "subnet", header: "Subnet", value: (item) => str(spec(item).subnet) },
+    { key: "vpc", header: "VPC", value: (item) => str(spec(item).vpc), link: vpcLink },
+    { key: "subnet", header: "Subnet", value: (item) => str(spec(item).subnet), link: subnetLink },
     { key: "lanip", header: "LAN IP", value: (item) => str(spec(item).lanIp), mono: true },
     { key: "external", header: "External subnets", value: (item) => ((spec(item).externalSubnets as string[] | undefined) || []).join(", ") },
     { key: "qos", header: "QoS policy", value: (item) => str(spec(item).qosPolicy) },
@@ -159,7 +166,7 @@ const iptablesEip: NatKind = {
   hasReady: true,
   columns: [
     { key: "ip", header: "IP address", value: eipAddress, mono: true },
-    { key: "gateway", header: "NAT gateway", value: (item) => str(spec(item).natGwDp) },
+    { key: "gateway", header: "NAT gateway", value: (item) => str(spec(item).natGwDp), link: gatewayLink },
     { key: "external", header: "External subnet", value: (item) => str(spec(item).externalSubnet) },
     { key: "used", header: "Used by", value: (item) => str(status(item).nat) },
     { key: "qos", header: "QoS policy", value: (item) => str(spec(item).qosPolicy) || str(status(item).qosPolicy) },
@@ -183,10 +190,10 @@ const iptablesSnat: NatKind = {
   catalogPath: "/networks/kube-ovn/iptables-snat-rules",
   hasReady: true,
   columns: [
-    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).eip) },
+    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).eip), link: eipLink("iptables-eips") },
     { key: "address", header: "EIP address", value: (item) => str(status(item).v4ip), mono: true },
     { key: "source", header: "Internal CIDR", value: (item) => str(spec(item).internalCIDR), mono: true },
-    { key: "gateway", header: "NAT gateway", value: (item) => str(status(item).natGwDp) },
+    { key: "gateway", header: "NAT gateway", value: (item) => str(status(item).natGwDp), link: gatewayLink },
   ],
   fields: [
     { name: "eip", label: "Elastic IP", required: true, suggest: iptablesEipOptions },
@@ -203,13 +210,13 @@ const iptablesDnat: NatKind = {
   catalogPath: "/networks/kube-ovn/iptables-dnat-rules",
   hasReady: true,
   columns: [
-    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).eip) },
+    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).eip), link: eipLink("iptables-eips") },
     { key: "address", header: "EIP address", value: (item) => str(status(item).v4ip), mono: true },
     { key: "protocol", header: "Protocol", value: (item) => str(spec(item).protocol) },
     { key: "external", header: "External port", value: (item) => str(spec(item).externalPort), mono: true },
     { key: "internal", header: "Internal IP", value: (item) => str(spec(item).internalIp), mono: true },
     { key: "internalport", header: "Internal port", value: (item) => str(spec(item).internalPort), mono: true },
-    { key: "gateway", header: "NAT gateway", value: (item) => str(status(item).natGwDp) },
+    { key: "gateway", header: "NAT gateway", value: (item) => str(status(item).natGwDp), link: gatewayLink },
   ],
   fields: [
     { name: "eip", label: "Elastic IP", required: true, suggest: iptablesEipOptions },
@@ -228,10 +235,10 @@ const iptablesFip: NatKind = {
   catalogPath: "/networks/kube-ovn/iptables-fip-rules",
   hasReady: true,
   columns: [
-    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).eip) },
+    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).eip), link: eipLink("iptables-eips") },
     { key: "address", header: "EIP address", value: (item) => str(status(item).v4ip), mono: true },
     { key: "internal", header: "Internal IP", value: (item) => str(spec(item).internalIp), mono: true },
-    { key: "gateway", header: "NAT gateway", value: (item) => str(status(item).natGwDp) },
+    { key: "gateway", header: "NAT gateway", value: (item) => str(status(item).natGwDp), link: gatewayLink },
   ],
   fields: [
     { name: "eip", label: "Elastic IP", required: true, suggest: iptablesEipOptions, hint: "One floating IP per EIP; the EIP cannot also carry SNAT or DNAT." },
@@ -292,11 +299,11 @@ const ovnFip: NatKind = {
   catalogPath: "/networks/kube-ovn/ovn-fips",
   hasReady: true,
   columns: [
-    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).ovnEip) },
+    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).ovnEip), link: eipLink("ovn-eips") },
     { key: "address", header: "EIP address", value: (item) => str(status(item).v4Eip), mono: true },
     { key: "internal", header: "Internal IP", value: (item) => str(status(item).v4Ip) || str(spec(item).v4Ip), mono: true },
     { key: "ipname", header: "IP name", value: (item) => str(spec(item).ipName) },
-    { key: "vpc", header: "VPC", value: (item) => str(status(item).vpc) || str(spec(item).vpc) },
+    { key: "vpc", header: "VPC", value: (item) => str(status(item).vpc) || str(spec(item).vpc), link: vpcLink },
     { key: "type", header: "Type", value: (item) => str(spec(item).type) },
   ],
   fields: [
@@ -316,11 +323,11 @@ const ovnSnat: NatKind = {
   catalogPath: "/networks/kube-ovn/ovn-snat-rules",
   hasReady: true,
   columns: [
-    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).ovnEip) },
+    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).ovnEip), link: eipLink("ovn-eips") },
     { key: "address", header: "EIP address", value: (item) => str(status(item).v4Eip), mono: true },
     { key: "source", header: "Source", value: (item) => str(spec(item).vpcSubnet) || str(spec(item).ipName) || str(status(item).v4IpCidr) },
     { key: "cidr", header: "Internal CIDR", value: (item) => str(status(item).v4IpCidr) || str(spec(item).v4IpCidr), mono: true },
-    { key: "vpc", header: "VPC", value: (item) => str(status(item).vpc) || str(spec(item).vpc) },
+    { key: "vpc", header: "VPC", value: (item) => str(status(item).vpc) || str(spec(item).vpc), link: vpcLink },
   ],
   fields: [
     { name: "ovnEip", label: "Elastic IP", required: true, suggest: ovnEipOptions },
@@ -338,7 +345,7 @@ const ovnDnat: NatKind = {
   catalogPath: "/networks/kube-ovn/ovn-dnat-rules",
   hasReady: true,
   columns: [
-    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).ovnEip) },
+    { key: "eip", header: "Elastic IP", value: (item) => str(spec(item).ovnEip), link: eipLink("ovn-eips") },
     { key: "address", header: "EIP address", value: (item) => str(status(item).v4Eip), mono: true },
     { key: "protocol", header: "Protocol", value: (item) => str(spec(item).protocol) || str(status(item).protocol) },
     { key: "external", header: "External port", value: (item) => str(spec(item).externalPort), mono: true },

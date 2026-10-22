@@ -437,7 +437,7 @@ export function VpcDetailPage() {
         <Panel title={t("NAT gateways")} bodyClassName="space-y-2">
             {data.natGateways.map((gw) => (
               <div key={gw.metadata.name} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
-                <Link to={`/networks/kube-ovn/vpc-nat-gateways/_cluster/${gw.metadata.name}`} className="font-medium hover:text-primary transition-colors">{gw.metadata.name}</Link>
+                <Link to={`/vpc/nat-gateways/${gw.metadata.name}`} className="font-medium hover:text-primary transition-colors">{gw.metadata.name}</Link>
                 <span className="font-mono text-xs text-muted-foreground">{str(asRecord(gw.spec).subnet)} / {str(asRecord(gw.spec).lanIp, "auto")}</span>
               </div>
             ))}
