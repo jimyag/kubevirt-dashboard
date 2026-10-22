@@ -91,8 +91,8 @@ export const navSections: NavSection[] = [
     items: [
       { name: "VPCs", path: "/vpc/vpcs", icon: Network, visible: (p) => p.vpc },
       { name: "Subnets", path: "/vpc/subnets", icon: Split, visible: (p) => p.vpc },
-      { name: "Elastic IPs", path: "/networks/kube-ovn/ovn-eips", icon: Globe, match: ["/networks/kube-ovn/iptables-eips", "/networks/kube-ovn/ovn-fips", "/networks/kube-ovn/iptables-fip-rules"], visible: (p) => p.vpc },
-      { name: "NAT Gateways", path: "/networks/kube-ovn/vpc-nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/ovn-snat-rules", "/networks/kube-ovn/ovn-dnat-rules"], visible: (p) => p.vpc },
+      { name: "Elastic IPs", path: "/vpc/elastic-ips", icon: Globe, match: ["/networks/kube-ovn/iptables-eips", "/networks/kube-ovn/ovn-eips"], visible: (p) => p.vpc },
+      { name: "NAT Gateways", path: "/vpc/nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/vpc-nat-gateways", "/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/iptables-fip-rules", "/networks/kube-ovn/ovn-snat-rules", "/networks/kube-ovn/ovn-dnat-rules", "/networks/kube-ovn/ovn-fips"], visible: (p) => p.vpc },
       { name: "Load Balancers", path: "/networks/kubernetes/services", icon: Scale },
       { name: "Multus Networks", path: "/networks/kubernetes/nads", icon: Route, requires: ["k8s.cni.cncf.io/v1", "network-attachment-definitions"] },
     ],

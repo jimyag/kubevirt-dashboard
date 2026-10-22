@@ -1,9 +1,10 @@
-import { useState, type ComponentProps, type ComponentType, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType, type KeyboardEvent, type ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
-import { Check, ChevronRight, Inbox } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Inbox, Search, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { findActiveNav, toneClasses } from "@/lib/navigation"
+import { tokenValue, useDistinctValues, usePaged, type FilterField, type Paging } from "@/lib/filter"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -304,6 +305,218 @@ export function NativeSelect({ className, ...props }: ComponentProps<"select">) 
   )
 }
 
+// --- Typeable filters ---
+
+type Suggestion = { value: string; label?: ReactNode; hint?: string }
+
+const inputClass = "h-9 w-full rounded-md border border-input bg-background text-sm text-foreground shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+
+/** Keyboard and open state for an input with a suggestion list. */
+function useSuggestions(count: number) {
+  const [open, setOpen] = useState(false)
+  const [rawActive, setActive] = useState(-1)
+  const active = rawActive < count ? rawActive : -1
+  const keyHandler = (pick: (index: number) => void) => (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      setOpen(true)
+      if (count === 0) return
+      setActive(event.key === "ArrowDown" ? (active + 1) % count : (active <= 0 ? count - 1 : active - 1))
+    } else if ((event.key === "Enter" || event.key === "Tab") && open && active >= 0 && active < count) {
+      event.preventDefault()
+      pick(active)
+    } else if (event.key === "Escape") {
+      setOpen(false)
+    }
+  }
+  return { open, setOpen: (next: boolean) => { setOpen(next); setActive(-1) }, active, keyHandler }
+}
+
+function SuggestionList({ items, active, onPick, footer }: { items: Suggestion[]; active: number; onPick: (index: number) => void; footer?: ReactNode }) {
+  const listRef = useRef<HTMLUListElement>(null)
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" })
+  }, [active])
+  if (items.length === 0 && !footer) return null
+  return (
+    <div className="absolute top-full left-0 z-50 mt-1 w-max min-w-full max-w-[min(420px,90vw)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+      <ul ref={listRef} role="listbox" className="max-h-64 overflow-y-auto py-1">
+        {items.map((item, index) => (
+          <li
+            key={item.value}
+            data-index={index}
+            role="option"
+            aria-selected={index === active}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              onPick(index)
+            }}
+            className={cn("flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 text-sm", index === active ? "bg-accent text-accent-foreground" : "hover:bg-muted/60")}
+          >
+            <span className="min-w-0 truncate">{item.label ?? item.value}</span>
+            {item.hint && <span className="shrink-0 text-xs text-muted-foreground">{item.hint}</span>}
+          </li>
+        ))}
+      </ul>
+      {footer && <div className="border-t px-3 py-1.5 text-xs text-muted-foreground">{footer}</div>}
+    </div>
+  )
+}
+
+const maxSuggestions = 100
+
+/**
+ * Text input with suggestions, used instead of a select for filters: type any text or pick a
+ * known value. An empty value means "all".
+ */
+export function Combobox({
+  value,
+  onChange,
+  options,
+  placeholder,
+  className,
+  "aria-label": ariaLabel,
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: Array<string | Suggestion>
+  placeholder?: string
+  className?: string
+  "aria-label"?: string
+}) {
+  const normalized = useMemo(() => options.map((option) => typeof option === "string" ? { value: option } : option), [options])
+  const items = useMemo(() => {
+    const needle = value.trim().toLowerCase()
+    // Show everything when the box holds an exact option, so another one can be picked.
+    const exact = normalized.some((option) => option.value.toLowerCase() === needle)
+    const matches = !needle || exact ? normalized : normalized.filter((option) => option.value.toLowerCase().includes(needle))
+    return matches.slice(0, maxSuggestions)
+  }, [normalized, value])
+  const suggest = useSuggestions(items.length)
+  const pick = (index: number) => {
+    onChange(items[index].value)
+    suggest.setOpen(false)
+  }
+  return (
+    <div className={cn("relative min-w-[160px]", className)}>
+      <input
+        className={cn(inputClass, "px-3", value && "pr-8")}
+        value={value}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        role="combobox"
+        aria-expanded={suggest.open}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => {
+          onChange(event.target.value)
+          suggest.setOpen(true)
+        }}
+        onFocus={() => suggest.setOpen(true)}
+        onBlur={() => suggest.setOpen(false)}
+        onKeyDown={suggest.keyHandler(pick)}
+      />
+      {value && (
+        <button type="button" aria-label="Clear" onMouseDown={(event) => event.preventDefault()} onClick={() => onChange("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
+          <X className="size-3.5" />
+        </button>
+      )}
+      {suggest.open && <SuggestionList items={items} active={suggest.active} onPick={pick} />}
+    </div>
+  )
+}
+
+/**
+ * Search box that understands `field:value` tokens for the given fields, suggesting field names
+ * and the values present in the rows. See lib/filter.ts for the syntax.
+ */
+export function FilterInput<T>({
+  value,
+  onChange,
+  fields,
+  rows,
+  placeholder = "Filter, e.g. web status:running",
+  className,
+}: {
+  value: string
+  onChange: (value: string) => void
+  fields: FilterField<T>[]
+  rows: T[]
+  placeholder?: string
+  className?: string
+}) {
+  // The token being typed is the text after the last space.
+  const start = value.search(/\S*$/)
+  const token = value.slice(start)
+  const negate = token.startsWith("-")
+  const bare = negate ? token.slice(1) : token
+  const colon = bare.indexOf(":")
+  const fieldKey = colon > 0 ? bare.slice(0, colon).toLowerCase() : ""
+  const field = fieldKey ? fields.find((item) => item.key === fieldKey || item.aliases?.includes(fieldKey)) : undefined
+
+  // Distinct values are only collected for the field being typed, once per rows change.
+  const fieldValues = useDistinctValues(rows, fields, field ? field.key : "")
+
+  const prefix = negate ? "-" : ""
+  let items: Suggestion[] = []
+  if (field) {
+    const partial = bare.slice(colon + 1).replace(/^"/, "").toLowerCase()
+    items = fieldValues
+      .filter((item) => item.toLowerCase().includes(partial))
+      .slice(0, 20)
+      .map((item) => ({ value: `${prefix}${field.key}:${tokenValue(item)} `, label: item, hint: field.label }))
+  } else if (colon <= 0) {
+    const lower = bare.toLowerCase()
+    items = fields
+      .filter((item) => !lower || item.key.startsWith(lower) || item.label.toLowerCase().startsWith(lower) || item.aliases?.some((alias) => alias.startsWith(lower)))
+      .map((item) => ({ value: `${prefix}${item.key}:`, label: <span className="font-mono text-xs">{item.key}:</span>, hint: item.label }))
+  }
+
+  const suggest = useSuggestions(items.length)
+  const pick = (index: number) => {
+    const next = value.slice(0, start) + items[index].value
+    onChange(next)
+    // Keep the list open after choosing a field so its values show next.
+    suggest.setOpen(next.endsWith(":"))
+  }
+
+  return (
+    <div className={cn("relative w-full md:w-[320px]", className)}>
+      <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+      <input
+        className={cn(inputClass, "pl-9", value ? "pr-8" : "pr-3")}
+        value={value}
+        placeholder={placeholder}
+        aria-label="Filter"
+        role="combobox"
+        aria-expanded={suggest.open}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => {
+          onChange(event.target.value)
+          suggest.setOpen(true)
+        }}
+        onFocus={() => suggest.setOpen(true)}
+        onBlur={() => suggest.setOpen(false)}
+        onKeyDown={suggest.keyHandler(pick)}
+      />
+      {value && (
+        <button type="button" aria-label="Clear filter" onMouseDown={(event) => event.preventDefault()} onClick={() => onChange("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
+          <X className="size-3.5" />
+        </button>
+      )}
+      {suggest.open && (items.length > 0 || !token) && (
+        <SuggestionList
+          items={items}
+          active={suggest.active}
+          onPick={pick}
+          footer={!token && <>Type text, or <span className="font-mono">field:value</span>; prefix <span className="font-mono">-</span> to exclude</>}
+        />
+      )}
+    </div>
+  )
+}
+
 export function ChoiceCard({
   selected,
   onClick,
@@ -372,13 +585,30 @@ export type Column<T> = {
   className?: string
 }
 
+/** Footer for usePaged; renders nothing when everything fits on one page. */
+export function Pager({ page, pageCount, pageSize, total, onPage }: Paging) {
+  if (pageCount <= 1) return null
+  return (
+    <div className="flex items-center justify-end gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+      <span className="tabular-nums">{page * pageSize + 1}–{Math.min(total, (page + 1) * pageSize)} of {total}</span>
+      <Button variant="ghost" size="icon" className="size-7" disabled={page === 0} onClick={() => onPage(page - 1)} aria-label="Previous page">
+        <ChevronLeft className="size-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="size-7" disabled={page >= pageCount - 1} onClick={() => onPage(page + 1)} aria-label="Next page">
+        <ChevronRight className="size-4" />
+      </Button>
+    </div>
+  )
+}
+
 export function DataTable<T>({
   columns,
-  rows,
+  rows: allRows,
   rowKey,
   loading,
   empty,
   minWidth = 760,
+  pageSize = 100,
 }: {
   columns: Column<T>[]
   rows: T[]
@@ -386,7 +616,9 @@ export function DataTable<T>({
   loading?: boolean
   empty?: ReactNode
   minWidth?: number
+  pageSize?: number
 }) {
+  const { rows, ...paging } = usePaged(allRows, pageSize)
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
       <div className="overflow-x-auto">
@@ -417,6 +649,7 @@ export function DataTable<T>({
           </TableBody>
         </Table>
       </div>
+      <Pager {...paging} />
     </div>
   )
 }

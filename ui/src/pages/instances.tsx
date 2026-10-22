@@ -14,7 +14,6 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Search,
   ShieldCheck,
   Square,
   Trash2,
@@ -34,17 +33,21 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   ChoiceCard,
+  Combobox,
   ConfirmDialog,
   EmptyState,
   FieldRow,
+  FilterInput,
   KeyValueGrid,
   LoadingState,
   NativeSelect,
   PageHeader,
+  Pager,
   StatusDot,
   Toolbar,
   Panel,
 } from "@/components/console"
+import { namespaceScope, useFilteredRows, usePaged, type FilterField } from "@/lib/filter"
 import {
   asList,
   asRecord,
@@ -82,11 +85,39 @@ const statusTabs = [
   { id: "error", label: "Error" },
 ] as const
 
+type InstanceRow = {
+  vm: KubeObject
+  key: string
+  status: string
+  ips: string[]
+  node: string
+  shape: ReturnType<typeof vmShape>
+  network: ReturnType<typeof vmNetworkLabel>
+  groups: ReturnType<typeof vmSecurityGroupRefs>
+}
+
+const instanceFields: FilterField<InstanceRow>[] = [
+  { key: "name", label: "Name", value: (row) => row.vm.metadata.name },
+  { key: "namespace", label: "Namespace", aliases: ["ns"], value: (row) => row.vm.metadata.namespace },
+  { key: "status", label: "Status", value: (row) => row.status },
+  { key: "ip", label: "IP address", value: (row) => row.ips },
+  { key: "spec", label: "Spec", value: (row) => [row.shape.label, row.shape.detail] },
+  { key: "network", label: "Network", aliases: ["subnet"], value: (row) => row.network.label },
+  { key: "sg", label: "Security groups", value: (row) => row.groups.map((group) => group.name) },
+  { key: "host", label: "Host", aliases: ["node"], value: (row) => row.node },
+  { key: "label", label: "Labels", value: (row) => Object.entries(row.vm.metadata.labels || {}).map(([name, value]) => `${name}=${value}`) },
+]
+
 export function InstanceListPage() {
   const namespaces = useNamespaces()
   const profile = useNetworkProfile()
   const { provider, providers } = useSgProvider()
-  const [namespace, setNamespace] = useState(() => readLocal("instances-namespace") || "all")
+  const [namespace, setNamespace] = useState(() => {
+    const stored = readLocal("instances-namespace")
+    return stored === "all" ? "" : stored || ""
+  })
+  const ns = useMemo(() => namespaceScope(namespace, namespaces), [namespace, namespaces])
+  const scope = ns.scope
   const [statusTab, setStatusTab] = useState<(typeof statusTabs)[number]["id"]>("all")
   const [search, setSearch] = useState("")
   const [selected, setSelected] = useState<Record<string, boolean>>({})
@@ -103,13 +134,13 @@ export function InstanceListPage() {
 
   const { data, loading, reload } = useAsync(async () => {
     const [vms, vmis, types] = await Promise.all([
-      listItems(namespacedPath(VM_API, "virtualmachines", namespace)),
-      listItems(namespacedPath(VM_API, "virtualmachineinstances", namespace)),
+      listItems(namespacedPath(VM_API, "virtualmachines", scope)),
+      listItems(namespacedPath(VM_API, "virtualmachineinstances", scope)),
       listItems("/apis/instancetype.kubevirt.io/v1beta1/virtualmachineclusterinstancetypes"),
     ])
     const instanceTypes = Object.fromEntries(types.map((type) => [type.metadata.name, { cpu: Number(asRecord(asRecord(type.spec).cpu).guest || 0), memory: str(asRecord(asRecord(type.spec).memory).guest) }]))
     return { vms, vmis, instanceTypes }
-  }, { vms: [] as KubeObject[], vmis: [] as KubeObject[], instanceTypes: {} as Record<string, { cpu: number; memory: string }> }, [namespace])
+  }, { vms: [] as KubeObject[], vmis: [] as KubeObject[], instanceTypes: {} as Record<string, { cpu: number; memory: string }> }, [scope])
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -119,28 +150,41 @@ export function InstanceListPage() {
   }, [reload])
 
   // Live CPU and memory of virt-launcher pods; null when metrics-server is not installed.
-  const usage = useMetricsPoll(() => fetchInstanceUsage(namespace), [namespace])
-  const vmiByKey = useMemo(() => Object.fromEntries(data.vmis.map((vmi) => [`${vmi.metadata.namespace}/${vmi.metadata.name}`, vmi])), [data.vmis])
+  const usage = useMetricsPoll(() => fetchInstanceUsage(scope), [scope])
   const key = (vm: KubeObject) => `${vm.metadata.namespace}/${vm.metadata.name}`
-  const counts = useMemo(() => {
-    const result: Record<string, number> = { all: data.vms.length, running: 0, stopped: 0, transitioning: 0, error: 0 }
-    data.vms.forEach((vm) => { result[vmStatusGroup(vmStatus(vm))]++ })
-    return result
-  }, [data.vms])
 
-  const rows = useMemo(() => {
-    const needle = search.trim().toLowerCase()
+  // One row model per VM, built once per reload, so filtering and rendering share it.
+  const allRows = useMemo(() => {
+    const vmiByKey = Object.fromEntries(data.vmis.map((vmi) => [`${vmi.metadata.namespace}/${vmi.metadata.name}`, vmi]))
     return data.vms
-      .filter((vm) => statusTab === "all" || vmStatusGroup(vmStatus(vm)) === statusTab)
-      .filter((vm) => {
-        if (!needle) return true
-        const ips = asList(asRecord(vmiByKey[key(vm)]?.status).interfaces).map((iface) => str(iface.ipAddress)).join(" ")
-        return vm.metadata.name.toLowerCase().includes(needle) || ips.includes(needle) || (vm.metadata.namespace || "").includes(needle)
+      .filter((vm) => ns.match(vm.metadata.namespace))
+      .map((vm): InstanceRow => {
+        const vmiStatus = asRecord(vmiByKey[key(vm)]?.status)
+        return {
+          vm,
+          key: key(vm),
+          status: vmStatus(vm),
+          ips: asList(vmiStatus.interfaces).map((iface) => str(iface.ipAddress)).filter(Boolean),
+          node: str(vmiStatus.nodeName),
+          shape: vmShape(vm, data.instanceTypes),
+          network: vmNetworkLabel(vm),
+          groups: vmSecurityGroupRefs(vm, providers),
+        }
       })
-      .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name))
-  }, [data.vms, search, statusTab, vmiByKey])
+      .sort((a, b) => a.vm.metadata.name.localeCompare(b.vm.metadata.name))
+  }, [data, ns, providers])
 
-  const selectedVms = rows.filter((vm) => selected[key(vm)])
+  const counts = useMemo(() => {
+    const result: Record<string, number> = { all: allRows.length, running: 0, stopped: 0, transitioning: 0, error: 0 }
+    allRows.forEach((row) => { result[vmStatusGroup(row.status)]++ })
+    return result
+  }, [allRows])
+
+  const tabRows = useMemo(() => (statusTab === "all" ? allRows : allRows.filter((row) => vmStatusGroup(row.status) === statusTab)), [allRows, statusTab])
+  const rows = useFilteredRows(tabRows, instanceFields, search)
+  const { rows: pageRows, ...paging } = usePaged(rows)
+
+  const selectedVms = rows.filter((row) => selected[row.key]).map((row) => row.vm)
   const allSelected = rows.length > 0 && selectedVms.length === rows.length
 
   const runBatch = async (action: "start" | "stop" | "restart") => {
@@ -185,18 +229,10 @@ export function InstanceListPage() {
       </div>
 
       <Toolbar
-        right={
-          <div className="relative w-full md:w-[300px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search by name or IP" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        }
+        right={<FilterInput value={search} onChange={setSearch} fields={instanceFields} rows={tabRows} placeholder="Filter, e.g. web ip:10.0 host:node-1" />}
       >
         <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
-        <NativeSelect value={namespace} onChange={(e) => setNamespace(e.target.value)} aria-label="Namespace" className="min-w-[160px]">
-          <option value="all">All namespaces</option>
-          {Array.from(new Set([...(namespace !== "all" ? [namespace] : []), ...namespaces])).map((ns) => <option key={ns} value={ns}>{ns}</option>)}
-        </NativeSelect>
+        <Combobox value={namespace} onChange={setNamespace} options={namespaces} placeholder="All namespaces" aria-label="Namespace" />
         {selectedVms.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-2 py-1">
             <span className="text-sm text-muted-foreground">{selectedVms.length} selected</span>
@@ -214,7 +250,7 @@ export function InstanceListPage() {
             <thead className="bg-muted/50">
               <tr className="border-b">
                 <th className="h-9 w-10 px-3 text-left">
-                  <input type="checkbox" className="size-4 accent-primary" aria-label="Select all instances" checked={allSelected} onChange={(e) => setSelected(e.target.checked ? Object.fromEntries(rows.map((vm) => [key(vm), true])) : {})} />
+                  <input type="checkbox" className="size-4 accent-primary" aria-label="Select all instances" checked={allSelected} onChange={(e) => setSelected(e.target.checked ? Object.fromEntries(rows.map((row) => [row.key, true])) : {})} />
                 </th>
                 {["Name", "Status", "IP address", "Spec", usage ? "Usage" : null, "Network", provider ? "Security groups" : null, "Host", "Created", ""].filter((header) => header !== null).map((header, index) => (
                   <th key={index} className={cn("h-10 px-3 text-left text-xs font-medium text-muted-foreground", header === "Created" && "text-right")}>{header}</th>
@@ -229,19 +265,12 @@ export function InstanceListPage() {
                   <td colSpan={11}>
                     <EmptyState
                       icon={Cpu}
-                      title={data.vms.length === 0 ? "No instances yet" : "No matching instances"}
-                      action={data.vms.length === 0 && <Button asChild size="sm"><Link to="/kubevirt/virtualization/virtual-machines/create">Create instance</Link></Button>}
+                      title={allRows.length === 0 && !namespace ? "No instances yet" : "No matching instances"}
+                      action={allRows.length === 0 && !namespace && <Button asChild size="sm"><Link to="/kubevirt/virtualization/virtual-machines/create">Create instance</Link></Button>}
                     />
                   </td>
                 </tr>
-              ) : rows.map((vm) => {
-                const vmi = vmiByKey[key(vm)]
-                const vmiStatus = asRecord(vmi?.status)
-                const ips = asList(vmiStatus.interfaces).map((iface) => str(iface.ipAddress)).filter(Boolean)
-                const shape = vmShape(vm, data.instanceTypes)
-                const network = vmNetworkLabel(vm)
-                const status = vmStatus(vm)
-                const groups = vmSecurityGroupRefs(vm, providers)
+              ) : pageRows.map(({ vm, ips, shape, network, status, groups, node }) => {
                 return (
                   <tr key={key(vm)} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                     <td className="px-3 py-2">
@@ -286,7 +315,7 @@ export function InstanceListPage() {
                         </div>
                       </td>
                     )}
-                    <td className="px-3 py-2 text-sm text-muted-foreground">{str(vmiStatus.nodeName, "-")}</td>
+                    <td className="px-3 py-2 text-sm text-muted-foreground">{node || "-"}</td>
                     <td className="px-3 py-2 text-right text-sm text-muted-foreground tabular-nums">{relativeTime(vm.metadata.creationTimestamp)}</td>
                     <td className="px-3 py-2 text-right">
                       <InstanceRowMenu vm={vm} running={vmStatusGroup(status) === "running"} onChanged={reload} onDelete={() => setDeleting([vm])} />
@@ -297,6 +326,7 @@ export function InstanceListPage() {
             </tbody>
           </table>
         </div>
+        <Pager {...paging} />
       </div>
 
       <ConfirmDialog

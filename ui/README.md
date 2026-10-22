@@ -18,7 +18,7 @@ Run the Go binary (`./kubevirt-dashboard --listen 127.0.0.1:11111`) for the dev 
 | Path | Contents |
 |------|----------|
 | `src/App.tsx` | Routes, instance detail and disk pages |
-| `src/pages/` | Console pages: overview, instances and create wizard, VPCs and subnets, security groups, events, settings |
+| `src/pages/` | Console pages: overview, instances and create wizard, VPCs and subnets, elastic IPs and NAT, security groups, events, settings |
 | `src/components/console.tsx` | Shared console components (page header, tables, panels, status, dialogs) |
 | `src/components/resource-management.tsx` | Generic list, detail, manifest, create and edit views used by the Resource Catalog |
 | `src/components/ui/` | shadcn/ui components; do not edit them directly |
@@ -27,6 +27,8 @@ Run the Go binary (`./kubevirt-dashboard --listen 127.0.0.1:11111`) for the dev 
 | `src/lib/navigation.ts` | Navigation sections shared by the sidebar, breadcrumbs and command palette |
 | `src/lib/security-groups.ts` | Security group model and its Kube-OVN / Cilium mappings |
 | `src/lib/metrics.ts` | metrics-server and Prometheus queries |
+| `src/lib/filter.ts` | `field:value` list filtering, namespace scoping and paging |
+| `src/lib/nat.ts` | Kube-OVN NAT kinds (VPC NAT gateway and OVN native): columns, forms and specs |
 
 All requests go to the Kubernetes API through the Go backend proxy (`/api`, `/apis`) with the selected context in the `X-Kube-Context` header.
 

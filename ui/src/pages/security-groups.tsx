@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { ArrowDownToLine, ArrowUpFromLine, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -17,11 +17,13 @@ import {
 } from "@/components/ui/dialog"
 import {
   ChoiceCard,
+  Combobox,
   ConfirmDialog,
   DataTable,
   EmptyState,
   ErrorNote,
   FieldRow,
+  FilterInput,
   KeyValueGrid,
   LoadingState,
   NativeSelect,
@@ -30,6 +32,7 @@ import {
   Toolbar,
   Panel,
 } from "@/components/console"
+import { namespaceScope, useFilteredRows, type FilterField } from "@/lib/filter"
 import {
   listItems,
   relativeTime,
@@ -301,6 +304,16 @@ function CreateSecurityGroupDialog({
 
 // --- List ---
 
+type GroupRow = { sg: SecurityGroup; instances: number }
+
+const groupFields: FilterField<GroupRow>[] = [
+  { key: "name", label: "Name", value: (row) => row.sg.name },
+  { key: "description", label: "Description", aliases: ["desc"], value: (row) => row.sg.description },
+  { key: "namespace", label: "Namespace", aliases: ["ns"], value: (row) => row.sg.namespace },
+  { key: "type", label: "Type", value: (row) => (row.sg.managed ? "Security group" : `Policy ${row.sg.selector}`) },
+  { key: "instances", label: "Instances", value: (row) => row.instances },
+]
+
 export function SecurityGroupListPage() {
   const { provider: defaultProvider, providers, loaded } = useSgProvider()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -308,7 +321,9 @@ export function SecurityGroupListPage() {
   const provider = requested && providers.includes(requested) ? requested : defaultProvider
   const navigate = useNavigate()
   const namespaces = useNamespaces()
-  const [namespace, setNamespace] = useState("all")
+  const [namespace, setNamespace] = useState("")
+  const ns = useMemo(() => namespaceScope(namespace, namespaces), [namespace, namespaces])
+  const scope = ns.scope
   const [search, setSearch] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<SecurityGroup | null>(null)
@@ -316,16 +331,16 @@ export function SecurityGroupListPage() {
   const { data, loading, reload } = useAsync(async () => {
     if (!provider) return { groups: [] as SecurityGroup[], vms: [] as KubeObject[] }
     const [groups, vms] = await Promise.all([
-      listSecurityGroups(provider, namespace),
+      listSecurityGroups(provider, scope),
       listItems("/apis/kubevirt.io/v1/virtualmachines"),
     ])
     return { groups, vms }
-  }, { groups: [] as SecurityGroup[], vms: [] as KubeObject[] }, [provider, namespace])
+  }, { groups: [] as SecurityGroup[], vms: [] as KubeObject[] }, [provider, scope])
 
-  const rows = useMemo(() => data.groups.filter((sg) => {
-    const needle = search.trim().toLowerCase()
-    return !needle || sg.name.toLowerCase().includes(needle) || sg.description.toLowerCase().includes(needle)
-  }), [data.groups, search])
+  const allRows = useMemo(() => data.groups
+    .filter((sg) => provider !== "cilium" || ns.match(sg.namespace))
+    .map((sg): GroupRow => ({ sg, instances: data.vms.filter((vm) => vmMatchesGroup(vm, sg)).length })), [data, ns, provider])
+  const rows = useFilteredRows(allRows, groupFields, search)
 
   if (!loaded) return <LoadingState />
   if (!provider) {
@@ -377,51 +392,43 @@ export function SecurityGroupListPage() {
       )}
       <ProviderNote provider={provider} />
       <Toolbar
-        right={
-          <div className="relative w-full md:w-[280px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Filter by name or description" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        }
+        right={<FilterInput value={search} onChange={setSearch} fields={provider === "cilium" ? groupFields : groupFields.filter((field) => field.key !== "namespace")} rows={allRows} />}
       >
         <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
         {provider === "cilium" && (
-          <NativeSelect value={namespace} onChange={(e) => setNamespace(e.target.value)} aria-label="Namespace" className="min-w-[160px]">
-            <option value="all">All namespaces</option>
-            {namespaces.map((ns) => <option key={ns} value={ns}>{ns}</option>)}
-          </NativeSelect>
+          <Combobox value={namespace} onChange={setNamespace} options={namespaces} placeholder="All namespaces" aria-label="Namespace" />
         )}
       </Toolbar>
-      <DataTable
+      <DataTable<GroupRow>
         loading={loading}
         rows={rows}
-        rowKey={(sg) => `${sg.namespace || ""}/${sg.name}`}
-        empty={<EmptyState icon={ShieldCheck} title="No security groups" action={<Button size="sm" onClick={() => setCreateOpen(true)}>Create security group</Button>} />}
+        rowKey={({ sg }) => `${sg.namespace || ""}/${sg.name}`}
+        empty={<EmptyState icon={ShieldCheck} title={allRows.length ? "No matching security groups" : "No security groups"} action={<Button size="sm" onClick={() => setCreateOpen(true)}>Create security group</Button>} />}
         columns={[
           {
             header: "Name",
-            cell: (sg) => (
+            cell: ({ sg }) => (
               <div className="flex flex-col">
                 <Link to={sgDetailPath(sg)} className="font-medium hover:text-primary transition-colors">{sg.name}</Link>
                 {sg.description && <span className="text-xs text-muted-foreground">{sg.description}</span>}
               </div>
             ),
           },
-          ...(provider === "cilium" ? [{ header: "Namespace", cell: (sg: SecurityGroup) => <span className="text-sm text-muted-foreground">{sg.namespace}</span> }] : []),
-          { header: "Inbound", cell: (sg) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "ingress").length}</span> },
-          { header: "Outbound", cell: (sg) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "egress").length}</span> },
-          { header: "Instances", cell: (sg) => <span className="text-sm tabular-nums">{data.vms.filter((vm) => vmMatchesGroup(vm, sg)).length}</span> },
+          ...(provider === "cilium" ? [{ header: "Namespace", cell: ({ sg }: GroupRow) => <span className="text-sm text-muted-foreground">{sg.namespace}</span> }] : []),
+          { header: "Inbound", cell: ({ sg }) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "ingress").length}</span> },
+          { header: "Outbound", cell: ({ sg }) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "egress").length}</span> },
+          { header: "Instances", cell: ({ instances }) => <span className="text-sm tabular-nums">{instances}</span> },
           {
             header: "Type",
-            cell: (sg) => sg.managed
+            cell: ({ sg }) => sg.managed
               ? <Badge variant="outline">Security group</Badge>
               : <Badge variant="outline" className="text-muted-foreground">Policy ({sg.selector})</Badge>,
           },
-          { header: "Created", className: "text-right", cell: (sg) => <span className="text-sm text-muted-foreground tabular-nums">{relativeTime(sg.raw.metadata.creationTimestamp)}</span> },
+          { header: "Created", className: "text-right", cell: ({ sg }) => <span className="text-sm text-muted-foreground tabular-nums">{relativeTime(sg.raw.metadata.creationTimestamp)}</span> },
           {
             header: "",
             className: "w-12 text-right",
-            cell: (sg) => <Button size="icon" variant="ghost" aria-label={`Delete ${sg.name}`} onClick={() => setDeleting(sg)}><Trash2 className="size-4 text-muted-foreground" /></Button>,
+            cell: ({ sg }) => <Button size="icon" variant="ghost" aria-label={`Delete ${sg.name}`} onClick={() => setDeleting(sg)}><Trash2 className="size-4 text-muted-foreground" /></Button>,
           },
         ]}
       />
@@ -430,7 +437,7 @@ export function SecurityGroupListPage() {
         onOpenChange={setCreateOpen}
         providers={providers}
         defaultProvider={provider}
-        defaultNamespace={namespace === "all" ? "default" : namespace}
+        defaultNamespace={scope === "all" ? "default" : scope}
         onCreated={(sg) => navigate(sgDetailPath(sg))}
       />
       <ConfirmDialog
