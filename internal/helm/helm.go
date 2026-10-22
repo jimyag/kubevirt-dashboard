@@ -25,14 +25,18 @@ import (
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/releaseutil"
 	"helm.sh/helm/v3/pkg/repo"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
@@ -57,6 +61,7 @@ func Register(mux *http.ServeMux, restConfig RESTConfigFunc) {
 	mux.HandleFunc("PUT /api/v1/helm/releases/{namespace}/{name}", h.upgrade)
 	mux.HandleFunc("DELETE /api/v1/helm/releases/{namespace}/{name}", h.uninstall)
 	mux.HandleFunc("GET /api/v1/helm/releases/{namespace}/{name}/history", h.history)
+	mux.HandleFunc("GET /api/v1/helm/releases/{namespace}/{name}/resources", h.resources)
 	mux.HandleFunc("POST /api/v1/helm/releases/{namespace}/{name}/rollback", h.rollback)
 	mux.HandleFunc("GET /api/v1/helm/chart", h.chartInfo)
 }
@@ -354,6 +359,144 @@ func (h *handler) history(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Revision > items[j].Revision })
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+// releaseResource is one object of a release's manifest and its live state in the cluster.
+type releaseResource struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name"`
+	// Plural resource name from discovery; empty when the cluster does not serve the kind.
+	Resource string `json:"resource,omitempty"`
+	Exists   bool   `json:"exists"`
+	// Status summary for the status dot ("Ready", "Running", "Missing", ...) and a detail such as "2/3".
+	Status  string `json:"status"`
+	Detail  string `json:"detail,omitempty"`
+	Created string `json:"created,omitempty"`
+}
+
+// resources lists the objects of the release's current manifest with their live status, so the
+// console can show what a release owns and link to each object.
+func (h *handler) resources(w http.ResponseWriter, r *http.Request) {
+	namespace, name := r.PathValue("namespace"), r.PathValue("name")
+	cfg, err := h.configuration(r, namespace)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	rel, err := action.NewGet(cfg).Run(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	restConfig, err := h.restConfig(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	getter := &restGetter{config: restConfig, namespace: namespace}
+	mapper, err := getter.ToRESTMapper()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	client, err := dynamic.NewForConfig(restConfig)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	items := []releaseResource{}
+	for _, manifest := range releaseutil.SplitManifests(rel.Manifest) {
+		var head unstructured.Unstructured
+		if err := yaml.Unmarshal([]byte(manifest), &head.Object); err != nil || head.Object == nil || head.GetKind() == "" {
+			continue
+		}
+		item := releaseResource{APIVersion: head.GetAPIVersion(), Kind: head.GetKind(), Name: head.GetName(), Status: "Unknown"}
+		mapping, err := mapper.RESTMapping(schema.FromAPIVersionAndKind(item.APIVersion, item.Kind).GroupKind(), schema.FromAPIVersionAndKind(item.APIVersion, item.Kind).Version)
+		if err != nil {
+			item.Namespace = head.GetNamespace()
+			items = append(items, item)
+			continue
+		}
+		item.Resource = mapping.Resource.Resource
+		var resource dynamic.ResourceInterface = client.Resource(mapping.Resource)
+		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+			item.Namespace = head.GetNamespace()
+			if item.Namespace == "" {
+				item.Namespace = namespace
+			}
+			resource = client.Resource(mapping.Resource).Namespace(item.Namespace)
+		}
+		live, err := resource.Get(r.Context(), item.Name, metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			item.Status = "Missing"
+		case err != nil:
+			item.Status = "Unknown"
+			item.Detail = err.Error()
+		default:
+			item.Exists = true
+			item.Created = live.GetCreationTimestamp().UTC().Format(time.RFC3339)
+			item.Status, item.Detail = objectStatus(live)
+		}
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Kind != items[j].Kind {
+			return items[i].Kind < items[j].Kind
+		}
+		return items[i].Name < items[j].Name
+	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+// objectStatus summarizes the common kinds; others report their Ready condition or just exist.
+func objectStatus(obj *unstructured.Unstructured) (string, string) {
+	num := func(fields ...string) int64 {
+		value, _, _ := unstructured.NestedInt64(obj.Object, fields...)
+		return value
+	}
+	ratio := func(ready, want int64) (string, string) {
+		detail := fmt.Sprintf("%d/%d", ready, want)
+		if ready >= want {
+			return "Ready", detail
+		}
+		return "Progressing", detail
+	}
+	switch obj.GetKind() {
+	case "Deployment", "StatefulSet", "ReplicaSet":
+		want, found, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+		if !found {
+			want = 1
+		}
+		return ratio(num("status", "readyReplicas"), want)
+	case "DaemonSet":
+		return ratio(num("status", "numberReady"), num("status", "desiredNumberScheduled"))
+	case "Job":
+		if num("status", "succeeded") > 0 {
+			return "Complete", ""
+		}
+		if num("status", "failed") > 0 {
+			return "Failed", ""
+		}
+		return "Running", ""
+	}
+	if phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase"); phase != "" {
+		return phase, ""
+	}
+	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	for _, condition := range conditions {
+		c, _ := condition.(map[string]interface{})
+		if c["type"] == "Ready" || c["type"] == "Available" {
+			if c["status"] == "True" {
+				return "Ready", ""
+			}
+			reason, _ := c["reason"].(string)
+			return "NotReady", reason
+		}
+	}
+	return "Exists", ""
 }
 
 // chartSource names a chart in an HTTP repository (repo + chart) or an OCI registry

@@ -18,13 +18,16 @@ import {
   KeyValueGrid,
   LoadingState,
   PageHeader,
+  Pager,
   Panel,
   StatusDot,
   TabBar,
   Toolbar,
 } from "@/components/console"
 import { YamlCode, YamlDiff } from "@/components/yaml-editor"
-import { useFilteredRows, type FilterField } from "@/lib/filter"
+import { useFilteredRows, usePaged, type FilterField } from "@/lib/filter"
+import { consoleObjectPath } from "@/lib/events"
+import { resourceConfigs } from "@/resources/configs"
 import { relativeTime, useAsync, useNamespaces } from "@/lib/kube"
 import {
   chartInfo,
@@ -36,12 +39,14 @@ import {
   listReleases,
   needsSource,
   releaseHistory,
+  releaseResources,
   rollbackRelease,
   uninstallRelease,
   upgradeRelease,
   type ChartSource,
   type HelmRelease,
   type HelmReleaseDetail,
+  type HelmResource,
 } from "@/lib/helm"
 import { lineDiff } from "@/lib/yaml-view"
 import { isDnsLabel } from "@/lib/validate"
@@ -259,9 +264,10 @@ export function UninstallDialog({ release, onOpenChange, onDone }: { release: He
 
 // --- Detail ---
 
-type DetailTab = "values" | "defaults" | "manifest" | "history" | "notes"
+type DetailTab = "resources" | "values" | "defaults" | "manifest" | "history" | "notes"
 
 const detailTabs: Array<{ id: DetailTab; label: string }> = [
+  { id: "resources", label: "Resources" },
   { id: "values", label: "Values" },
   { id: "defaults", label: "Chart defaults" },
   { id: "manifest", label: "Manifest" },
@@ -280,7 +286,7 @@ export function HelmReleaseDetailPage() {
     throw err
   }), null, [namespace, name])
   const requested = params.get("tab") as DetailTab | null
-  const tab = requested && detailTabs.some((item) => item.id === requested) ? requested : "values"
+  const tab = requested && detailTabs.some((item) => item.id === requested) ? requested : "resources"
 
   if (loading && !release) return <LoadingState />
   if (!release) return error ? <ErrorNote>{error}</ErrorNote> : <EmptyState icon={Package} title={t("Release not found")} action={<Button asChild variant="outline" size="sm"><Link to="/catalog/helm">{t("Back")}</Link></Button>} />
@@ -312,7 +318,8 @@ export function HelmReleaseDetailPage() {
           { label: t("Description"), value: release.chartInfo?.description || release.description || "-" },
         ]} />
       </Panel>
-      <TabBar<DetailTab> tabs={detailTabs.map((item) => ({ id: item.id, label: t(item.label) }))} value={tab} onChange={(next) => setParams(next === "values" ? {} : { tab: next }, { replace: true })} />
+      <TabBar<DetailTab> tabs={detailTabs.map((item) => ({ id: item.id, label: t(item.label) }))} value={tab} onChange={(next) => setParams(next === "resources" ? {} : { tab: next }, { replace: true })} />
+      {tab === "resources" && <ReleaseResources release={release} />}
       {tab === "values" && <ReleaseValues release={release} onSaved={reload} />}
       {tab === "defaults" && <YamlCode value={release.chartValues} className="h-[calc(100dvh-320px)] min-h-[360px]" />}
       {tab === "manifest" && <YamlCode value={release.manifest} className="h-[calc(100dvh-320px)] min-h-[360px]" />}
@@ -428,6 +435,69 @@ function ChangeVersionDialog({ open, onOpenChange, release, onDone }: { open: bo
     >
       <ChartSourceFields source={source} onChange={setSource} lockChart />
     </ConfirmDialog>
+  )
+}
+
+const apiGroup = (path: string) => /^\/apis\/([^/]+)\//.exec(path)?.[1] ?? ""
+
+/** Console page of a release object: a dedicated page, else the Resource Catalog page of its kind. */
+const resourcePath = (item: HelmResource) => {
+  if (!item.exists) return null
+  const dedicated = consoleObjectPath(item)
+  if (dedicated) return dedicated
+  const group = item.apiVersion.includes("/") ? item.apiVersion.split("/")[0] : ""
+  const candidates = Object.values(resourceConfigs).filter((candidate) => candidate.kind === item.kind && apiGroup(candidate.listPath) === group)
+  // Pages filtered by label (SSH keys are Secrets) only hold some objects of their kind.
+  const config = candidates.find((candidate) => !candidate.listQuery) ?? candidates[0]
+  return config ? `${config.path}/${item.namespace || "_cluster"}/${item.name}` : null
+}
+
+const resourceFields: FilterField<HelmResource>[] = [
+  { key: "name", label: "Name", value: (item) => item.name },
+  { key: "kind", label: "Kind", value: (item) => item.kind },
+  { key: "namespace", label: "Namespace", aliases: ["ns"], value: (item) => item.namespace || "" },
+  { key: "status", label: "Status", value: (item) => item.status },
+]
+
+/** Objects the release created, with live status; missing ones were deleted outside Helm. */
+function ReleaseResources({ release }: { release: HelmReleaseDetail }) {
+  const { data, loading, error, reload } = useAsync(() => releaseResources(release.namespace, release.name), [] as HelmResource[], [release.namespace, release.name, release.revision])
+  const [search, setSearch] = useState("")
+  const rows = useFilteredRows(data, resourceFields, search)
+  const paging = usePaged(rows, 50)
+  return (
+    <div className="space-y-3">
+      <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={resourceFields} rows={data} placeholder={t("Filter, e.g. kind:Deployment")} />}>
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
+        <span className="text-sm text-muted-foreground">{t("{count} objects", { count: data.length })}</span>
+      </Toolbar>
+      {error && <ErrorNote>{error}</ErrorNote>}
+      <DataTable
+        loading={loading && data.length === 0}
+        rows={paging.rows}
+        rowKey={(item) => `${item.apiVersion}/${item.kind}/${item.namespace}/${item.name}`}
+        empty={<EmptyState title={data.length ? t("No matching objects") : t("No objects")} />}
+        columns={[
+          {
+            header: t("Name"),
+            cell: (item) => {
+              const path = resourcePath(item)
+              return (
+                <div className="flex flex-col">
+                  {path ? <Link to={path} className="font-medium hover:text-primary transition-colors">{item.name}</Link> : <span className="font-medium">{item.name}</span>}
+                  {item.namespace && <span className="text-xs text-muted-foreground">{item.namespace}</span>}
+                </div>
+              )
+            },
+          },
+          { header: t("Kind"), cell: (item) => <span className="font-mono text-xs">{item.kind}</span> },
+          { header: t("API version"), cell: (item) => <span className="font-mono text-xs text-muted-foreground">{item.apiVersion}</span> },
+          { header: t("Status"), cell: (item) => <span className="inline-flex items-center gap-2" title={item.detail}><StatusDot status={item.status} />{item.detail && /^\d+\/\d+$/.test(item.detail) && <span className="text-xs text-muted-foreground tabular-nums">{item.detail}</span>}</span> },
+          { header: t("Created"), className: "text-right", cell: (item) => item.created ? <span className="text-sm text-muted-foreground tabular-nums" title={item.created}>{relativeTime(item.created)}</span> : <span className="text-sm text-muted-foreground">-</span> },
+        ]}
+      />
+      <Pager {...paging} />
+    </div>
   )
 }
 

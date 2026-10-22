@@ -20,8 +20,10 @@ export const eventTime = (event: KubeEvent) =>
 export const eventCount = (event: KubeEvent) => event.series?.count || event.count || 1
 
 /** Console route for the object an event refers to, when the console has a page for its kind. */
-export const involvedObjectPath = (event: KubeEvent) => {
-  const object = event.involvedObject
+export const involvedObjectPath = (event: KubeEvent) => consoleObjectPath(event.involvedObject)
+
+/** Console route of the dedicated page for an object of these kinds, or null. */
+export const consoleObjectPath = (object?: { kind?: string; name?: string; namespace?: string }) => {
   if (!object?.name) return null
   const ns = object.namespace
   switch (object.kind) {

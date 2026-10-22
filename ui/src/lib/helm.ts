@@ -48,6 +48,25 @@ export const releaseHistory = async (namespace: string, name: string): Promise<H
   return data.items || []
 }
 
+/** An object of the release's manifest and its live state. */
+export type HelmResource = {
+  apiVersion: string
+  kind: string
+  namespace?: string
+  name: string
+  /** Plural resource name; empty when the cluster does not serve the kind. */
+  resource?: string
+  exists: boolean
+  status: string
+  detail?: string
+  created?: string
+}
+
+export const releaseResources = async (namespace: string, name: string): Promise<HelmResource[]> => {
+  const data = await requestJson(`${releasePath(namespace, name)}/resources`, { method: "GET" }) as { items?: HelmResource[] }
+  return data.items || []
+}
+
 export const installRelease = (input: ChartSource & { namespace: string; name: string; values: string }) =>
   requestJson(`${HELM}/releases`, json("POST", input)) as Promise<HelmRelease>
 
