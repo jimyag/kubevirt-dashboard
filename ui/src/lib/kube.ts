@@ -176,7 +176,7 @@ export type NetworkProfile = {
   loaded: boolean
 }
 
-export const networkProfiles: Record<NetworkProfileId, { label: string; description: string; vpc: boolean; acl: AclProvider; engines: AclEngine[]; recommended?: boolean }> = {
+export const networkProfiles: Record<NetworkProfileId, { label: string; description: string; vpc: boolean; acl: AclProvider; engines: AclEngine[] }> = {
   pod: {
     label: "KubeVirt",
     description: "VMs use the default pod network. Access control uses Kubernetes NetworkPolicy.",
@@ -197,7 +197,6 @@ export const networkProfiles: Record<NetworkProfileId, { label: string; descript
     vpc: true,
     acl: "cilium",
     engines: ["cilium", "kube-ovn"],
-    recommended: true,
   },
   cilium: {
     label: "KubeVirt + Cilium",
@@ -297,10 +296,17 @@ export const kubeOvnAnnotations = {
   ipAddress: "ovn.kubernetes.io/ip_address",
   securityGroups: "ovn.kubernetes.io/security_groups",
   portSecurity: "ovn.kubernetes.io/port_security",
+  /** Name of a Vip whose address the pod takes. */
+  vip: "ovn.kubernetes.io/vip",
+  /** Bandwidth limits in Mbit/s, seen from the instance: ingress is download, egress upload. */
+  ingressRate: "ovn.kubernetes.io/ingress_rate",
+  egressRate: "ovn.kubernetes.io/egress_rate",
 }
 
 /** Label put on VM templates (and thus virt-launcher pods) to attach a Cilium-backed security group. */
 export const ciliumSecurityGroupLabel = (name: string) => `sg.kubevirt-dashboard.io/${name}`
+/** Label for a cluster-wide Cilium security group (CiliumClusterwideNetworkPolicy); separate so names never clash with namespaced groups. */
+export const ciliumGlobalGroupLabel = (name: string) => `global.sg.kubevirt-dashboard.io/${name}`
 export const managedSecurityGroupLabel = "kubevirt-dashboard.io/security-group"
 
 export const subnetUsage = (subnet: KubeObject) => {

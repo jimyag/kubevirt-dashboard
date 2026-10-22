@@ -12,7 +12,10 @@ import { EventsPage } from "./pages/events";
 import { SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
 import { CatalogPage, SettingsPage } from "./pages/settings";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
-import { ElasticIpPage, NatGatewayPage } from "./pages/nat";
+import { DnatRulePage, ElasticIpPage, FloatingIpPage, NatGatewayDetailPage, NatGatewayPage, SnatRulePage } from "./pages/nat";
+import { ReservedIpListPage } from "./pages/reserved-ips";
+import { IpPoolListPage, PeeringListPage, RouteTableDetailPage, RouteTableListPage } from "./pages/vpc-network";
+import { AddressGroupListPage } from "./pages/address-groups";
 import { KubernetesCategoryPage, KubernetesManagementPage, KubeVirtCategoryPage, KubeVirtManagementPage, NetworkCategoryPage, NetworkManagementPage, StorageCategoryPage, StorageManagementPage } from "./resources/group-pages";
 import { t, useLocale } from "@/lib/i18n";
 import { VMDetailContent } from "./pages/instance-detail";
@@ -46,8 +49,18 @@ function App() {
               <Route path="/vpc/vpcs/:name" element={<VpcDetailPage />} />
               <Route path="/vpc/subnets" element={<SubnetListPage />} />
               <Route path="/vpc/subnets/:name" element={<SubnetDetailPage />} />
+              <Route path="/vpc/reserved-ips" element={<ReservedIpListPage />} />
+              <Route path="/vpc/route-tables" element={<RouteTableListPage />} />
+              <Route path="/vpc/route-tables/:name" element={<RouteTableDetailPage />} />
+              <Route path="/vpc/peering-connections" element={<PeeringListPage />} />
+              <Route path="/vpc/ip-pools" element={<IpPoolListPage />} />
+              <Route path="/vpc/address-groups" element={<AddressGroupListPage />} />
               <Route path="/vpc/elastic-ips" element={<ElasticIpPage />} />
               <Route path="/vpc/nat-gateways" element={<NatGatewayPage />} />
+              <Route path="/vpc/nat-gateways/:name" element={<NatGatewayDetailPage />} />
+              <Route path="/vpc/nat/snat-rules" element={<SnatRulePage />} />
+              <Route path="/vpc/nat/dnat-rules" element={<DnatRulePage />} />
+              <Route path="/vpc/nat/floating-ips" element={<FloatingIpPage />} />
               <Route path="/vpc/security-groups" element={<SecurityGroupListPage />} />
               <Route path="/vpc/security-groups/:provider/:name" element={<SecurityGroupDetailPage />} />
               <Route path="/vpc/security-groups/:provider/:namespace/:name" element={<SecurityGroupDetailPage />} />

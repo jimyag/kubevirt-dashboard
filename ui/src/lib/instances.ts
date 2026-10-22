@@ -3,6 +3,7 @@ import * as YAML from "js-yaml"
 import {
   asList,
   asRecord,
+  ciliumGlobalGroupLabel,
   ciliumSecurityGroupLabel,
   kubeOvnAnnotations,
   str,
@@ -10,6 +11,7 @@ import {
   type UnknownRecord,
 } from "./kube"
 import { t } from "./i18n"
+import { bandwidthAnnotations, extraNicSpec, type Bandwidth, type ExtraNic } from "./vm-network"
 
 // --- Instance helpers ---
 
@@ -75,6 +77,10 @@ export type WizardState = {
   vpc: string
   subnet: string
   fixedIp: string
+  /** Kube-OVN Vip whose address the instance takes; replaces fixedIp. */
+  reservedIp: string
+  bandwidth: Bandwidth
+  extraNics: ExtraNic[]
   binding: "masquerade" | "bridge"
   /** Engine enforcing the selected security groups; chosen per instance on the Kube-OVN + Cilium stack. */
   sgEngine: "kube-ovn" | "cilium" | null
@@ -137,18 +143,26 @@ export const buildVirtualMachine = (state: WizardState, vpcEnabled: boolean) => 
   const templateAnnotations: Record<string, string> = {}
   if (vpcEnabled && state.subnet) {
     templateAnnotations[kubeOvnAnnotations.logicalSwitch] = state.subnet
-    if (state.fixedIp.trim()) templateAnnotations[kubeOvnAnnotations.ipAddress] = state.fixedIp.trim()
+    if (state.reservedIp) templateAnnotations[kubeOvnAnnotations.vip] = state.reservedIp
+    else if (state.fixedIp.trim()) templateAnnotations[kubeOvnAnnotations.ipAddress] = state.fixedIp.trim()
+    Object.assign(templateAnnotations, bandwidthAnnotations(state.bandwidth))
   }
+  const extra = extraNicSpec(state.extraNics)
+  Object.assign(templateAnnotations, extra.annotations)
   if (state.securityGroups.length && aclProvider === "kube-ovn") {
     templateAnnotations[kubeOvnAnnotations.securityGroups] = state.securityGroups.join(",")
     templateAnnotations[kubeOvnAnnotations.portSecurity] = "true"
   }
   if (state.securityGroups.length && aclProvider === "cilium") {
-    state.securityGroups.forEach((group) => { templateLabels[ciliumSecurityGroupLabel(group)] = "true" })
+    // "cluster/<name>" selects a cluster-wide group (see sgSelectionKey).
+    state.securityGroups.forEach((group) => {
+      const label = group.startsWith("cluster/") ? ciliumGlobalGroupLabel(group.slice("cluster/".length)) : ciliumSecurityGroupLabel(group)
+      templateLabels[label] = "true"
+    })
   }
 
   const domain: UnknownRecord = {
-    devices: { disks, interfaces: [{ name: "default", [state.binding]: {} }] },
+    devices: { disks, interfaces: [{ name: "default", [state.binding]: {} }, ...extra.interfaces] },
   }
   if (state.specMode === "custom") {
     domain.cpu = { cores: state.cpu, sockets: 1, threads: 1 }
@@ -163,7 +177,7 @@ export const buildVirtualMachine = (state: WizardState, vpcEnabled: boolean) => 
       metadata: { labels: templateLabels, ...(Object.keys(templateAnnotations).length ? { annotations: templateAnnotations } : {}) },
       spec: {
         domain,
-        networks: [{ name: "default", pod: {} }],
+        networks: [{ name: "default", pod: {} }, ...extra.networks],
         volumes,
       },
     },

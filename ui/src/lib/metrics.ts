@@ -102,18 +102,22 @@ export function useMetricsPoll<T>(fetcher: () => Promise<T | null>, deps: unknow
   return data
 }
 
-// --- Prometheus ---
+// --- Prometheus-compatible query API ---
 
-export type PrometheusConfig = { namespace: string; service: string; port: string; scheme: "http" | "https" }
-
-export const prometheusPresets: Array<{ label: string; config: PrometheusConfig }> = [
-  { label: "kube-prometheus-stack", config: { namespace: "monitoring", service: "prometheus-operated", port: "9090", scheme: "http" } },
-  { label: "kube-prometheus", config: { namespace: "monitoring", service: "prometheus-k8s", port: "9090", scheme: "http" } },
-  { label: "prometheus helm chart", config: { namespace: "prometheus", service: "prometheus-server", port: "80", scheme: "http" } },
-]
+/**
+ * Any backend serving the Prometheus HTTP query API: Prometheus, VictoriaMetrics (single or the
+ * vmselect of a cluster), Thanos Query. `path` is the API prefix, e.g. /select/0/prometheus for a
+ * VictoriaMetrics cluster; empty for the others.
+ */
+export type PrometheusConfig = { namespace: string; service: string; port: string; scheme: "http" | "https"; path: string }
 
 const storageKey = () => `prometheus:${getContext()}`
 const listeners = new Set<() => void>()
+
+const normalizePath = (path: unknown) => {
+  const text = str(path).trim().replace(/\/+$/, "")
+  return text && !text.startsWith("/") ? `/${text}` : text
+}
 
 export const readPrometheusConfig = (): PrometheusConfig | null => {
   try {
@@ -121,7 +125,7 @@ export const readPrometheusConfig = (): PrometheusConfig | null => {
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<PrometheusConfig>
     if (!parsed.namespace || !parsed.service || !parsed.port) return null
-    return { namespace: parsed.namespace, service: parsed.service, port: parsed.port, scheme: parsed.scheme === "https" ? "https" : "http" }
+    return { namespace: parsed.namespace, service: parsed.service, port: parsed.port, scheme: parsed.scheme === "https" ? "https" : "http", path: normalizePath(parsed.path) }
   } catch {
     return null
   }
@@ -129,7 +133,7 @@ export const readPrometheusConfig = (): PrometheusConfig | null => {
 
 export const writePrometheusConfig = (config: PrometheusConfig | null) => {
   try {
-    if (config) localStorage.setItem(storageKey(), JSON.stringify(config))
+    if (config) localStorage.setItem(storageKey(), JSON.stringify({ ...config, path: normalizePath(config.path) }))
     else localStorage.removeItem(storageKey())
   } catch {
     // Without browser storage the setting only lasts for this page view.
@@ -149,9 +153,9 @@ export function usePrometheusConfig() {
   return config
 }
 
-/** Prometheus reached through the Kubernetes API service proxy, so it needs no external exposure. */
+/** The backend reached through the Kubernetes API service proxy, so it needs no external exposure. */
 export const prometheusBase = (config: PrometheusConfig) =>
-  `/api/v1/namespaces/${config.namespace}/services/${config.scheme}:${config.service}:${config.port}/proxy`
+  `/api/v1/namespaces/${config.namespace}/services/${config.scheme}:${config.service}:${config.port}/proxy${normalizePath(config.path)}`
 
 const promRequest = async (config: PrometheusConfig, path: string) => {
   const res = await apiFetch(`${prometheusBase(config)}${path}`)
@@ -160,7 +164,7 @@ const promRequest = async (config: PrometheusConfig, path: string) => {
   try {
     body = JSON.parse(text)
   } catch {
-    throw new Error(res.ok ? t("Prometheus returned a non-JSON response") : `${res.status} ${text.slice(0, 200)}`)
+    throw new Error(res.ok ? t("The service did not answer with the Prometheus API. Check the port and path.") : `${res.status} ${text.slice(0, 200)}`)
   }
   if (!res.ok || body.status !== "success") throw new Error(body.error || body.message || `${res.status} ${res.statusText}`)
   return body.data
@@ -180,26 +184,93 @@ export const promQueryRange = async (config: PrometheusConfig, query: string, ra
   }))
 }
 
-/** Checks the config by asking for Prometheus build info. */
+/**
+ * Checks the config with an instant query, then names the backend. Prometheus reports its own
+ * version with a revision in build info; VictoriaMetrics only reports the Prometheus API version it
+ * emulates, but serves /api/v1/status/active_queries, which Prometheus does not.
+ */
 export const testPrometheus = async (config: PrometheusConfig) => {
-  const data = asRecord(await promRequest(config, "/api/v1/status/buildinfo"))
-  return str(data.version, "unknown")
+  await promRequest(config, `/api/v1/query?query=${encodeURIComponent("vector(1)")}`)
+  const info = asRecord(await promRequest(config, "/api/v1/status/buildinfo").catch(() => ({})))
+  const version = str(info.version)
+  if (info.revision) return { backend: "Prometheus", version }
+  const res = await apiFetch(`${prometheusBase(config)}/api/v1/status/active_queries`).catch(() => null)
+  if (res?.ok) return { backend: "VictoriaMetrics", version: "" }
+  return { backend: "", version }
 }
 
-/** Label matcher for one VMI in KubeVirt's kubevirt_vmi_* metrics. */
-const vmiSelector = (namespace: string, name: string) => `namespace="${namespace}",name="${name}"`
+export type BackendCandidate = { kind: string; config: PrometheusConfig }
 
-export const vmQueries = (namespace: string, name: string) => {
-  const sel = vmiSelector(namespace, name)
-  return {
-    cpu: `sum(rate(kubevirt_vmi_cpu_usage_seconds_total{${sel}}[5m]))`,
-    memory: `sum(kubevirt_vmi_memory_used_bytes{${sel}})`,
-    networkRx: `sum(rate(kubevirt_vmi_network_receive_bytes_total{${sel}}[5m]))`,
-    networkTx: `sum(rate(kubevirt_vmi_network_transmit_bytes_total{${sel}}[5m]))`,
-    diskRead: `sum(rate(kubevirt_vmi_storage_read_traffic_bytes_total{${sel}}[5m]))`,
-    diskWrite: `sum(rate(kubevirt_vmi_storage_write_traffic_bytes_total{${sel}}[5m]))`,
+type ServiceLike = KubeObject & { spec?: { ports?: Array<{ name?: string; port: number }> } }
+
+const portOf = (service: ServiceLike, names: string[], numbers: number[]) => {
+  const ports = service.spec?.ports || []
+  const match = ports.find((port) => port.name && names.includes(port.name)) || ports.find((port) => numbers.includes(port.port))
+  return match ? String(match.port) : ""
+}
+
+/** Recognizes the services the common charts and operators create for a query endpoint. */
+const candidateFor = (service: ServiceLike): BackendCandidate | null => {
+  const name = service.metadata.name
+  const labels = service.metadata.labels || {}
+  const app = labels["app.kubernetes.io/name"] || labels.app || ""
+  const base = { namespace: service.metadata.namespace || "default", service: name, scheme: "http" as const, path: "" }
+  if (/^vmselect-|vmselect$/.test(name) || app === "vmselect") {
+    const port = portOf(service, ["http"], [8481])
+    return port ? { kind: "VictoriaMetrics cluster", config: { ...base, port, path: "/select/0/prometheus" } } : null
   }
+  if (/^vmsingle-|victoria-metrics-single-server$/.test(name) || app === "vmsingle" || app === "victoria-metrics-single") {
+    const port = portOf(service, ["http"], [8428, 8429])
+    return port ? { kind: "VictoriaMetrics", config: { ...base, port } } : null
+  }
+  if (/thanos-query(-frontend)?$/.test(name) || app === "thanos-query") {
+    const port = portOf(service, ["http"], [9090, 10902])
+    return port ? { kind: "Thanos", config: { ...base, port } } : null
+  }
+  // The operator's headless service, chart services such as prometheus-server, kube-prometheus's prometheus-k8s.
+  if (name === "prometheus-operated" || (/prometheus/.test(name) && !/operator|exporter|alertmanager|adapter|pushgateway|node|state|blackbox|config-reloader/.test(name))) {
+    const port = portOf(service, ["web", "http"], [9090, 80])
+    return port ? { kind: "Prometheus", config: { ...base, port } } : null
+  }
+  return null
 }
+
+/** Services in the cluster that look like a Prometheus-compatible query API, checked one by one. */
+export const detectBackends = async (): Promise<Array<BackendCandidate & { version: string }>> => {
+  const services = await listItems<ServiceLike>("/api/v1/services")
+  const candidates = services.map(candidateFor).filter((item): item is BackendCandidate => item !== null)
+  const checked = await Promise.all(candidates.map(async (candidate) => {
+    try {
+      const result = await testPrometheus(candidate.config)
+      return { ...candidate, version: result.version }
+    } catch {
+      return null
+    }
+  }))
+  return checked.filter((item): item is BackendCandidate & { version: string } => item !== null)
+}
+
+/**
+ * Rate or value of one kubevirt_vmi_* metric for a VMI. KubeVirt labels series with the VMI's
+ * namespace; scrape configs that do not honor target labels (annotation-based discovery in the
+ * prometheus and victoria-metrics-single charts) rename it to exported_namespace, so both match.
+ */
+const vmiMetric = (metric: string, namespace: string, name: string, rate: boolean) => {
+  const series = (label: string) => {
+    const selector = `${metric}{${label}="${namespace}",name="${name}"}`
+    return rate ? `rate(${selector}[5m])` : selector
+  }
+  return `sum(${series("namespace")} or ${series("exported_namespace")})`
+}
+
+export const vmQueries = (namespace: string, name: string) => ({
+  cpu: vmiMetric("kubevirt_vmi_cpu_usage_seconds_total", namespace, name, true),
+  memory: vmiMetric("kubevirt_vmi_memory_used_bytes", namespace, name, false),
+  networkRx: vmiMetric("kubevirt_vmi_network_receive_bytes_total", namespace, name, true),
+  networkTx: vmiMetric("kubevirt_vmi_network_transmit_bytes_total", namespace, name, true),
+  diskRead: vmiMetric("kubevirt_vmi_storage_read_traffic_bytes_total", namespace, name, true),
+  diskWrite: vmiMetric("kubevirt_vmi_storage_write_traffic_bytes_total", namespace, name, true),
+})
 
 /** Whether metrics-server is reachable, for settings and hints. */
 export const metricsServerAvailable = async () => (await listItems(`${METRICS}/nodes`)).length > 0

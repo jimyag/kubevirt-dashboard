@@ -206,7 +206,7 @@ function BindDialog({ kind, engines, data, ips, ipName, vmName, subnet, onClose,
                 <Combobox value={internalIp} onChange={setInternalIp} options={ips} aria-label={t("Internal IP")} className="w-full font-mono" />
               </FieldRow>
             ) : (
-              <FieldRow label={t("IP name")} hint={t("Kube-OVN IP object of this instance.")}>
+              <FieldRow label={t("IP name")} hint={t("IP object of this instance.")}>
                 <Input value={ipName} readOnly className="font-mono" />
               </FieldRow>
             )}

@@ -1,7 +1,16 @@
 import type { ComponentType } from "react"
 import {
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpFromLine,
   Bell,
+  Bookmark,
   Boxes,
+  Cable,
+  History,
+  Layers3,
+  Signpost,
+  Ungroup,
   Camera,
   Cpu,
   Database,
@@ -12,6 +21,7 @@ import {
   LayoutDashboard,
   Layers,
   ListChecks,
+  ListTree,
   Network,
   Route,
   Scale,
@@ -27,6 +37,7 @@ import { useDiscovery, useNetworkProfile, type Discovery, type NetworkProfile } 
 
 export type NavItem = {
   name: string
+  /** For a group, the first visible child's path (used when the sidebar is collapsed to icons). */
   path: string
   icon: ComponentType<{ className?: string }>
   /** Extra path prefixes that should highlight this entry. */
@@ -34,6 +45,8 @@ export type NavItem = {
   /** API that must be served for the entry to show. */
   requires?: [groupVersion: string, resource: string]
   visible?: (profile: NetworkProfile) => boolean
+  /** Second-level pages; makes this entry a collapsible group in the sidebar. */
+  children?: NavItem[]
 }
 
 export type SectionTone = "home" | "compute" | "storage" | "network" | "security" | "platform"
@@ -66,12 +79,26 @@ export const navSections: NavSection[] = [
     label: "Compute",
     tone: "compute",
     items: [
-      { name: "Instances", path: "/kubevirt/virtualization/virtual-machines", icon: Cpu, match: ["/kubevirt/virtualization/virtual-machine-instances"] },
-      { name: "Instance Types", path: "/kubevirt/templates/cluster-instance-types", icon: Layers, match: ["/kubevirt/templates"], requires: ["instancetype.kubevirt.io/v1beta1", "virtualmachineclusterinstancetypes"] },
-      { name: "Images", path: "/kubevirt/cdi/data-sources", icon: Image, match: ["/kubevirt/cdi/data-import-crons"], requires: ["cdi.kubevirt.io/v1beta1", "datasources"] },
-      { name: "Instance Pools", path: "/kubevirt/virtualization/vm-pools", icon: Boxes, requires: ["pool.kubevirt.io/v1beta1", "virtualmachinepools"] },
-      { name: "Snapshots", path: "/kubevirt/snapshots/snapshots", icon: Camera, match: ["/kubevirt/snapshots"], requires: ["snapshot.kubevirt.io/v1beta1", "virtualmachinesnapshots"] },
-      { name: "Migrations", path: "/kubevirt/operations/migrations", icon: Route },
+      {
+        name: "Instances & images",
+        path: "",
+        icon: Cpu,
+        children: [
+          { name: "Instances", path: "/kubevirt/virtualization/virtual-machines", icon: Cpu, match: ["/kubevirt/virtualization/virtual-machine-instances"] },
+          { name: "Instance Types", path: "/kubevirt/templates/cluster-instance-types", icon: Layers, match: ["/kubevirt/templates"], requires: ["instancetype.kubevirt.io/v1beta1", "virtualmachineclusterinstancetypes"] },
+          { name: "Images", path: "/kubevirt/cdi/data-sources", icon: Image, match: ["/kubevirt/cdi/data-import-crons"], requires: ["cdi.kubevirt.io/v1beta1", "datasources"] },
+          { name: "Instance Pools", path: "/kubevirt/virtualization/vm-pools", icon: Boxes, requires: ["pool.kubevirt.io/v1beta1", "virtualmachinepools"] },
+        ],
+      },
+      {
+        name: "Snapshots & migrations",
+        path: "",
+        icon: History,
+        children: [
+          { name: "Snapshots", path: "/kubevirt/snapshots/snapshots", icon: Camera, match: ["/kubevirt/snapshots"], requires: ["snapshot.kubevirt.io/v1beta1", "virtualmachinesnapshots"] },
+          { name: "Migrations", path: "/kubevirt/operations/migrations", icon: Route },
+        ],
+      },
       { name: "Hosts", path: "/nodes", icon: Server },
     ],
   },
@@ -81,20 +108,43 @@ export const navSections: NavSection[] = [
     items: [
       { name: "Disks", path: "/kubevirt/cdi/data-volumes", icon: HardDrive, requires: ["cdi.kubevirt.io/v1beta1", "datavolumes"] },
       { name: "Volumes", path: "/storage/kubernetes/persistent-volume-claims", icon: Database, match: ["/storage/kubernetes/persistent-volumes"] },
-      { name: "Storage Classes", path: "/storage/kubernetes/storage-classes", icon: Disc3 },
       { name: "Volume Snapshots", path: "/storage/kubernetes/volume-snapshots", icon: Camera, requires: ["snapshot.storage.k8s.io/v1", "volumesnapshots"] },
+      { name: "Storage Classes", path: "/storage/kubernetes/storage-classes", icon: Disc3 },
     ],
   },
   {
     label: "Networking",
     tone: "network",
     items: [
-      { name: "VPCs", path: "/vpc/vpcs", icon: Network, visible: (p) => p.vpc },
-      { name: "Subnets", path: "/vpc/subnets", icon: Split, visible: (p) => p.vpc },
-      { name: "Elastic IPs", path: "/vpc/elastic-ips", icon: Globe, match: ["/networks/kube-ovn/iptables-eips", "/networks/kube-ovn/ovn-eips"], visible: (p) => p.vpc },
-      { name: "NAT Gateways", path: "/vpc/nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/vpc-nat-gateways", "/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/iptables-fip-rules", "/networks/kube-ovn/ovn-snat-rules", "/networks/kube-ovn/ovn-dnat-rules", "/networks/kube-ovn/ovn-fips"], visible: (p) => p.vpc },
+      {
+        name: "Virtual private cloud",
+        path: "",
+        icon: Network,
+        visible: (p) => p.vpc,
+        children: [
+          { name: "VPCs", path: "/vpc/vpcs", icon: Network },
+          { name: "Subnets", path: "/vpc/subnets", icon: Split },
+          { name: "Route Tables", path: "/vpc/route-tables", icon: Signpost },
+          { name: "Peering Connections", path: "/vpc/peering-connections", icon: Cable },
+          { name: "Reserved IPs", path: "/vpc/reserved-ips", icon: Bookmark, match: ["/networks/kube-ovn/vips"] },
+          { name: "IP Pools", path: "/vpc/ip-pools", icon: Layers3, match: ["/networks/kube-ovn/ip-pools"] },
+        ],
+      },
+      {
+        name: "Elastic IPs & NAT",
+        path: "",
+        icon: Globe,
+        visible: (p) => p.vpc,
+        children: [
+          { name: "Elastic IPs", path: "/vpc/elastic-ips", icon: Globe, match: ["/networks/kube-ovn/iptables-eips", "/networks/kube-ovn/ovn-eips"] },
+          { name: "NAT Gateways", path: "/vpc/nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/vpc-nat-gateways"] },
+          { name: "SNAT Rules", path: "/vpc/nat/snat-rules", icon: ArrowUpFromLine, match: ["/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/ovn-snat-rules"] },
+          { name: "DNAT Rules", path: "/vpc/nat/dnat-rules", icon: ArrowDownToLine, match: ["/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/ovn-dnat-rules"] },
+          { name: "Floating IPs", path: "/vpc/nat/floating-ips", icon: ArrowLeftRight, match: ["/networks/kube-ovn/iptables-fip-rules", "/networks/kube-ovn/ovn-fips"] },
+        ],
+      },
       { name: "Load Balancers", path: "/networks/kubernetes/services", icon: Scale },
-      { name: "Multus Networks", path: "/networks/kubernetes/nads", icon: Route, requires: ["k8s.cni.cncf.io/v1", "network-attachment-definitions"] },
+      { name: "Multus Networks", path: "/networks/kubernetes/nads", icon: Ungroup, requires: ["k8s.cni.cncf.io/v1", "network-attachment-definitions"] },
     ],
   },
   {
@@ -102,6 +152,7 @@ export const navSections: NavSection[] = [
     tone: "security",
     items: [
       { name: "Security Groups", path: "/vpc/security-groups", icon: ShieldCheck, visible: (p) => p.acl !== "networkpolicy" },
+      { name: "Address Groups", path: "/vpc/address-groups", icon: ListTree, match: ["/networks/cilium/cidr-groups"], requires: ["cilium.io/v2", "ciliumcidrgroups"], visible: (p) => p.aclEngines.includes("cilium") },
       { name: "Network Policies", path: "/networks/kubernetes/network-policies", icon: Shield, match: ["/networks/cilium/network-policies", "/networks/cilium/clusterwide-network-policies"] },
     ],
   },
@@ -127,12 +178,16 @@ export const isNavItemVisible = (item: NavItem, profile: NetworkProfile, discove
 }
 
 
-const allNavItems = navSections.flatMap((section) => section.items.map((item) => ({ section, item })))
+type NavEntry = { section: NavSection; item: NavItem; parent?: NavItem }
+
+/** Every page in the navigation, with its section and, for second-level pages, its group. */
+const allNavItems: NavEntry[] = navSections.flatMap((section) => section.items.flatMap((item) =>
+  item.children ? item.children.map((child) => ({ section, item: child, parent: item })) : [{ section, item }]))
 
 /** Longest-prefix match so specific entries win over generic catalog entries. */
-export const findActiveNav = (pathname: string) => {
+export const findActiveNav = (pathname: string): NavEntry | undefined => {
   if (pathname === "/") return allNavItems[0]
-  let best: (typeof allNavItems)[number] | undefined
+  let best: NavEntry | undefined
   let bestLength = 0
   for (const entry of allNavItems.slice(1)) {
     for (const prefix of [entry.item.path, ...(entry.item.match || [])]) {
@@ -145,11 +200,23 @@ export const findActiveNav = (pathname: string) => {
   return best
 }
 
-/** Navigation sections filtered by served APIs and the active network stack. */
-export function useNavSections() {
+/**
+ * Navigation filtered by served APIs and the active network stack. A group keeps its visible
+ * children; with only one left it becomes that page, and with none it disappears.
+ */
+export function useNavSections(): NavSection[] {
   const profile = useNetworkProfile()
   const discovery = useDiscovery()
   return navSections
-    .map((section) => ({ ...section, items: section.items.filter((item) => isNavItemVisible(item, profile, discovery)) }))
+    .map((section) => ({
+      ...section,
+      items: section.items.flatMap((item): NavItem[] => {
+        if (!isNavItemVisible(item, profile, discovery)) return []
+        if (!item.children) return [item]
+        const children = item.children.filter((child) => isNavItemVisible(child, profile, discovery))
+        if (children.length <= 1) return children
+        return [{ ...item, path: children[0].path, children }]
+      }),
+    }))
     .filter((section) => section.items.length > 0)
 }

@@ -60,7 +60,7 @@ function Breadcrumbs() {
   const location = useLocation()
   const active = findActiveNav(location.pathname)
   if (!active) return null
-  const crumbs = active.section.label === "Home" ? [t(active.item.name)] : [t(active.section.label), t(active.item.name)]
+  const crumbs = active.section.label === "Home" ? [t(active.item.name)] : [t(active.section.label), ...(active.parent ? [t(active.parent.name)] : []), t(active.item.name)]
   return (
     <nav className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
       {crumbs.map((crumb, index) => (

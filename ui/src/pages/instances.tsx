@@ -51,6 +51,7 @@ import { namespaceScope, useFilteredRows, usePaged, type FilterField } from "@/l
 import {
   asList,
   asRecord,
+  kubeOvnAnnotations,
   listItems,
   namespacedPath,
   relativeTime,
@@ -62,9 +63,10 @@ import {
   useNetworkProfile,
   type KubeObject,
 } from "@/lib/kube"
-import { engineLabel, listSecurityGroups, useSgProvider, vmSecurityGroupRefs, type SecurityGroup } from "@/lib/security-groups"
+import { engineLabel, isGlobalGroup, listSecurityGroups, parseSgSelection, sgRefKey, sgSelectionKey, useSgProvider, vmSecurityGroupRefs, type SecurityGroup } from "@/lib/security-groups"
 import { fetchInstanceUsage, formatBytes, useMetricsPoll } from "@/lib/metrics"
 import { cidrContains, ipv4Cidr, isDnsLabel, isQuantity } from "@/lib/validate"
+import { bandwidthProblem, bandwidthText, listAttachableNetworks, nextNicName, type AttachableNetwork } from "@/lib/vm-network"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
 import { t } from "@/lib/i18n"
 import { usePolling } from "@/lib/polling"
@@ -99,6 +101,7 @@ type InstanceRow = {
   node: string
   shape: ReturnType<typeof vmShape>
   network: ReturnType<typeof vmNetworkLabel>
+  vpc: string
   groups: ReturnType<typeof vmSecurityGroupRefs>
 }
 
@@ -109,6 +112,7 @@ const instanceFields: FilterField<InstanceRow>[] = [
   { key: "ip", label: "IP address", value: (row) => row.ips },
   { key: "spec", label: "Spec", value: (row) => [row.shape.label, row.shape.detail] },
   { key: "network", label: "Network", aliases: ["subnet"], value: (row) => row.network.label },
+  { key: "vpc", label: "VPC", value: (row) => row.vpc },
   { key: "sg", label: "Security groups", value: (row) => row.groups.map((group) => group.name) },
   { key: "host", label: "Host", aliases: ["node"], value: (row) => row.node },
   { key: "label", label: "Labels", value: (row) => Object.entries(row.vm.metadata.labels || {}).map(([name, value]) => `${name}=${value}`) },
@@ -140,14 +144,16 @@ export function InstanceListPage() {
   }, [namespace])
 
   const { data, loading, reload } = useAsync(async () => {
-    const [vms, vmis, types] = await Promise.all([
+    const [vms, vmis, types, subnets] = await Promise.all([
       listItems(namespacedPath(VM_API, "virtualmachines", scope)),
       listItems(namespacedPath(VM_API, "virtualmachineinstances", scope)),
       listItems("/apis/instancetype.kubevirt.io/v1beta1/virtualmachineclusterinstancetypes"),
+      profile.vpc ? listItems("/apis/kubeovn.io/v1/subnets").catch(() => [] as KubeObject[]) : Promise.resolve([] as KubeObject[]),
     ])
     const instanceTypes = Object.fromEntries(types.map((type) => [type.metadata.name, { cpu: Number(asRecord(asRecord(type.spec).cpu).guest || 0), memory: str(asRecord(asRecord(type.spec).memory).guest) }]))
-    return { vms, vmis, instanceTypes }
-  }, { vms: [] as KubeObject[], vmis: [] as KubeObject[], instanceTypes: {} as Record<string, { cpu: number; memory: string }> }, [scope])
+    const vpcBySubnet = Object.fromEntries(subnets.map((subnet) => [subnet.metadata.name, str(asRecord(subnet.spec).vpc, "ovn-cluster")]))
+    return { vms, vmis, instanceTypes, vpcBySubnet }
+  }, { vms: [] as KubeObject[], vmis: [] as KubeObject[], instanceTypes: {} as Record<string, { cpu: number; memory: string }>, vpcBySubnet: {} as Record<string, string> }, [scope, profile.vpc])
 
   usePolling(reload, 15000)
 
@@ -170,6 +176,7 @@ export function InstanceListPage() {
           node: str(vmiStatus.nodeName),
           shape: vmShape(vm, data.instanceTypes),
           network: vmNetworkLabel(vm),
+          vpc: data.vpcBySubnet[vmNetworkLabel(vm).label] || "",
           groups: vmSecurityGroupRefs(vm, providers),
         }
       })
@@ -272,7 +279,7 @@ export function InstanceListPage() {
                     />
                   </td>
                 </tr>
-              ) : pageRows.map(({ vm, ips, shape, network, status, groups, node }) => {
+              ) : pageRows.map(({ vm, ips, shape, network, vpc, status, groups, node }) => {
                 return (
                   <tr key={key(vm)} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                     <td className="px-3 py-2">
@@ -304,14 +311,14 @@ export function InstanceListPage() {
                       ) : (
                         <span className={cn("text-sm", network.kind === "pod" && "text-muted-foreground")}>{network.label}</span>
                       )}
-                      {profile.vpc && network.kind === "subnet" && <div className="text-xs text-muted-foreground">{t("Kube-OVN subnet")}</div>}
+                      {vpc && <div className="text-xs text-muted-foreground">{t("VPC {vpc}", { vpc })}</div>}
                     </td>
                     {provider && (
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
                           {groups.length ? groups.map((group) => (
-                            <Badge key={`${group.provider}:${group.name}`} variant="outline" title={engineLabel[group.provider]}>
-                              {group.name}{providers.length > 1 && <span className="text-muted-foreground">{group.provider === "cilium" ? "cil" : "ovn"}</span>}
+                            <Badge key={sgRefKey(group)} variant="outline" title={group.global ? t("Cluster wide") : engineLabel[group.provider]}>
+                              {group.name}
                             </Badge>
                           )) : <span className="text-sm text-muted-foreground">-</span>}
                         </div>
@@ -463,6 +470,9 @@ export function CreateInstancePage() {
     vpc: "",
     subnet: "",
     fixedIp: "",
+    reservedIp: "",
+    bandwidth: { ingress: "", egress: "" },
+    extraNics: [],
     binding: "masquerade",
     sgEngine: null,
     securityGroups: [],
@@ -471,19 +481,23 @@ export function CreateInstancePage() {
     sshKey: "",
   }))
   const set = (patch: Partial<WizardState>) => setState((current) => ({ ...current, ...patch }))
+  const [ipMode, setIpMode] = useState<"auto" | "fixed" | "reserved">("auto")
   const aclProvider = state.sgEngine && engines.includes(state.sgEngine) ? state.sgEngine : defaultEngine
 
   const { data: catalog, loading: catalogLoading } = useAsync(async () => {
-    const [instanceTypes, dataSources, storageClasses, vpcs, subnets, pvcs] = await Promise.all([
+    const [instanceTypes, dataSources, storageClasses, vpcs, subnets, pvcs, vips, vms] = await Promise.all([
       listItems("/apis/instancetype.kubevirt.io/v1beta1/virtualmachineclusterinstancetypes"),
       listItems("/apis/cdi.kubevirt.io/v1beta1/datasources"),
       listItems("/apis/storage.k8s.io/v1/storageclasses"),
       profile.vpc ? listItems("/apis/kubeovn.io/v1/vpcs") : Promise.resolve([]),
-      profile.vpc ? listItems("/apis/kubeovn.io/v1/subnets") : Promise.resolve([]),
+      profile.kubeOvnInstalled ? listItems("/apis/kubeovn.io/v1/subnets") : Promise.resolve([]),
       listItems(`/api/v1/namespaces/${state.namespace}/persistentvolumeclaims`),
+      profile.vpc ? listItems("/apis/kubeovn.io/v1/vips") : Promise.resolve([]),
+      profile.vpc ? listItems(`${VM_API}/virtualmachines`) : Promise.resolve([]),
     ])
-    return { instanceTypes, dataSources, storageClasses, vpcs, subnets, pvcs }
-  }, { instanceTypes: [] as KubeObject[], dataSources: [] as KubeObject[], storageClasses: [] as KubeObject[], vpcs: [] as KubeObject[], subnets: [] as KubeObject[], pvcs: [] as KubeObject[] }, [profile.vpc, state.namespace])
+    const networks = await listAttachableNetworks(subnets)
+    return { instanceTypes, dataSources, storageClasses, vpcs, subnets, pvcs, vips, vms, networks }
+  }, { instanceTypes: [] as KubeObject[], dataSources: [] as KubeObject[], storageClasses: [] as KubeObject[], vpcs: [] as KubeObject[], subnets: [] as KubeObject[], pvcs: [] as KubeObject[], vips: [] as KubeObject[], vms: [] as KubeObject[], networks: [] as AttachableNetwork[] }, [profile.vpc, profile.kubeOvnInstalled, state.namespace])
 
   const { data: securityGroups } = useAsync(
     async () => aclProvider ? (await listSecurityGroups(aclProvider, state.namespace)).filter((sg) => sg.managed) : [],
@@ -516,6 +530,14 @@ export function CreateInstancePage() {
   const vpcSubnets = catalog.subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === state.vpc && !["join"].includes(subnet.metadata.name))
   const selectedSubnet = catalog.subnets.find((subnet) => subnet.metadata.name === state.subnet)
   const subnetCidr = ipv4Cidr(str(asRecord(selectedSubnet?.spec).cidrBlock))
+  // Reserved IPs of the chosen subnet that this namespace may use and no other instance holds.
+  const usedVips = new Set(catalog.vms.map((item) => str(asRecord(asRecord(asRecord(asRecord(item.spec).template).metadata).annotations)[kubeOvnAnnotations.vip])).filter(Boolean))
+  const freeVips = catalog.vips.filter((vip) => {
+    const spec = asRecord(vip.spec)
+    return str(spec.subnet) === state.subnet && (!str(spec.namespace) || str(spec.namespace) === state.namespace) && !str(spec.type) && !usedVips.has(vip.metadata.name)
+  })
+  const vipAddress = (vip?: KubeObject) => str(asRecord(vip?.status).v4ip) || str(asRecord(vip?.spec).v4ip)
+
   const defaultStorageClass = catalog.storageClasses.find((sc) => sc.metadata.annotations?.["storageclass.kubernetes.io/is-default-class"] === "true")?.metadata.name
   const vm = useMemo(() => buildVirtualMachine({ ...state, sgEngine: aclProvider }, profile.vpc), [state, aclProvider, profile.vpc])
 
@@ -534,8 +556,12 @@ export function CreateInstancePage() {
   if (!problems.image && state.dataDisks.some((size) => !isQuantity(size))) problems.image = t("Data disk sizes must be quantities such as 50Gi.")
   if (profile.vpc && !state.subnet) problems.network = t("Choose a subnet.")
   else if (profile.vpc && catalog.vpcs.length > 0 && !usableVpcs.some((vpc) => vpc.metadata.name === state.vpc)) problems.network = t("VPC {vpc} does not allow namespace {namespace}.", { vpc: state.vpc, namespace: state.namespace })
+  else if (profile.vpc && ipMode === "reserved" && !state.reservedIp) problems.network = t("Choose a reserved IP.")
+  else if (profile.vpc && ipMode === "fixed" && !state.fixedIp.trim()) problems.network = t("Enter a private IP.")
   else if (profile.vpc && state.fixedIp.trim() && subnetCidr && !cidrContains(subnetCidr, state.fixedIp)) problems.network = t("{ip} is not inside {cidr}.", { ip: state.fixedIp.trim(), cidr: subnetCidr })
   else if (profile.vpc && state.fixedIp.trim() && state.fixedIp.trim() === str(asRecord(selectedSubnet?.spec).gateway)) problems.network = t("The private IP cannot be the subnet gateway.")
+  if (!problems.network && [state.bandwidth.ingress, state.bandwidth.egress].some((value) => bandwidthProblem(value))) problems.network = t("Bandwidth must be a whole number of Mbit/s, or empty for unlimited.")
+  if (!problems.network && state.extraNics.some((nic) => !nic.network.value)) problems.network = t("Choose a network for each extra interface.")
   if (!state.password && !state.sshKey.trim()) problems.access = t("Set a password or an SSH key so you can log in.")
 
   const stepIndex = steps.findIndex((item) => item.id === step)
@@ -573,9 +599,11 @@ export function CreateInstancePage() {
     },
     { label: t("System disk"), value: state.imageSource === "containerdisk" ? "Ephemeral" : t("{size} on {storageClass}", { size: state.rootSize, storageClass: state.storageClass || defaultStorageClass || t("default class") }) },
     { label: t("Data disks"), value: state.dataDisks.length ? state.dataDisks.join(", ") : "None" },
-    { label: t("Network"), value: profile.vpc ? `${state.vpc} / ${state.subnet || "N/A"}${state.fixedIp ? ` (${state.fixedIp})` : ""}` : "Pod network" },
+    { label: t("Network"), value: profile.vpc ? `${state.vpc} / ${state.subnet || "N/A"}${state.reservedIp ? ` (${vipAddress(catalog.vips.find((vip) => vip.metadata.name === state.reservedIp)) || state.reservedIp})` : state.fixedIp ? ` (${state.fixedIp})` : ""}` : "Pod network" },
+    ...(state.extraNics.length ? [{ label: t("Extra interfaces"), value: state.extraNics.map((nic) => nic.network.subnet || nic.network.nad).join(", ") }] : []),
+    ...(profile.vpc && (state.bandwidth.ingress || state.bandwidth.egress) ? [{ label: t("Bandwidth"), value: t("In {ingress} / out {egress}", { ingress: bandwidthText(state.bandwidth.ingress) || t("Unlimited"), egress: bandwidthText(state.bandwidth.egress) || t("Unlimited") }) }] : []),
     { label: t("Interface binding"), value: state.binding },
-    { label: t("Security groups"), value: aclProvider ? `${state.securityGroups.join(", ") || t("None")}${engines.length > 1 ? ` (${engineLabel[aclProvider]})` : ""}` : t("Not available") },
+    { label: t("Security groups"), value: aclProvider ? `${state.securityGroups.map((key) => parseSgSelection(key).name).join(", ") || t("None")}${engines.length > 1 ? ` (${engineLabel[aclProvider]})` : ""}` : t("Not available") },
     { label: t("Login"), value: `${state.username || t("default user")}${state.password ? ` / ${t("password")}` : ""}${state.sshKey.trim() ? ` / ${t("SSH key")}` : ""}` },
     { label: t("Power on"), value: state.startAfterCreate ? "After creation" : "Stay stopped" },
   ]
@@ -615,7 +643,7 @@ export function CreateInstancePage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FieldRow label={t("Name")} hint={t("Lowercase letters, digits and dashes.")}><Input value={state.name} onChange={(e) => set({ name: e.target.value.toLowerCase() })} /></FieldRow>
                   <FieldRow label={t("Namespace (project)")}>
-                    <NativeSelect value={state.namespace} onChange={(e) => set({ namespace: e.target.value, securityGroups: [], pvcName: "" })}>
+                    <NativeSelect value={state.namespace} onChange={(e) => set({ namespace: e.target.value, securityGroups: [], pvcName: "", reservedIp: "" })}>
                       {Array.from(new Set([state.namespace, ...namespaces])).map((ns) => <option key={ns} value={ns}>{ns}</option>)}
                     </NativeSelect>
                   </FieldRow>
@@ -716,12 +744,12 @@ export function CreateInstancePage() {
 
           {step === "network" && (
             <>
-              <StepSection title={t("Network")} description={profile.vpc ? t("Kube-OVN") : t("Pod network")}>
+              <StepSection title={t("Network")} description={profile.vpc ? t("VPC network") : t("Pod network")}>
                 {profile.vpc ? (
                   <>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <FieldRow label={t("VPC")}>
-                        <NativeSelect value={state.vpc} onChange={(e) => set({ vpc: e.target.value, subnet: "", fixedIp: "" })}>
+                        <NativeSelect value={state.vpc} onChange={(e) => set({ vpc: e.target.value, subnet: "", fixedIp: "", reservedIp: "" })}>
                           {catalog.vpcs.map((vpc) => (
                             <option key={vpc.metadata.name} value={vpc.metadata.name} disabled={!vpcAllowsNamespace(vpc)}>
                               {vpc.metadata.name}{vpcAllowsNamespace(vpc) ? "" : t(" (not open to {namespace})", { namespace: state.namespace })}
@@ -729,7 +757,6 @@ export function CreateInstancePage() {
                           ))}
                         </NativeSelect>
                       </FieldRow>
-                      <FieldRow label={t("Private IP")} hint={subnetCidr ? t("Inside {cidr}. Leave empty to allocate automatically.", { cidr: subnetCidr }) : t("Leave empty to allocate automatically.")}><Input value={state.fixedIp} onChange={(e) => set({ fixedIp: e.target.value })} placeholder={t("Auto")} /></FieldRow>
                     </div>
                     <div className="space-y-2">
                       <div className="text-sm font-medium">{t("Subnet")}</div>
@@ -742,7 +769,7 @@ export function CreateInstancePage() {
                             <ChoiceCard
                               key={subnet.metadata.name}
                               selected={state.subnet === subnet.metadata.name}
-                              onClick={() => set({ subnet: subnet.metadata.name, fixedIp: subnet.metadata.name === state.subnet ? state.fixedIp : "" })}
+                              onClick={() => set({ subnet: subnet.metadata.name, fixedIp: subnet.metadata.name === state.subnet ? state.fixedIp : "", reservedIp: subnet.metadata.name === state.subnet ? state.reservedIp : "" })}
                               title={<span className="flex items-center gap-2">{subnet.metadata.name}<span className="font-mono text-xs font-normal text-muted-foreground">{str(asRecord(subnet.spec).cidrBlock)}</span></span>}
                               description={t("{v0} IPs available{v1}", { v0: Math.max(0, usage.total - usage.used), v1: namespacesBound.length ? t(" / bound to {namespaces}", { namespaces: namespacesBound.join(", ") }) : "" })}
                             />
@@ -750,9 +777,32 @@ export function CreateInstancePage() {
                         })}
                       </div>
                     </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">{t("Private IP")}</div>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <ChoiceCard selected={ipMode === "auto"} onClick={() => { setIpMode("auto"); set({ fixedIp: "", reservedIp: "" }) }} title={t("Automatic")} description={t("Allocated from the subnet")} />
+                        <ChoiceCard selected={ipMode === "fixed"} onClick={() => { setIpMode("fixed"); set({ reservedIp: "" }) }} title={t("Specify")} description={subnetCidr ? t("An address inside {cidr}", { cidr: subnetCidr }) : t("An address in the subnet")} />
+                        <ChoiceCard selected={ipMode === "reserved"} onClick={() => { setIpMode("reserved"); set({ fixedIp: "" }) }} title={t("Reserved IP")} description={t("{count} free in this subnet", { count: freeVips.length })} />
+                      </div>
+                      {ipMode === "fixed" && <Input className="max-w-xs font-mono" value={state.fixedIp} onChange={(e) => set({ fixedIp: e.target.value })} placeholder={subnetCidr ? subnetCidr.split("/")[0] : "10.0.0.10"} aria-label={t("Private IP")} />}
+                      {ipMode === "reserved" && (
+                        freeVips.length ? (
+                          <NativeSelect className="max-w-xs" value={state.reservedIp} onChange={(e) => set({ reservedIp: e.target.value })} aria-label={t("Reserved IP")}>
+                            <option value="">{t("Choose a reserved IP")}</option>
+                            {freeVips.map((vip) => <option key={vip.metadata.name} value={vip.metadata.name}>{vipAddress(vip) || t("pending")} ({vip.metadata.name})</option>)}
+                          </NativeSelect>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">{t("No free reserved IP in this subnet.")} <Link to="/vpc/reserved-ips" className="text-primary hover:underline">{t("Reserve one")}</Link></p>
+                        )
+                      )}
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <FieldRow label={t("Inbound bandwidth (Mbit/s)")}><Input inputMode="numeric" value={state.bandwidth.ingress} onChange={(e) => set({ bandwidth: { ...state.bandwidth, ingress: e.target.value } })} placeholder={t("Unlimited")} /></FieldRow>
+                      <FieldRow label={t("Outbound bandwidth (Mbit/s)")}><Input inputMode="numeric" value={state.bandwidth.egress} onChange={(e) => set({ bandwidth: { ...state.bandwidth, egress: e.target.value } })} placeholder={t("Unlimited")} /></FieldRow>
+                    </div>
                   </>
                 ) : (
-                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">{t("The instance gets an address from the pod CIDR.")} {profile.kubeOvnInstalled ? t("Kube-OVN is installed: switch the network stack in Settings to choose VPCs and subnets.") : t("Install Kube-OVN to place instances in VPCs and subnets.")}</div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">{t("The instance gets an address from the pod CIDR.")} {profile.kubeOvnInstalled ? t("VPC networking can be turned on under Settings, Networking.") : t("Install Kube-OVN to place instances in VPCs and subnets.")}</div>
                 )}
                 <div className="space-y-2">
                   <div className="text-sm font-medium">{t("Interface binding")}</div>
@@ -762,7 +812,34 @@ export function CreateInstancePage() {
                   </div>
                 </div>
               </StepSection>
-              <StepSection title={t("Security groups")} description={aclProvider === "kube-ovn" ? t("Enforced by Kube-OVN port ACLs.") : aclProvider === "cilium" ? t("Enforced by Cilium. Groups from namespace {namespace}.", { namespace: state.namespace }) : t("Security groups require Kube-OVN or Cilium.")}>
+              <StepSection title={t("Extra network interfaces")} description={t("Multus attachments, bridge binding")}>
+                {state.extraNics.map((nic, index) => (
+                  <div key={nic.name} className="flex items-center gap-2">
+                    <span className="w-14 font-mono text-sm text-muted-foreground">{nic.name}</span>
+                    <NativeSelect
+                      value={nic.network.value}
+                      onChange={(e) => {
+                        const network = catalog.networks.find((item) => item.value === e.target.value)
+                        if (network) set({ extraNics: state.extraNics.map((item, i) => i === index ? { ...item, network } : item) })
+                      }}
+                      aria-label={t("Network of {nic}", { nic: nic.name })}
+                    >
+                      {catalog.networks.map((network) => (
+                        <option key={network.value} value={network.value}>
+                          {network.subnet ? t("Subnet {subnet} ({cidr})", { subnet: network.subnet, cidr: network.cidr }) : `${network.nad} (${network.cniType})`}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                    <Button size="icon" variant="ghost" aria-label={t("Remove interface")} onClick={() => set({ extraNics: state.extraNics.filter((_, i) => i !== index) })}><Trash2 className="size-4 text-muted-foreground" /></Button>
+                  </div>
+                ))}
+                {catalog.networks.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("No attachable networks.")} <Link to="/networks/kubernetes/nads" className="text-primary hover:underline">{t("Multus networks")}</Link></p>
+                ) : (
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => set({ extraNics: [...state.extraNics, { name: nextNicName(state.extraNics.map((nic) => nic.name)), network: catalog.networks[0] }] })}><Plus className="size-4" />{t("Add interface")}</Button>
+                )}
+              </StepSection>
+              <StepSection title={t("Security groups")} description={aclProvider === "cilium" ? t("Groups from namespace {namespace} and cluster-wide groups.", { namespace: state.namespace }) : undefined}>
                 {aclProvider ? (
                   <>
                     {engines.length > 1 && (
@@ -776,7 +853,7 @@ export function CreateInstancePage() {
                               onClick={() => set({ sgEngine: engine, securityGroups: [] })}
                               icon={ShieldCheck}
                               title={<span className="flex items-center gap-2">{engineLabel[engine]}{engine === defaultEngine && <Badge variant="outline">{t("Default")}</Badge>}</span>}
-                              description={engine === "cilium" ? t("CiliumNetworkPolicy, per namespace") : t("Kube-OVN SecurityGroup, cluster wide")}
+                              description={engine === "cilium" ? t("Deny rules and address groups") : t("Port ACLs with rule priorities")}
                             />
                           ))}
                         </div>
@@ -784,15 +861,18 @@ export function CreateInstancePage() {
                     )}
                     {securityGroups.length === 0 && <p className="text-sm text-muted-foreground">{t("No security groups yet.")} <Link to="/vpc/security-groups" className="text-primary hover:underline">{t("Create one")}</Link>{t(", or continue without.")}</p>}
                     <div className="grid gap-2 sm:grid-cols-2">
-                      {securityGroups.map((sg) => (
+                      {securityGroups.map((sg) => {
+                        const key = sgSelectionKey(sg)
+                        return (
                         <ChoiceCard
-                          key={sg.name}
-                          selected={state.securityGroups.includes(sg.name)}
-                          onClick={() => set({ securityGroups: state.securityGroups.includes(sg.name) ? state.securityGroups.filter((item) => item !== sg.name) : [...state.securityGroups, sg.name] })}
-                          title={sg.name}
+                          key={key}
+                          selected={state.securityGroups.includes(key)}
+                          onClick={() => set({ securityGroups: state.securityGroups.includes(key) ? state.securityGroups.filter((item) => item !== key) : [...state.securityGroups, key] })}
+                          title={<span className="flex items-center gap-2">{sg.name}{isGlobalGroup(sg) && <Badge variant="outline">{t("Cluster wide")}</Badge>}</span>}
                           description={sg.description || t("{inbound} inbound / {outbound} outbound rules", { inbound: sg.rules.filter((rule) => rule.direction === "ingress").length, outbound: sg.rules.filter((rule) => rule.direction === "egress").length })}
                         />
-                      ))}
+                        )
+                      })}
                     </div>
                   </>
                 ) : (

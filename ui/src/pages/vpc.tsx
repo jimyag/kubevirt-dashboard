@@ -48,6 +48,8 @@ import {
 } from "@/lib/kube"
 import { cidrContains, cidrsOverlap, ipv4Cidr, isDnsLabel, parseIPv4Cidr } from "@/lib/validate"
 import { t } from "@/lib/i18n"
+import { PeeringPanel, RouteTablePanel } from "@/components/vpc-routing"
+import { SubnetIpPools } from "@/components/ip-pools"
 
 const OVN = "/apis/kubeovn.io/v1"
 const VM_API = "/apis/kubevirt.io/v1"
@@ -77,7 +79,7 @@ export function KubeOvnMissing() {
         <EmptyState
           icon={Network}
           title={t("VPC networking is not enabled")}
-          description={profile.kubeOvnInstalled ? t("The selected network stack does not use VPCs.") : t("Requires Kube-OVN.")}
+          description={profile.kubeOvnInstalled ? t("VPC networking is turned off in Settings.") : t("Requires Kube-OVN.")}
           action={<Button asChild variant="outline" size="sm"><Link to="/settings">{t("Open settings")}</Link></Button>}
         />
     </div>
@@ -155,7 +157,7 @@ export function CreateSubnetDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("Create subnet")}</DialogTitle>
-          <DialogDescription>{t("A Kube-OVN logical switch inside a VPC. Instances placed in this subnet get an address from its CIDR.")}</DialogDescription>
+          <DialogDescription>{t("Instances placed in this subnet get an address from its CIDR.")}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 sm:grid-cols-2">
           <FieldRow label={t("Name")}><Input value={values.name} onChange={(e) => set({ name: e.target.value })} placeholder="subnet-web" /></FieldRow>
@@ -167,7 +169,7 @@ export function CreateSubnetDialog({
           <FieldRow label={t("IPv4 CIDR")} hint={t("Use a comma to add an IPv6 CIDR for dual stack.")}><Input value={values.cidrBlock} onChange={(e) => set({ cidrBlock: e.target.value })} /></FieldRow>
           <FieldRow label={t("Gateway")} hint={t("Defaults to the first address.")}><Input value={values.gateway} onChange={(e) => set({ gateway: e.target.value })} placeholder="auto" /></FieldRow>
           <FieldRow label={t("Bound namespaces")} hint={t("Pods in these namespaces default to this subnet.")}><Input value={values.namespaces} onChange={(e) => set({ namespaces: e.target.value })} placeholder={t("ns-a, ns-b")} /></FieldRow>
-          <FieldRow label={t("Reserved IPs")}><Input value={values.excludeIps} onChange={(e) => set({ excludeIps: e.target.value })} placeholder="10.100.0.1..10.100.0.10" /></FieldRow>
+          <FieldRow label={t("Excluded IPs")} hint={t("Never allocated, e.g. addresses used outside the cluster.")}><Input value={values.excludeIps} onChange={(e) => set({ excludeIps: e.target.value })} placeholder="10.100.0.1..10.100.0.10" /></FieldRow>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {defaultVpcSelected ? (
@@ -383,15 +385,16 @@ export function VpcDetailPage() {
   const { name = "" } = useParams()
   const [subnetOpen, setSubnetOpen] = useState(false)
   const { data, loading, reload } = useAsync(async () => {
-    const [vpcRes, subnets, natGateways, vms] = await Promise.all([
+    const [vpcRes, allSubnets, natGateways, vms, vpcs] = await Promise.all([
       apiFetch(`${OVN}/vpcs/${name}`),
       listItems(`${OVN}/subnets`),
       listItems(`${OVN}/vpc-nat-gateways`),
       listItems(`${VM_API}/virtualmachines`),
+      listItems(`${OVN}/vpcs`),
     ])
     const vpc = vpcRes.ok ? await vpcRes.json() as KubeObject : null
-    return { vpc, subnets: subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === name), natGateways: natGateways.filter((gw) => str(asRecord(gw.spec).vpc) === name), vms }
-  }, { vpc: null as KubeObject | null, subnets: [] as KubeObject[], natGateways: [] as KubeObject[], vms: [] as KubeObject[] }, [name])
+    return { vpc, allSubnets, vpcs, subnets: allSubnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === name), natGateways: natGateways.filter((gw) => str(asRecord(gw.spec).vpc) === name), vms }
+  }, { vpc: null as KubeObject | null, allSubnets: [] as KubeObject[], vpcs: [] as KubeObject[], subnets: [] as KubeObject[], natGateways: [] as KubeObject[], vms: [] as KubeObject[] }, [name])
 
   if (loading && !data.vpc) return <LoadingState />
   if (!data.vpc) return <EmptyState icon={Network} title={t("VPC not found")} action={<Button asChild variant="outline" size="sm"><Link to="/vpc/vpcs">{t("Back to VPCs")}</Link></Button>} />
@@ -399,7 +402,6 @@ export function VpcDetailPage() {
   const spec = asRecord(data.vpc.spec)
   const subnetNames = new Set(data.subnets.map((subnet) => subnet.metadata.name))
   const instances = data.vms.filter((vm) => subnetNames.has(vmSubnet(vm)))
-  const staticRoutes = asList(spec.staticRoutes)
 
   return (
     <div className="space-y-6">
@@ -435,22 +437,16 @@ export function VpcDetailPage() {
         <Panel title={t("NAT gateways")} bodyClassName="space-y-2">
             {data.natGateways.map((gw) => (
               <div key={gw.metadata.name} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
-                <Link to={`/networks/kube-ovn/vpc-nat-gateways/_cluster/${gw.metadata.name}`} className="font-medium hover:text-primary transition-colors">{gw.metadata.name}</Link>
+                <Link to={`/vpc/nat-gateways/${gw.metadata.name}`} className="font-medium hover:text-primary transition-colors">{gw.metadata.name}</Link>
                 <span className="font-mono text-xs text-muted-foreground">{str(asRecord(gw.spec).subnet)} / {str(asRecord(gw.spec).lanIp, "auto")}</span>
               </div>
             ))}
             {data.natGateways.length === 0 && <p className="text-sm text-muted-foreground">{t("No NAT gateways.")} <Link to="/vpc/nat-gateways" className="text-primary hover:underline">{t("Create one")}</Link> {t("to give instances internet access or elastic IPs.")}</p>}
           </Panel>
-        <Panel title={t("Route table")} bodyClassName="space-y-2">
-            {staticRoutes.map((route, index) => (
-              <div key={index} className="flex items-center justify-between gap-3 rounded-lg border p-3 font-mono text-xs">
-                <span>{str(route.cidr)}</span>
-                <span className="text-muted-foreground">via {str(route.nextHopIP)} ({str(route.policy, "policyDst")})</span>
-              </div>
-            ))}
-            {staticRoutes.length === 0 && <p className="text-sm text-muted-foreground">{t("No static routes. Subnet routes are managed automatically.")}</p>}
-          </Panel>
+        <PeeringPanel vpc={data.vpc} vpcs={data.vpcs} subnets={data.allSubnets} onSaved={reload} />
       </div>
+
+      <RouteTablePanel vpc={data.vpc} onSaved={reload} />
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold">{t("Instances in this VPC")}</h2>
@@ -598,14 +594,15 @@ export function SubnetDetailPage() {
   const [confirmSave, setConfirmSave] = useState(false)
   const [error, setError] = useState("")
   const { data, loading, reload } = useAsync(async () => {
-    const [subnetRes, ips, vms] = await Promise.all([
+    const [subnetRes, ips, vms, pools] = await Promise.all([
       apiFetch(`${OVN}/subnets/${name}`),
       listItems(`${OVN}/ips`),
       listItems(`${VM_API}/virtualmachines`),
+      listItems(`${OVN}/ippools`).catch(() => [] as KubeObject[]),
     ])
     const subnet = subnetRes.ok ? await subnetRes.json() as KubeObject : null
-    return { subnet, ips: ips.filter((ip) => str(asRecord(ip.spec).subnet) === name), vms: vms.filter((vm) => vmSubnet(vm) === name) }
-  }, { subnet: null as KubeObject | null, ips: [] as KubeObject[], vms: [] as KubeObject[] }, [name])
+    return { subnet, ips: ips.filter((ip) => str(asRecord(ip.spec).subnet) === name), vms: vms.filter((vm) => vmSubnet(vm) === name), pools: pools.filter((pool) => str(asRecord(pool.spec).subnet) === name) }
+  }, { subnet: null as KubeObject | null, ips: [] as KubeObject[], vms: [] as KubeObject[], pools: [] as KubeObject[] }, [name])
 
   if (loading && !data.subnet) return <LoadingState />
   if (!data.subnet) return <EmptyState icon={Split} title={t("Subnet not found")} action={<Button asChild variant="outline" size="sm"><Link to="/vpc/subnets">{t("Back to subnets")}</Link></Button>} />
@@ -650,7 +647,7 @@ export function SubnetDetailPage() {
             { label: t("Bound namespaces"), value: (spec.namespaces as string[] | undefined)?.join(", ") || "None" },
             { label: t("NAT outgoing"), value: spec.natOutgoing ? "Enabled" : "Disabled" },
             { label: t("Private"), value: spec.private ? "Yes" : "No" },
-            { label: t("Reserved IPs"), value: (spec.excludeIps as string[] | undefined)?.join(", ") || "None" },
+            { label: t("Excluded IPs"), value: (spec.excludeIps as string[] | undefined)?.join(", ") || "None" },
             { label: t("Provider"), value: str(spec.provider, "ovn") },
           ]} />
         </Panel>
@@ -722,6 +719,8 @@ export function SubnetDetailPage() {
         confirmLabel={t("Save rules")}
         onConfirm={save}
       />
+
+      <SubnetIpPools subnet={data.subnet} pools={data.pools} onChanged={reload} />
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold">{t("Allocated addresses")}</h2>

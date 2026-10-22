@@ -18,7 +18,7 @@ import {
   useNetworkProfile,
   type KubeObject,
 } from "@/lib/kube"
-import { engineLabel, listAllSecurityGroups, useSgProvider } from "@/lib/security-groups"
+import { listAllSecurityGroups, useSgProvider } from "@/lib/security-groups"
 import { vmStatus, vmStatusGroup } from "@/lib/instances"
 import { toneClasses, type SectionTone } from "@/lib/navigation"
 import { t } from "@/lib/i18n"
@@ -213,7 +213,7 @@ export function OverviewPage() {
             ))}
           </Panel>
 
-          <Panel title={t("Network")} description={t(profile.label)} actions={<Link to="/settings" className="text-xs text-muted-foreground hover:text-foreground">{t("Change")}</Link>} bodyClassName="p-0 divide-y">
+          <Panel title={t("Network")} bodyClassName="p-0 divide-y">
             {profile.vpc && (
               <>
                 <CountRow label={t("VPCs")} value={data.vpcs.length} to="/vpc/vpcs" />
@@ -222,7 +222,7 @@ export function OverviewPage() {
               </>
             )}
             {providers.length > 0 ? (
-              <CountRow label={t("Security groups ({v0})", { v0: providers.map((engine) => engineLabel[engine]).join(", ") })} value={data.securityGroups.length} to="/vpc/security-groups" />
+              <CountRow label={t("Security groups")} value={data.securityGroups.length} to="/vpc/security-groups" />
             ) : (
               <CountRow label={t("Network policies")} value="" to="/networks/kubernetes/network-policies" />
             )}

@@ -106,7 +106,7 @@ function PrometheusCharts({ config, namespace, name }: { config: PrometheusConfi
         setError("")
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : t("Prometheus query failed"))
+        if (!cancelled) setError(err instanceof Error ? err.message : t("Metrics query failed"))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -186,7 +186,7 @@ function LiveCharts({ namespace, name }: { namespace: string; name: string }) {
   usePolling(sample, 10000)
 
   if (available === false) {
-    return <EmptyState icon={Activity} title={t("No metrics source")} description={t("Install metrics-server for live usage, or configure Prometheus in Settings for history.")} />
+    return <EmptyState icon={Activity} title={t("No metrics source")} description={t("Install metrics-server for live usage, or set up monitoring in Settings for history.")} />
   }
   const latest = samples.length ? samples[samples.length - 1] : undefined
   return (
@@ -202,7 +202,7 @@ export function VmMonitoring({ namespace, name, running }: { namespace: string; 
   if (config) return <PrometheusCharts config={config} namespace={namespace} name={name} />
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t("Live samples from metrics-server, kept while this page is open.")} <Link to="/settings" className="text-primary hover:underline">{t("Configure Prometheus")}</Link> {t("for history, network and disk charts.")}
+      <p className="text-xs text-muted-foreground">{t("Live samples from metrics-server, kept while this page is open.")} <Link to="/settings" className="text-primary hover:underline">{t("Set up monitoring")}</Link> {t("for history, network and disk charts.")}
       </p>
       {running ? <LiveCharts namespace={namespace} name={name} /> : <EmptyState icon={Activity} title={t("Instance is not running")} />}
     </div>
