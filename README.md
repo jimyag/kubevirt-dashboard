@@ -13,6 +13,7 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 - **NAT**: elastic IPs, SNAT, DNAT and floating IPs for both Kube-OVN NAT models: VPC NAT gateways (`IptablesEIP`, `Iptables*Rule`) and OVN native NAT (`OvnEip`, `OvnSnatRule`, `OvnDnatRule`, `OvnFip`). Each NAT gateway has a detail page listing its elastic IPs and the SNAT, DNAT and floating IP rules on them. An instance's network tab shows its elastic IPs and binds a floating IP or adds port forwarding directly.
 - **VPC networking** (Kube-OVN): static and policy routes, VPC peering, reserved private IPs (`Vip`), IP pools per subnet, per-instance bandwidth limits, and extra NICs on Kube-OVN subnets or other networks through Multus.
 - **Cilium security groups**: per namespace (`CiliumNetworkPolicy`) or cluster wide (`CiliumClusterwideNetworkPolicy`), with address groups (`CiliumCIDRGroup`) as rule sources and destinations.
+- **Helm**: Helm releases under **Resource Catalog → Helm Releases**: list, values, chart defaults, rendered manifest, notes and history; edit values with a diff review, change the chart version, roll back, install from any HTTP or OCI chart repository, and uninstall. Uses the Helm SDK in the dashboard binary, storing releases the same way as the `helm` CLI.
 - **Manifests**: `kubectl get -o yaml` output with highlighting, search and folding; edits are saved after a diff review and rejected if someone else changed the object meanwhile.
 - **Events and monitoring**: a cluster-wide event browser, events on every resource detail page, live CPU and memory from metrics-server, and VM history charts from any Prometheus-compatible backend (Prometheus, VictoriaMetrics, Thanos) when one is configured.
 - **Languages**: English and Simplified Chinese, switched from the header or Settings; the browser language is used by default.
@@ -49,6 +50,7 @@ Attaching or detaching a security group updates the VM template and the running 
 ## Monitoring
 
 - **metrics-server** (`metrics.k8s.io`): when installed, host CPU and memory usage appear on the overview and live usage on instance pages.
+- **Deploy**: **Settings → Monitoring** deploys a backend with Helm. Choose Prometheus or VictoriaMetrics, and an operator stack (kube-prometheus-stack, victoria-metrics-k8s-stack) or a single server (prometheus, victoria-metrics-single). The recommended values already scrape KubeVirt's `kubevirt-prometheus-metrics` service and can be edited on the page before deploying; afterwards the release can be edited, upgraded or removed from the same page or from Helm Releases, and **Use for metrics** points the console at it.
 - **History** (Prometheus API): in **Settings → Monitoring**, **Detect in cluster** finds the query services that kube-prometheus-stack, the prometheus chart, the VictoriaMetrics operator (`VMSingle`, `VMCluster` vmselect) and the victoria-metrics-single chart create, or enter namespace, service, port and an optional path prefix (`/select/0/prometheus` for a VictoriaMetrics cluster). Queries go through the Kubernetes API service proxy, so the backend does not need to be exposed outside the cluster. VM charts use the metrics KubeVirt exports (`kubevirt_vmi_*`) and match the VMI namespace whether the scrape kept it as `namespace` or renamed it to `exported_namespace`.
 - Verified on a k3s cluster with kube-prometheus-stack (Prometheus 3.7), the VictoriaMetrics operator with a `VMSingle`, and the victoria-metrics-single chart (VictoriaMetrics 1.128), each installed from its chart.
 
@@ -71,6 +73,7 @@ The dashboard has **no authentication of its own**. Every request runs with the 
 - Prefer `kubectl port-forward` or binding to `127.0.0.1`.
 - Do not apply `manifest/nodeport.yaml` or `manifest/ingress.yaml` without putting an authenticating proxy (for example oauth2-proxy) in front, and restricting who can reach it.
 - Console, VNC and pod shell WebSockets only accept pages served by the dashboard itself (same origin), so other sites open in the same browser cannot use them. Behind a proxy that rewrites the Host header, list the public origin with `--allowed-origin`.
+- The Helm pages install, upgrade and uninstall charts from any repository with the same credentials, so a chart can create any resource the dashboard can. Releases are stored as Secrets in their namespace, like the `helm` CLI; chart sources the dashboard used are kept in the `kubevirt-dashboard-helm-sources` ConfigMap of each namespace.
 - Narrow the ClusterRole in `manifest/deploy.yaml` if you only need part of the console.
 
 ## Installation

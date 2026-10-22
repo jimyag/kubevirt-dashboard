@@ -113,7 +113,6 @@ export function SettingsPage() {
 
       <NetworkingSettings />
 
-      <MonitoringSettings />
 
       <Panel title={t("Installed components")}>
           <div className="grid gap-2 md:grid-cols-2">
@@ -143,13 +142,15 @@ export function SettingsPage() {
 }
 
 const catalog = [
+  { to: "/catalog/helm", title: "Helm releases", description: "Charts installed with Helm: values, manifests, history" },
   { to: "/kubevirt", title: "KubeVirt", description: "VMs, VMIs, pools, CDI, instance types, snapshots, migrations" },
   { to: "/storage", title: "Storage", description: "StorageClasses, PV/PVC, CSI, volume snapshots" },
   { to: "/networks", title: "Networks", description: "Services, Gateway API, Multus, Calico, Cilium, Kube-OVN" },
   { to: "/kubernetes", title: "Kubernetes", description: "Workloads, config, RBAC, policy, admission, cluster" },
 ]
 
-function MonitoringSettings() {
+/** Where the dashboard queries metrics from; shown on Settings, Monitoring. */
+export function MonitoringSettings() {
   const saved = usePrometheusConfig()
   const [form, setForm] = useState<PrometheusConfig>(() => saved || { namespace: "monitoring", service: "prometheus-operated", port: "9090", scheme: "http", path: "" })
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
@@ -186,7 +187,7 @@ function MonitoringSettings() {
 
   return (
     <Panel
-      title={t("Monitoring")}
+      title={t("Metrics source")}
       description={t("Any Prometheus-compatible query API: Prometheus, VictoriaMetrics or Thanos. Reached through the Kubernetes API service proxy and stored per cluster in this browser.")}
       bodyClassName="space-y-4"
     >

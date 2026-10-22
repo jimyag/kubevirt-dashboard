@@ -39,6 +39,8 @@ Run the Go binary (`./kubevirt-dashboard --listen 127.0.0.1:11111`) for the dev 
 | `src/lib/filter.ts` | `field:value` list filtering, namespace scoping and paging |
 | `src/lib/polling.ts` | `usePolling`: interval refresh that pauses while the tab is hidden |
 | `src/lib/detail-values.ts`, `src/lib/vm-pages.ts` | Value helpers for detail views; VM types and helpers |
+| `src/pages/helm.tsx`, `src/lib/helm.ts` | Helm releases: list, detail, values editor, history and install; client for `/api/v1/helm` |
+| `src/pages/monitoring-settings.tsx`, `src/lib/monitoring-presets.ts` | Settings → Monitoring: deployed backends, metrics source and Helm deploy presets |
 | `src/lib/nat.ts` | Kube-OVN NAT kinds (VPC NAT gateway and OVN native): columns, forms and specs |
 
 All requests go to the Kubernetes API through the Go backend proxy (`/api`, `/apis`) with the selected context in the `X-Kube-Context` header.

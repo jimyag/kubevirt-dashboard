@@ -1,5 +1,6 @@
 import type { ComponentType } from "react"
 import {
+  Activity,
   ArrowDownToLine,
   ArrowLeftRight,
   ArrowUpFromLine,
@@ -23,6 +24,7 @@ import {
   ListChecks,
   ListTree,
   Network,
+  Package,
   Route,
   Scale,
   Server,
@@ -160,8 +162,24 @@ export const navSections: NavSection[] = [
     label: "Platform",
     tone: "platform",
     items: [
-      { name: "Resource Catalog", path: "/catalog", icon: ListChecks, match: ["/kubernetes", "/kubevirt", "/storage", "/networks"] },
-      { name: "Settings", path: "/settings", icon: Settings },
+      {
+        name: "Resources",
+        path: "",
+        icon: ListChecks,
+        children: [
+          { name: "Resource Catalog", path: "/catalog", icon: ListChecks, match: ["/kubernetes", "/kubevirt", "/storage", "/networks"] },
+          { name: "Helm Releases", path: "/catalog/helm", icon: Package },
+        ],
+      },
+      {
+        name: "Settings",
+        path: "",
+        icon: Settings,
+        children: [
+          { name: "General settings", path: "/settings", icon: Settings },
+          { name: "Monitoring", path: "/settings/monitoring", icon: Activity },
+        ],
+      },
     ],
   },
 ]

@@ -96,9 +96,9 @@ const toneForStatus = (status?: string): Tone => {
   if (!lower) return "neutral"
   // Negative states first: "notready" contains "ready".
   if (["error", "fail", "crash", "false", "unschedulable", "notready", "unavailable", "degraded", "lost"].some((key) => lower.includes(key))) return "danger"
-  if (["running", "succeeded", "ready", "bound", "true", "active", "available", "healthy", "installed"].some((key) => lower.includes(key))) return "success"
+  if (["running", "succeeded", "ready", "bound", "true", "active", "available", "healthy", "installed", "deployed"].some((key) => lower.includes(key))) return "success"
   if (["start", "progress", "migrat", "import", "pending", "provision", "stopping", "terminat", "waiting", "paused", "clon", "cordon"].some((key) => lower.includes(key))) return "warning"
-  if (lower.includes("stopped") || lower.includes("halted")) return "neutral"
+  if (lower.includes("stopped") || lower.includes("halted") || lower.includes("superseded")) return "neutral"
   return "info"
 }
 
