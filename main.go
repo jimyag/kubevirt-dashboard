@@ -40,11 +40,39 @@ var (
 	kubeconfig  string
 	contextName string
 	statusFile  = "vm-statuses.txt"
+
+	// allowedOrigins are extra browser origins (scheme://host[:port]) allowed to open console
+	// and exec WebSockets, for reverse proxies that rewrite the Host header.
+	allowedOrigins []string
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin:  func(r *http.Request) bool { return true },
+	CheckOrigin:  checkOrigin,
 	Subprotocols: []string{"binary"},
+}
+
+// checkOrigin only lets pages served by this dashboard open serial console, VNC and pod exec
+// WebSockets, so another site open in the same browser cannot drive them (cross-site WebSocket
+// hijacking). Requests without an Origin header come from non-browser clients and are allowed.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	for _, allowed := range allowedOrigins {
+		if strings.EqualFold(strings.TrimSuffix(allowed, "/"), origin) {
+			return true
+		}
+	}
+	log.Printf("rejected websocket from origin %q (host %q); use --allowed-origin to allow it", origin, r.Host)
+	return false
 }
 
 var defaultStatuses = []string{
@@ -241,6 +269,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "default namespace (optional)")
 	rootCmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	rootCmd.Flags().StringVar(&contextName, "context", "", "the name of the kubeconfig context to use")
+	rootCmd.Flags().StringSliceVar(&allowedOrigins, "allowed-origin", nil, "extra browser origin allowed to open console WebSockets, e.g. https://dash.example.com (repeatable)")
 }
 
 func main() {

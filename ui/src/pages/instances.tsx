@@ -67,6 +67,7 @@ import { fetchInstanceUsage, formatBytes, useMetricsPoll } from "@/lib/metrics"
 import { cidrContains, ipv4Cidr, isDnsLabel, isQuantity } from "@/lib/validate"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
 import { t } from "@/lib/i18n"
+import { usePolling } from "@/lib/polling"
 
 const VM_API = "/apis/kubevirt.io/v1"
 const SUB_API = "/apis/subresources.kubevirt.io/v1"
@@ -148,12 +149,7 @@ export function InstanceListPage() {
     return { vms, vmis, instanceTypes }
   }, { vms: [] as KubeObject[], vmis: [] as KubeObject[], instanceTypes: {} as Record<string, { cpu: number; memory: string }> }, [scope])
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (!document.hidden) reload()
-    }, 15000)
-    return () => clearInterval(timer)
-  }, [reload])
+  usePolling(reload, 15000)
 
   // Live CPU and memory of virt-launcher pods; null when metrics-server is not installed.
   const usage = useMetricsPoll(() => fetchInstanceUsage(scope), [scope])
@@ -447,7 +443,8 @@ export function CreateInstancePage() {
   const [error, setError] = useState("")
   const [state, setState] = useState<WizardState>(() => ({
     name: `vm-${Math.random().toString(36).slice(2, 7)}`,
-    namespace: [null, "all"].includes(readLocal("instances-namespace")) ? "default" : readLocal("instances-namespace") as string,
+    // The list stores "" (or the legacy "all") for all namespaces; a new instance needs a concrete one.
+    namespace: [null, "", "all"].includes(readLocal("instances-namespace")) ? "default" : readLocal("instances-namespace") as string,
     description: "",
     startAfterCreate: true,
     specMode: "custom",
@@ -555,7 +552,7 @@ export function CreateInstancePage() {
       await requestJson(`${VM_API}/namespaces/${state.namespace}/virtualmachines`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(vm) })
       navigate(`/kubevirt/virtualization/virtual-machines/${state.namespace}/${state.name}/overview`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create instance")
+      setError(err instanceof Error ? err.message : t("Failed to create instance"))
     } finally {
       setCreating(false)
     }

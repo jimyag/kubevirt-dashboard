@@ -41,6 +41,9 @@ applyDocumentLang()
 
 export const getLocale = () => current
 
+/** BCP 47 tag for Intl / toLocaleString, following the console language rather than the browser. */
+export const dateLocale = () => (current === "zh" ? "zh-CN" : "en-US")
+
 export function t(text: string, vars?: Record<string, string | number | undefined | null>): string
 export function t(text: string | undefined, vars?: Record<string, string | number | undefined | null>): string | undefined
 export function t(text: string | undefined, vars?: Record<string, string | number | undefined | null>) {

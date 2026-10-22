@@ -105,7 +105,7 @@ function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKin
       setValues(kind.defaults || {})
       onCreated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Create failed")
+      setError(err instanceof Error ? err.message : t("Create failed"))
     } finally {
       setSaving(false)
     }

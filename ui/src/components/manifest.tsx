@@ -30,6 +30,8 @@ export function ManifestPanel({ object, url, onSaved }: { object: unknown; url?:
   const [draft, setDraft] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState<{ object: Record<string, unknown>; diff: DiffLine[] } | null>(null)
+  // Set when the server rejected the save because the object changed after editing started.
+  const [conflict, setConflict] = useState(false)
   const editing = base !== null
   const name = String(identityOf(object).name || "manifest")
   const kind = String(identityOf(object).kind || "")
@@ -38,11 +40,13 @@ export function ManifestPanel({ object, url, onSaved }: { object: unknown; url?:
     setBase({ yaml: current, object })
     setDraft(current)
     setError("")
+    setConflict(false)
   }
 
   const cancel = () => {
     setBase(null)
     setError("")
+    setConflict(false)
   }
 
   const review = () => {
@@ -75,11 +79,33 @@ export function ManifestPanel({ object, url, onSaved }: { object: unknown; url?:
 
   const save = async () => {
     if (!pending || !url) return
-    await requestJson(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(pending.object) })
+    try {
+      await requestJson(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(pending.object) })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      // Optimistic concurrency: the resourceVersion in the edited YAML is no longer current.
+      if (/has been modified|conflict/i.test(message)) {
+        setPending(null)
+        setConflict(true)
+        onSaved?.()
+        return
+      }
+      throw err
+    }
     toast.success(t("{kind} {name} updated", { kind, name }))
     setBase(null)
     setPending(null)
     onSaved?.()
+  }
+
+  // Start over from the latest object, keeping a copy of the rejected edit on the clipboard.
+  const restartFromLatest = () => {
+    navigator.clipboard.writeText(draft).catch(() => undefined)
+    toast.info(t("Your edited YAML was copied to the clipboard."))
+    setBase({ yaml: current, object })
+    setDraft(current)
+    setConflict(false)
+    setError("")
   }
 
   const download = () => {
@@ -116,10 +142,16 @@ export function ManifestPanel({ object, url, onSaved }: { object: unknown; url?:
         </div>
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
+      {conflict && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+          <span>{t("{kind} {name} was changed by someone else after you started editing, so your changes were not applied.", { kind, name })}</span>
+          <Button size="sm" variant="outline" onClick={restartFromLatest}>{t("Edit the latest version")}</Button>
+        </div>
+      )}
       <YamlCode
         value={editing ? draft : current}
         onChange={editing ? setDraft : undefined}
-        className="max-h-[calc(100dvh-280px)] min-h-[320px]"
+        className="h-[calc(100dvh-280px)] min-h-[360px]"
       />
       <ConfirmDialog
         open={pending !== null}

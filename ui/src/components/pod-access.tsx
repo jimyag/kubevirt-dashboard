@@ -104,7 +104,7 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
       if (!response.ok) throw new Error(await response.text())
       setLogs(await response.text())
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load pod logs")
+      setError(err instanceof Error ? err.message : t("Failed to load pod logs"))
       setLogs("")
     } finally {
       setLoading(false)
@@ -339,7 +339,7 @@ export function PodAccessButtons({ pod }: { pod: PodSummary }) {
   )
 }
 
-export function RelatedPodsCard({ title = "Related Pods", description, namespace, selector, selectors, podName, pods, className }: RelatedPodsCardProps) {
+export function RelatedPodsCard({ title, description, namespace, selector, selectors, podName, pods, className }: RelatedPodsCardProps) {
   const [items, setItems] = useState<PodSummary[]>(pods || [])
   const [loading, setLoading] = useState(!pods)
   const [error, setError] = useState("")
@@ -380,7 +380,7 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
       if (lastError) throw new Error(lastError)
       setItems([])
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load related pods")
+      setError(err instanceof Error ? err.message : t("Failed to load related pods"))
       setItems([])
     } finally {
       setLoading(false)
@@ -395,7 +395,7 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
     <section className={cn("rounded-lg border bg-card", className)}>
       <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
         <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="text-sm font-semibold">{title ?? t("Related Pods")}</h2>
           {description && <p className="text-xs text-muted-foreground">{description}</p>}
         </div>
         <Button size="sm" variant="ghost" onClick={load} className="gap-2" disabled={loading}>
@@ -428,7 +428,7 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
                   {pod.status?.podIP && <span className="font-mono text-xs text-muted-foreground">{pod.status.podIP}</span>}
                 </div>
                 <div className="min-w-0 text-xs text-muted-foreground">
-                  <div className="break-words">{pod.spec?.nodeName || "unscheduled"}</div>
+                  <div className="break-words">{pod.spec?.nodeName || t("Unscheduled")}</div>
                   <div className="break-words">{containersForPod(pod).map((item) => item.name).join(", ") || t("no containers")}</div>
                 </div>
               </div>
