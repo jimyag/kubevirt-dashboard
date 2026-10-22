@@ -7,42 +7,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Combobox, ConfirmDialog, DataTable, EmptyState, ErrorNote, FieldRow, NativeSelect, Panel, StatusDot, TabBar } from "@/components/console"
-import { apiFetch, asList, asRecord, requestJson, str, type KubeObject, type UnknownRecord } from "@/lib/kube"
-import { cidrsOverlap, ipv4Cidr, ipv4ToNumber, parseIPv4Cidr } from "@/lib/validate"
+import { asList, asRecord, str, type KubeObject } from "@/lib/kube"
+import { cidrsOverlap } from "@/lib/validate"
 import { t } from "@/lib/i18n"
-
-const OVN = "/apis/kubeovn.io/v1"
-const DEFAULT_VPC = "ovn-cluster"
-
-const mergePatch = (url: string, body: unknown) =>
-  requestJson(url, { method: "PATCH", headers: { "Content-Type": "application/merge-patch+json" }, body: JSON.stringify(body) })
-
-const getVpc = async (name: string) => {
-  const res = await apiFetch(`${OVN}/vpcs/${name}`)
-  if (!res.ok) throw new Error(t("VPC {vpc} not found", { vpc: name }))
-  return await res.json() as KubeObject
-}
-
-const isIp = (value: string) => value.includes(":") || ipv4ToNumber(value) !== null
-const isCidr = (value: string) => value.includes(":") ? value.includes("/") : parseIPv4Cidr(value) !== null
-const withoutPrefix = (cidr: string) => cidr.split("/")[0]
+import { DEFAULT_VPC, OVN, connectPair, freeConnectCidr, getVpc, isCidr, isIp, mergePatch, peeringStatus, readPeerings, readPolicy, readStatic, removePeering, subnetCidrs, withoutPrefix, type Peering, type PolicyRoute, type StaticRoute } from "@/lib/vpc"
 
 // --- Route table ---
-
-type StaticRoute = { cidr: string; nextHopIP: string; policy: string; extra: UnknownRecord }
-type PolicyRoute = { priority: string; match: string; action: string; nextHopIP: string }
 
 const routePolicies = [
   { value: "policyDst", label: "Destination" },
   { value: "policySrc", label: "Source" },
 ]
 const policyActions = ["allow", "drop", "reroute"]
-
-const readStatic = (spec: UnknownRecord): StaticRoute[] =>
-  asList(spec.staticRoutes).map(({ cidr, nextHopIP, policy, ...extra }) => ({ cidr: str(cidr), nextHopIP: str(nextHopIP), policy: str(policy, "policyDst"), extra }))
-
-const readPolicy = (spec: UnknownRecord): PolicyRoute[] =>
-  asList(spec.policyRoutes).map((route) => ({ priority: str(route.priority, "1000"), match: str(route.match), action: str(route.action, "allow"), nextHopIP: str(route.nextHopIP) }))
 
 const staticProblem = (route: StaticRoute) => {
   if (!isCidr(route.cidr.trim())) return t("{cidr} is not a valid CIDR.", { cidr: route.cidr || '""' })
@@ -209,34 +185,6 @@ export function RouteTablePanel({ vpc, onSaved }: { vpc: KubeObject; onSaved: ()
 
 // --- Peering ---
 
-type Peering = { remoteVpc: string; localConnectIP: string }
-
-const readPeerings = (vpc: KubeObject | undefined): Peering[] =>
-  asList(asRecord(vpc?.spec).vpcPeerings).map((peering) => ({ remoteVpc: str(peering.remoteVpc), localConnectIP: str(peering.localConnectIP) }))
-
-/** Picks a free /30 in 169.254.0.0/16 that no peering of any VPC uses yet. */
-const freeConnectCidr = (vpcs: KubeObject[]) => {
-  const used = vpcs.flatMap((vpc) => readPeerings(vpc).map((peering) => peering.localConnectIP))
-  for (let block = 0; block < 16384; block++) {
-    const third = Math.floor(block / 64)
-    const fourth = (block % 64) * 4
-    const cidr = `169.254.${third}.${fourth}/30`
-    if (!used.some((item) => cidrsOverlap(item, cidr))) return cidr
-  }
-  return "169.254.0.0/30"
-}
-
-/** The two usable addresses of a /30: [local, remote]. */
-const connectPair = (cidr: string) => {
-  const range = parseIPv4Cidr(cidr)
-  if (!range || range.prefix !== 30) return null
-  const toIp = (value: number) => [24, 16, 8, 0].map((shift) => Math.floor(value / 2 ** shift) % 256).join(".")
-  return [`${toIp(range.start + 1)}/30`, `${toIp(range.start + 2)}/30`]
-}
-
-const subnetCidrs = (subnets: KubeObject[], vpc: string) =>
-  subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, DEFAULT_VPC) === vpc).map((subnet) => ipv4Cidr(str(asRecord(subnet.spec).cidrBlock))).filter(Boolean)
-
 /**
  * VPC peering (spec.vpcPeerings). Both VPCs list each other with the two ends of a shared /30
  * link, and each side routes the other's subnets to the peer's link address.
@@ -250,16 +198,7 @@ export function PeeringPanel({ vpc, vpcs, subnets, onSaved }: { vpc: KubeObject;
   const isDefault = name === DEFAULT_VPC
 
   const remove = async (peering: Peering) => {
-    const [local, remote] = await Promise.all([getVpc(name), getVpc(peering.remoteVpc).catch(() => null)])
-    const remotePeering = readPeerings(remote ?? undefined).find((item) => item.remoteVpc === name)
-    const strip = (obj: KubeObject, remoteVpc: string, peerIp: string | undefined) => ({
-      spec: {
-        vpcPeerings: asList(asRecord(obj.spec).vpcPeerings).filter((item) => str(item.remoteVpc) !== remoteVpc),
-        staticRoutes: asList(asRecord(obj.spec).staticRoutes).filter((route) => !peerIp || str(route.nextHopIP) !== peerIp),
-      },
-    })
-    await mergePatch(`${OVN}/vpcs/${name}`, strip(local, peering.remoteVpc, remotePeering && withoutPrefix(remotePeering.localConnectIP)))
-    if (remote) await mergePatch(`${OVN}/vpcs/${peering.remoteVpc}`, strip(remote, name, withoutPrefix(peering.localConnectIP)))
+    await removePeering(name, peering)
     onSaved()
   }
 
@@ -282,11 +221,7 @@ export function PeeringPanel({ vpc, vpcs, subnets, onSaved }: { vpc: KubeObject;
             { header: t("Peer address"), cell: (peering) => <span className="font-mono text-xs">{readPeerings(byName.get(peering.remoteVpc)).find((item) => item.remoteVpc === name)?.localConnectIP || "N/A"}</span> },
             {
               header: t("Status"),
-              cell: (peering) => {
-                const remote = byName.get(peering.remoteVpc)
-                const status = !remote ? "Missing" : readPeerings(remote).some((item) => item.remoteVpc === name) ? "Active" : "Pending"
-                return <StatusDot status={status} />
-              },
+              cell: (peering) => <StatusDot status={peeringStatus(name, peering, byName)} />,
             },
             { header: "", className: "w-20 text-right", cell: (peering) => <Button size="sm" variant="ghost" onClick={() => setRemoving(peering)}>{t("Remove")}</Button> },
           ]}
@@ -306,10 +241,14 @@ export function PeeringPanel({ vpc, vpcs, subnets, onSaved }: { vpc: KubeObject;
   )
 }
 
-function AddPeeringDialog({ open, onOpenChange, vpc, vpcs, subnets, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; vpc: KubeObject; vpcs: KubeObject[]; subnets: KubeObject[]; onSaved: () => void }) {
-  const name = vpc.metadata.name
-  const peered = new Set(readPeerings(vpc).map((peering) => peering.remoteVpc))
-  const candidates = vpcs.map((item) => item.metadata.name).filter((item) => item !== name && item !== DEFAULT_VPC && !peered.has(item))
+/** Adds a peering. Without `vpc` the dialog also asks for the local VPC. */
+export function AddPeeringDialog({ open, onOpenChange, vpc, vpcs, subnets, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; vpc?: KubeObject; vpcs: KubeObject[]; subnets: KubeObject[]; onSaved: () => void }) {
+  const customVpcs = vpcs.map((item) => item.metadata.name).filter((item) => item !== DEFAULT_VPC)
+  const [localChoice, setLocalChoice] = useState("")
+  const name = vpc?.metadata.name ?? (customVpcs.includes(localChoice) ? localChoice : "")
+  const localVpc = vpc ?? vpcs.find((item) => item.metadata.name === name)
+  const peered = new Set(readPeerings(localVpc).map((peering) => peering.remoteVpc))
+  const candidates = customVpcs.filter((item) => item !== name && !peered.has(item))
   const [remote, setRemote] = useState("")
   const [connect, setConnect] = useState("")
   const [routes, setRoutes] = useState(true)
@@ -321,6 +260,7 @@ function AddPeeringDialog({ open, onOpenChange, vpc, vpcs, subnets, onSaved }: {
 
   const reset = (next: boolean) => {
     if (!next) {
+      setLocalChoice("")
       setRemote("")
       setConnect("")
       setRoutes(true)
@@ -329,6 +269,7 @@ function AddPeeringDialog({ open, onOpenChange, vpc, vpcs, subnets, onSaved }: {
   }
 
   const submit = async () => {
+    if (!name) throw new Error(t("Choose a VPC."))
     if (!candidates.includes(remote)) throw new Error(t("Choose a VPC to peer with."))
     if (!pair) throw new Error(t("The link must be a /30 CIDR, e.g. 169.254.0.0/30."))
     if (overlap.length) throw new Error(t("Subnets of the two VPCs overlap: {cidrs}", { cidrs: overlap.join(", ") }))
@@ -350,15 +291,20 @@ function AddPeeringDialog({ open, onOpenChange, vpc, vpcs, subnets, onSaved }: {
       open={open}
       onOpenChange={reset}
       title={t("Add peering")}
-      description={t("Connects {vpc} with another VPC. Both VPCs are updated.", { vpc: name })}
+      description={vpc ? t("Connects {vpc} with another VPC. Both VPCs are updated.", { vpc: name }) : t("Connects two VPCs. Both VPCs are updated.")}
       confirmLabel={t("Create peering")}
       onConfirm={submit}
     >
       <div className="space-y-4">
+        {!vpc && (
+          <FieldRow label={t("VPC")}>
+            <Combobox value={localChoice} onChange={setLocalChoice} options={customVpcs} placeholder={t("Choose a VPC")} aria-label={t("VPC")} />
+          </FieldRow>
+        )}
         <FieldRow label={t("Peer VPC")} hint={candidates.length === 0 ? t("No other custom VPC to peer with.") : undefined}>
           <Combobox value={remote} onChange={setRemote} options={candidates} placeholder={t("Choose a VPC")} aria-label={t("Peer VPC")} />
         </FieldRow>
-        <FieldRow label={t("Link CIDR")} hint={pair ? t("{local} on {vpc}, {remote} on the peer.", { local: pair[0], vpc: name, remote: pair[1] }) : t("A /30 used only for this link.")}>
+        <FieldRow label={t("Link CIDR")} hint={pair ? t("{local} on {vpc}, {remote} on the peer.", { local: pair[0], vpc: name || t("this VPC"), remote: pair[1] }) : t("A /30 used only for this link.")}>
           <Input className="font-mono text-xs" value={connect} onChange={(e) => setConnect(e.target.value)} placeholder={freeConnectCidr(vpcs)} />
         </FieldRow>
         <label className="flex items-center justify-between gap-3 rounded-lg border p-3">

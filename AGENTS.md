@@ -69,6 +69,7 @@ kubevirt-dashboard/
   - `Combobox`、`FilterInput`、`Pager`：列表筛选。筛选一律用可输入的 `Combobox`（不用下拉选择）；搜索框用 `FilterInput` + `lib/filter.ts` 的 `useFilteredRows`，支持对展示列做 `field:value` 筛选；长列表用 `usePaged` + `Pager` 分页
   - `ConfirmDialog`、`ErrorNote`、`EmptyState`、`LoadingState`：交互反馈
 - 导航数据集中在 `ui/src/lib/navigation.ts`，侧边栏、顶栏面包屑和 ⌘K 命令面板共用
+- 导航分两级：分区 → 页面，或分区 → 分组 → 页面（`NavItem.children`）。一个资源有多个子资源 / 关联资源时（如 VPC 下的子网、路由表、对等连接）放进同一分组；分组名不要与其中的页面同名；只剩一个可见页面的分组会自动展开为该页面
 
 ### 4. 设计模式
 

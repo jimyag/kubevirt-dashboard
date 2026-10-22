@@ -75,9 +75,10 @@ export function CommandPalette() {
           <CommandSeparator />
           {sections.map((section) => (
             <CommandGroup key={section.label} heading={t(section.label)}>
-              {section.items.map((item) => (
-                <CommandItem key={item.path} value={`${section.label} ${item.name} ${t(section.label)} ${t(item.name)}`} onSelect={() => go(item.path)}>
-                  <item.icon />{t(item.name)}
+              {section.items.flatMap((item) => (item.children || [item]).map((page) => ({ page, group: item.children ? item : undefined }))).map(({ page, group }) => (
+                <CommandItem key={page.path} value={`${section.label} ${group?.name ?? ""} ${page.name} ${t(section.label)} ${group ? t(group.name) : ""} ${t(page.name)}`} onSelect={() => go(page.path)}>
+                  <page.icon />{t(page.name)}
+                  {group && <span className="ml-auto text-xs text-muted-foreground">{t(group.name)}</span>}
                 </CommandItem>
               ))}
             </CommandGroup>

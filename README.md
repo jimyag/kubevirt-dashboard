@@ -6,7 +6,7 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 
 ## Features
 
-- **Cloud console layout**: Compute (instances, instance types, images, pools, snapshots, migrations, hosts), Storage (disks, volumes, storage classes, volume snapshots), Networking (VPCs, subnets, elastic IPs, NAT gateways, load balancers, Multus networks) and Security (security groups, network policies). Every other API resource is reachable from the **Resource Catalog**.
+- **Cloud console layout**: sections with second-level groups, like a public cloud console. Compute (instances and images, snapshots and migrations, hosts), Storage (disks, volumes, storage classes, volume snapshots), Networking (VPC: VPCs, subnets, route tables, peering connections, reserved IPs, IP pools; elastic IPs and NAT gateways; load balancers; Multus networks) and Security (security groups, address groups, network policies). Every other API resource is reachable from the **Resource Catalog**.
 - **Instance wizard**: create a VM step by step (spec or instance type, image and disks, VPC/subnet and security groups, cloud-init login) and review the exact manifest before submitting.
 - **Network stacks**: detects Kube-OVN and Cilium and adapts instance networking and security groups (see below).
 - **Filtering**: every list filter is a text box with suggestions (namespaces, VPCs, kinds), and the search box filters any shown column with `field:value` tokens, e.g. `web status:running host:node-1 -ns:dev`. An exact namespace is sent to the API; partial text filters locally. Long lists are paged.

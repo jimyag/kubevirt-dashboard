@@ -14,6 +14,7 @@ import { CatalogPage, SettingsPage } from "./pages/settings";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
 import { ElasticIpPage, NatGatewayPage } from "./pages/nat";
 import { ReservedIpListPage } from "./pages/reserved-ips";
+import { IpPoolListPage, PeeringListPage, RouteTableDetailPage, RouteTableListPage } from "./pages/vpc-network";
 import { AddressGroupListPage } from "./pages/address-groups";
 import { KubernetesCategoryPage, KubernetesManagementPage, KubeVirtCategoryPage, KubeVirtManagementPage, NetworkCategoryPage, NetworkManagementPage, StorageCategoryPage, StorageManagementPage } from "./resources/group-pages";
 import { t, useLocale } from "@/lib/i18n";
@@ -49,6 +50,10 @@ function App() {
               <Route path="/vpc/subnets" element={<SubnetListPage />} />
               <Route path="/vpc/subnets/:name" element={<SubnetDetailPage />} />
               <Route path="/vpc/reserved-ips" element={<ReservedIpListPage />} />
+              <Route path="/vpc/route-tables" element={<RouteTableListPage />} />
+              <Route path="/vpc/route-tables/:name" element={<RouteTableDetailPage />} />
+              <Route path="/vpc/peering-connections" element={<PeeringListPage />} />
+              <Route path="/vpc/ip-pools" element={<IpPoolListPage />} />
               <Route path="/vpc/address-groups" element={<AddressGroupListPage />} />
               <Route path="/vpc/elastic-ips" element={<ElasticIpPage />} />
               <Route path="/vpc/nat-gateways" element={<NatGatewayPage />} />
