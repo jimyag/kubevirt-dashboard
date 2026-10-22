@@ -14,9 +14,9 @@ export const virtualmachinepoolsConfig: ResourceConfig = {
     createFields: [
       ...shared.namespaceNameFields("example-pool"),
       { name: "replicas", label: "Replicas", type: "number", defaultValue: "1" },
-      { name: "cpu", label: "CPU Cores", type: "number", defaultValue: "1" },
+      { name: "cpu", label: "CPU cores", type: "number", defaultValue: "1" },
       { name: "memory", label: "Memory", defaultValue: "1Gi" },
-      { name: "containerImage", label: "Container Disk Image", defaultValue: "quay.io/containerdisks/fedora:latest" },
+      { name: "containerImage", label: "Container disk image", defaultValue: "quay.io/containerdisks/fedora:latest" },
     ],
     buildCreateResource: (values) => {
       const name = shared.stringValue(values.name, "example-pool");
@@ -61,15 +61,15 @@ export const virtualmachinepoolsConfig: ResourceConfig = {
           title: "Pool",
           items: [
             { label: "Replicas", value: spec.replicas },
-            { label: "Ready Replicas", value: shared.getRecord(r.status).readyReplicas },
-            { label: "Run Strategy", value: vmSpec.runStrategy },
+            { label: "Ready replicas", value: shared.getRecord(r.status).readyReplicas },
+            { label: "Run strategy", value: vmSpec.runStrategy },
             { label: "Selector", value: shared.selectorText(shared.getRecord(spec.selector).matchLabels) },
           ],
         },
         {
           title: "Template",
           items: [
-            { label: "Instance Type", value: shared.getRecord(vmSpec.instancetype).name },
+            { label: "Instance type", value: shared.getRecord(vmSpec.instancetype).name },
             { label: "CPU", value: shared.getRecord(domain.cpu).cores || shared.getRecord(domain.cpu).guest },
             { label: "Memory", value: shared.getRecord(shared.getRecord(domain.resources).requests).memory },
             { label: "Networks", value: shared.listNames(podSpec.networks) },

@@ -12,8 +12,8 @@ export const gatewaysConfig: ResourceConfig = {
     kind: "Gateway",
     createFields: [
       ...shared.namespaceNameFields("example-gateway"),
-      { name: "gatewayClassName", label: "Gateway Class", section: "Gateway", defaultValue: "example-gateway-class" },
-      { name: "listenerName", label: "Listener Name", section: "Listener", defaultValue: "http" },
+      { name: "gatewayClassName", label: "Gateway class", section: "Gateway", defaultValue: "example-gateway-class" },
+      { name: "listenerName", label: "Listener name", section: "Listener", defaultValue: "http" },
       { name: "hostname", label: "Hostname", section: "Listener", defaultValue: "", placeholder: "optional" },
       { name: "port", label: "Port", section: "Listener", type: "number", defaultValue: "80" },
       { name: "protocol", label: "Protocol", section: "Listener", type: "select", defaultValue: "HTTP", options: [{ label: "HTTP", value: "HTTP" }, { label: "HTTPS", value: "HTTPS" }, { label: "TCP", value: "TCP" }, { label: "TLS", value: "TLS" }] },

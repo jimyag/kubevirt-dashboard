@@ -13,12 +13,12 @@ export const persistentvolumeclaimsConfig: ResourceConfig = {
     createFields: [
       ...shared.namespaceNameFields("example-pvc"),
       { name: "storage", label: "Storage", section: "Request", defaultValue: "10Gi" },
-      { name: "accessMode", label: "Access Mode", section: "Request", type: "select", defaultValue: "ReadWriteOnce", options: [{ label: "ReadWriteOnce", value: "ReadWriteOnce" }, { label: "ReadOnlyMany", value: "ReadOnlyMany" }, { label: "ReadWriteMany", value: "ReadWriteMany" }, { label: "ReadWriteOncePod", value: "ReadWriteOncePod" }] },
-      { name: "volumeMode", label: "Volume Mode", section: "Request", type: "select", defaultValue: "Filesystem", options: [{ label: "Filesystem", value: "Filesystem" }, { label: "Block", value: "Block" }] },
-      { name: "storageClassName", label: "Storage Class", section: "Binding", defaultValue: "", placeholder: "optional" },
+      { name: "accessMode", label: "Access mode", section: "Request", type: "select", defaultValue: "ReadWriteOnce", options: [{ label: "ReadWriteOnce", value: "ReadWriteOnce" }, { label: "ReadOnlyMany", value: "ReadOnlyMany" }, { label: "ReadWriteMany", value: "ReadWriteMany" }, { label: "ReadWriteOncePod", value: "ReadWriteOncePod" }] },
+      { name: "volumeMode", label: "Volume mode", section: "Request", type: "select", defaultValue: "Filesystem", options: [{ label: "Filesystem", value: "Filesystem" }, { label: "Block", value: "Block" }] },
+      { name: "storageClassName", label: "Storage class", section: "Binding", defaultValue: "", placeholder: "optional" },
       { name: "volumeName", label: "Prebound PV", section: "Binding", defaultValue: "", placeholder: "optional" },
-      { name: "selectorKey", label: "Selector Key", section: "Selector", defaultValue: "", placeholder: "optional" },
-      { name: "selectorValue", label: "Selector Value", section: "Selector", defaultValue: "", placeholder: "optional" },
+      { name: "selectorKey", label: "Selector key", section: "Selector", defaultValue: "", placeholder: "optional" },
+      { name: "selectorValue", label: "Selector value", section: "Selector", defaultValue: "", placeholder: "optional" },
     ],
     buildCreateResource: (values) => {
       const storageClassName = shared.stringValue(values.storageClassName);
@@ -43,7 +43,7 @@ export const persistentvolumeclaimsConfig: ResourceConfig = {
     detailSections: shared.persistentVolumeClaimDetailSections,
     extraColumns: [
       { label: "Phase", value: (r) => String(shared.getRecord(r.status).phase || "N/A") },
-      { label: "Storage Class", value: (r) => String(shared.getRecord(r.spec).storageClassName || "N/A") },
+      { label: "Storage class", value: (r) => String(shared.getRecord(r.spec).storageClassName || "N/A") },
       { label: "Volume", value: (r) => String(shared.getRecord(r.spec).volumeName || "N/A") },
       { label: "Storage", value: (r) => String(shared.getRecord(shared.getRecord(r.status).capacity).storage || shared.getRecord(shared.getRecord(shared.getRecord(r.spec).resources).requests).storage || "N/A") },
     ],

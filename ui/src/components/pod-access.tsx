@@ -18,6 +18,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { t } from "@/lib/i18n"
 
 type ContainerInfo = {
   name: string
@@ -118,13 +119,12 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="gap-2">
-          <ScrollText className="h-4 w-4" />
-          Logs
+          <ScrollText className="h-4 w-4" />{t("Logs")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Pod Logs</DialogTitle>
+          <DialogTitle>{t("Pod Logs")}</DialogTitle>
           <DialogDescription>{pod.metadata.namespace}/{pod.metadata.name}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -136,8 +136,7 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
             {containers.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
           </select>
           <Button size="sm" variant="outline" onClick={loadLogs} className="gap-2" disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}
           </Button>
         </div>
         {error ? (
@@ -147,7 +146,7 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
           </div>
         ) : (
           <pre className="max-h-[65vh] min-h-[420px] overflow-auto rounded-lg border bg-muted/30 p-4 font-mono text-xs text-foreground whitespace-pre-wrap">
-            {loading ? "Loading..." : logs || "No logs returned"}
+            {loading ? t("Loading...") : logs || t("No logs returned")}
           </pre>
         )}
       </DialogContent>
@@ -287,18 +286,17 @@ function PodShellDialog({ pod }: { pod: PodSummary }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="gap-2">
-          <TerminalIcon className="h-4 w-4" />
-          Shell
+          <TerminalIcon className="h-4 w-4" />{t("Shell")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Pod Shell</DialogTitle>
+          <DialogTitle>{t("Pod Shell")}</DialogTitle>
           <DialogDescription>{pod.metadata.namespace}/{pod.metadata.name}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:items-center">
           <label className="grid gap-1">
-            <span className="text-xs font-medium text-muted-foreground">Container</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("Container")}</span>
             <select
               value={selectedContainer}
               onChange={(event) => setContainer(event.target.value)}
@@ -308,18 +306,18 @@ function PodShellDialog({ pod }: { pod: PodSummary }) {
             </select>
           </label>
           <label className="grid gap-1">
-            <span className="text-xs font-medium text-muted-foreground">Command</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("Command")}</span>
             <Input
               value={command}
               onChange={(event) => setCommand(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") connectShell()
               }}
-              placeholder="sh, bash, ash, or /bin/sh"
+              placeholder={t("sh, bash, ash, or /bin/sh")}
             />
           </label>
           <Button type="button" size="sm" onClick={status === "connected" ? disconnectShell : connectShell} disabled={status === "connecting"}>
-            {status === "connected" ? "Disconnect" : "Connect"}
+            {status === "connected" ? t("Disconnect") : t("Connect")}
           </Button>
           <Badge variant={status === "connected" ? "success" : status === "error" ? "danger" : "outline"}>{status}</Badge>
         </div>
@@ -401,8 +399,7 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
           {description && <p className="text-xs text-muted-foreground">{description}</p>}
         </div>
         <Button size="sm" variant="ghost" onClick={load} className="gap-2" disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          Refresh
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}
         </Button>
       </header>
       {error ? (
@@ -410,10 +407,10 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
       ) : loading ? (
         <div className="flex h-20 items-center justify-center gap-2">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-          <span className="text-sm text-muted-foreground">Loading...</span>
+          <span className="text-sm text-muted-foreground">{t("Loading...")}</span>
         </div>
       ) : items.length === 0 ? (
-        <div className="px-4 py-6 text-center text-sm text-muted-foreground">No pods</div>
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">{t("No pods")}</div>
       ) : (
         <div className="divide-y">
           {items.map((pod) => (
@@ -431,7 +428,7 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
                 </div>
                 <div className="min-w-0 text-xs text-muted-foreground">
                   <div className="break-words">{pod.spec?.nodeName || "unscheduled"}</div>
-                  <div className="break-words">{containersForPod(pod).map((item) => item.name).join(", ") || "no containers"}</div>
+                  <div className="break-words">{containersForPod(pod).map((item) => item.name).join(", ") || t("no containers")}</div>
                 </div>
               </div>
               <PodAccessButtons pod={pod} />

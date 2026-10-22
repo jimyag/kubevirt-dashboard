@@ -9,6 +9,7 @@ import {
   resourceNameFromListPath,
 } from "./api-paths";
 import { dvCreateConfig, resourceConfigs, vmCreateConfig } from "./configs";
+import { t } from "@/lib/i18n";
 
 const getContext = () => localStorage.getItem("kube-context") || "";
 
@@ -64,7 +65,7 @@ function ResourceConfigTable({ resources }: { resources: ResourceConfig[] }) {
   const hidden = resources.length - visibleResources.length
 
   if (Object.keys(available).length > 0 && visibleResources.length === 0) {
-    return <p className="text-sm text-muted-foreground">Not served by this cluster.</p>
+    return <p className="text-sm text-muted-foreground">{t("Not served by this cluster.")}</p>
   }
 
   return (
@@ -73,15 +74,15 @@ function ResourceConfigTable({ resources }: { resources: ResourceConfig[] }) {
         rows={visibleResources}
         rowKey={(config) => config.path}
         minWidth={640}
-        empty={<EmptyState title="Not served by this cluster" />}
+        empty={<EmptyState title={t("Not served by this cluster")} />}
         columns={[
-          { header: "Resource", cell: (config) => <Link to={config.path} className="font-medium hover:text-primary transition-colors">{config.title}</Link> },
-          { header: "Kind", cell: (config) => <span className="font-mono text-xs">{config.kind}</span> },
-          { header: "API", cell: (config) => <span className="font-mono text-xs text-muted-foreground">{apiVersionFromListPath(config.listPath) || "v1"}</span> },
-          { header: "Scope", className: "text-right", cell: (config) => <span className="text-sm text-muted-foreground">{config.namespaced ? "Namespaced" : "Cluster"}</span> },
+          { header: t("Resource"), cell: (config) => <Link to={config.path} className="font-medium hover:text-primary transition-colors">{t(config.title)}</Link> },
+          { header: t("Kind"), cell: (config) => <span className="font-mono text-xs">{config.kind}</span> },
+          { header: t("API"), cell: (config) => <span className="font-mono text-xs text-muted-foreground">{apiVersionFromListPath(config.listPath) || "v1"}</span> },
+          { header: t("Scope"), className: "text-right", cell: (config) => <span className="text-sm text-muted-foreground">{config.namespaced ? t("Namespaced") : t("Cluster")}</span> },
         ]}
       />
-      {hidden > 0 && <p className="text-xs text-muted-foreground">{hidden} not served by this cluster, hidden.</p>}
+      {hidden > 0 && <p className="text-xs text-muted-foreground">{hidden} {t("not served by this cluster, hidden.")}</p>}
     </div>
   )
 }
@@ -96,9 +97,9 @@ type ResourceGroup = {
 function GroupIndexPage({ title, base, groups }: { title: string; base: string; groups: ResourceGroup[] }) {
   return (
     <div className="space-y-6">
-      <PageHeader breadcrumbs={[{ label: "Resource Catalog", to: "/catalog" }, { label: title }]} title={title} />
+      <PageHeader breadcrumbs={[{ label: t("Resource Catalog"), to: "/catalog" }, { label: title }]} title={title} />
       {groups.map((group) => (
-        <Section key={group.slug} title={<Link to={`${base}/${group.slug}`} className="hover:text-primary transition-colors">{group.title}</Link>}>
+        <Section key={group.slug} title={<Link to={`${base}/${group.slug}`} className="hover:text-primary transition-colors">{t(group.title)}</Link>}>
           <ResourceConfigTable resources={group.resources} />
         </Section>
       ))}
@@ -109,12 +110,12 @@ function GroupIndexPage({ title, base, groups }: { title: string; base: string; 
 function GroupCategoryPage({ title, base, groups }: { title: string; base: string; groups: ResourceGroup[] }) {
   const { category } = useParams()
   const group = groups.find((item) => item.slug === category)
-  if (!group) return <EmptyState title={`${title} category not found`} />
+  if (!group) return <EmptyState title={t("{v0} category not found", { v0: title })} />
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: "Resource Catalog", to: "/catalog" }, { label: title, to: base }, { label: group.title }]}
-        title={group.title}
+        breadcrumbs={[{ label: t("Resource Catalog"), to: "/catalog" }, { label: title, to: base }, { label: group.title }]}
+        title={t(group.title)}
         subtitle={group.description}
       />
       <ResourceConfigTable resources={group.resources} />
@@ -126,7 +127,7 @@ function GroupCategoryPage({ title, base, groups }: { title: string; base: strin
 const kubernetesResourceGroups: ResourceGroup[] = [
   {
     slug: "workloads",
-    title: "Workloads And Scaling",
+    title: "Workloads and scaling",
     description: "Pods, workload controllers, Jobs, CronJobs, and HorizontalPodAutoscalers.",
     resources: [
       resourceConfigs.pods,
@@ -175,7 +176,7 @@ const kubernetesResourceGroups: ResourceGroup[] = [
   },
   {
     slug: "cluster",
-    title: "Cluster Definitions",
+    title: "Cluster definitions",
     description: "Namespaces, Events, CRDs, API services, leases, runtime classes, and scheduling classes.",
     resources: [
       resourceConfigs.namespaces,
@@ -201,7 +202,7 @@ const kubernetesResourceGroups: ResourceGroup[] = [
   },
   {
     slug: "flow-control",
-    title: "Flow Control",
+    title: "Flow control",
     description: "API priority and fairness flow schemas and priority levels.",
     resources: [
       resourceConfigs.flowschemas,
@@ -235,7 +236,7 @@ const kubevirtResourceGroups: ResourceGroup[] = [
   },
   {
     slug: "cdi",
-    title: "CDI Storage",
+    title: "CDI storage",
     description: "DataVolume, DataSource, StorageProfile, import, upload, clone, and transfer resources.",
     resources: [
       dvCreateConfig,
@@ -421,11 +422,11 @@ const networkResourceGroups: ResourceGroup[] = [
   },
 ];
 
-export const KubernetesManagementPage = () => <GroupIndexPage title="Kubernetes" base="/kubernetes" groups={kubernetesResourceGroups} />
-export const KubernetesCategoryPage = () => <GroupCategoryPage title="Kubernetes" base="/kubernetes" groups={kubernetesResourceGroups} />
-export const KubeVirtManagementPage = () => <GroupIndexPage title="KubeVirt" base="/kubevirt" groups={kubevirtResourceGroups} />
-export const KubeVirtCategoryPage = () => <GroupCategoryPage title="KubeVirt" base="/kubevirt" groups={kubevirtResourceGroups} />
-export const StorageManagementPage = () => <GroupIndexPage title="Storage" base="/storage" groups={storageResourceGroups} />
-export const StorageCategoryPage = () => <GroupCategoryPage title="Storage" base="/storage" groups={storageResourceGroups} />
-export const NetworkManagementPage = () => <GroupIndexPage title="Networks" base="/networks" groups={networkResourceGroups} />
-export const NetworkCategoryPage = () => <GroupCategoryPage title="Networks" base="/networks" groups={networkResourceGroups} />
+export const KubernetesManagementPage = () => <GroupIndexPage title={t("Kubernetes")} base="/kubernetes" groups={kubernetesResourceGroups} />
+export const KubernetesCategoryPage = () => <GroupCategoryPage title={t("Kubernetes")} base="/kubernetes" groups={kubernetesResourceGroups} />
+export const KubeVirtManagementPage = () => <GroupIndexPage title={t("KubeVirt")} base="/kubevirt" groups={kubevirtResourceGroups} />
+export const KubeVirtCategoryPage = () => <GroupCategoryPage title={t("KubeVirt")} base="/kubevirt" groups={kubevirtResourceGroups} />
+export const StorageManagementPage = () => <GroupIndexPage title={t("Storage")} base="/storage" groups={storageResourceGroups} />
+export const StorageCategoryPage = () => <GroupCategoryPage title={t("Storage")} base="/storage" groups={storageResourceGroups} />
+export const NetworkManagementPage = () => <GroupIndexPage title={t("Networks")} base="/networks" groups={networkResourceGroups} />
+export const NetworkCategoryPage = () => <GroupCategoryPage title={t("Networks")} base="/networks" groups={networkResourceGroups} />

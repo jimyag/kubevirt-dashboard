@@ -13,6 +13,7 @@ import {
   type UnknownRecord,
 } from "./kube"
 import { parseIPv4Cidr } from "./validate"
+import { t } from "./i18n"
 
 /**
  * A provider-neutral security group, modeled after cloud security groups:
@@ -109,21 +110,21 @@ export const portRange = (ports: string) => {
 export const ruleProblem = (rule: SgRule) => {
   if (rule.remoteType === "cidr") {
     const remote = rule.remote.trim()
-    if (!remote) return "A CIDR rule needs a CIDR block."
-    if (!remote.includes(":") && !parseIPv4Cidr(remote)) return `${remote} is not a valid CIDR.`
+    if (!remote) return t("A CIDR rule needs a CIDR block.")
+    if (!remote.includes(":") && !parseIPv4Cidr(remote)) return t("{cidr} is not a valid CIDR.", { cidr: remote })
   }
-  if (rule.remoteType === "group" && !rule.remote.trim()) return "Choose a security group."
+  if (rule.remoteType === "group" && !rule.remote.trim()) return t("Choose a security group.")
   if ((rule.protocol === "tcp" || rule.protocol === "udp") && rule.ports.trim()) {
     const match = /^(\d+)(?:-(\d+))?$/.exec(rule.ports.trim())
     const min = Number(match?.[1])
     const max = Number(match?.[2] ?? match?.[1])
-    if (!match || min < 1 || max > 65535 || min > max) return `Invalid port range ${rule.ports}. Use 22 or 8000-8100 within 1-65535.`
+    if (!match || min < 1 || max > 65535 || min > max) return t("Invalid port range {ports}. Use 22 or 8000-8100 within 1-65535.", { ports: rule.ports })
   }
   return ""
 }
 
 export const ruleSummary = (rule: SgRule) => {
-  const proto = rule.protocol === "all" ? "All traffic" : rule.protocol.toUpperCase()
+  const proto = rule.protocol === "all" ? t("All traffic") : rule.protocol.toUpperCase()
   const ports = rule.protocol === "all" || rule.protocol === "icmp" ? "" : rule.ports ? ` ${rule.ports}` : " all ports"
   return `${proto}${ports}`
 }

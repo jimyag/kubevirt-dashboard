@@ -5,6 +5,7 @@ import { EventList } from "@/components/events"
 import { eventsUrl, type KubeEvent } from "@/lib/events"
 import { namespaceScope } from "@/lib/filter"
 import { useNamespaces } from "@/lib/kube"
+import { t } from "@/lib/i18n"
 
 const kinds = ["VirtualMachine", "VirtualMachineInstance", "DataVolume", "Pod", "Node", "PersistentVolumeClaim", "VirtualMachineInstanceMigration"]
 
@@ -24,14 +25,14 @@ export function EventsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Events" subtitle="core/v1 events, refreshed every 15 seconds" />
+      <PageHeader title={t("Events")} subtitle={t("core/v1 events, refreshed every 15 seconds")} />
       <EventList
         url={eventsUrl({ namespace: ns.scope, kind: exactKind })}
         prefilter={prefilter}
         toolbarExtra={
           <>
-            <Combobox value={namespace} onChange={setNamespace} options={namespaces} placeholder="All namespaces" aria-label="Namespace" />
-            <Combobox value={kind} onChange={setKind} options={kinds} placeholder="All kinds" aria-label="Object kind" className="min-w-[200px]" />
+            <Combobox value={namespace} onChange={setNamespace} options={namespaces} placeholder={t("All namespaces")} aria-label={t("Namespace")} />
+            <Combobox value={kind} onChange={setKind} options={kinds} placeholder={t("All kinds")} aria-label={t("Object kind")} className="min-w-[200px]" />
           </>
         }
       />

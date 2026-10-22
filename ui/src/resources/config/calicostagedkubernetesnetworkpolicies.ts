@@ -8,7 +8,7 @@ export const calicoStagedKubernetesNetworkPoliciesConfig: ResourceConfig = share
     subtitle: "Manage staged Kubernetes NetworkPolicy resources in Calico",
     kind: "StagedKubernetesNetworkPolicy",
     namespaced: true,
-    createFields: [{ name: "selectorKey", label: "Pod Selector Key", section: "Policy", defaultValue: "app" }, { name: "selectorValue", label: "Pod Selector Value", section: "Policy", defaultValue: "example" }],
+    createFields: [{ name: "selectorKey", label: "Pod selector key", section: "Policy", defaultValue: "app" }, { name: "selectorValue", label: "Pod selector value", section: "Policy", defaultValue: "example" }],
     buildSpec: (values) => ({ podSelector: shared.selectorFromValues(values), policyTypes: ["Ingress"] }),
     statusPath: ["spec", "policyTypes", "0"],
   });

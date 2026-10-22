@@ -14,9 +14,9 @@ export const volumesnapshotsConfig: ResourceConfig = {
     kind: "VolumeSnapshot",
     createFields: [
       ...shared.namespaceNameFields("example-snapshot"),
-      { name: "snapshotClassName", label: "Snapshot Class", section: "Snapshot", defaultValue: "", placeholder: "optional" },
-      { name: "sourceType", label: "Source Type", section: "Source", type: "select", defaultValue: "pvc", options: [{ label: "PVC", value: "pvc" }, { label: "VolumeSnapshotContent", value: "content" }] },
-      { name: "sourceName", label: "Source Name", section: "Source", defaultValue: "example-pvc" },
+      { name: "snapshotClassName", label: "Snapshot class", section: "Snapshot", defaultValue: "", placeholder: "optional" },
+      { name: "sourceType", label: "Source type", section: "Source", type: "select", defaultValue: "pvc", options: [{ label: "PVC", value: "pvc" }, { label: "VolumeSnapshotContent", value: "content" }] },
+      { name: "sourceName", label: "Source name", section: "Source", defaultValue: "example-pvc" },
     ],
     buildCreateResource: (values) => {
       const snapshotClassName = shared.stringValue(values.snapshotClassName);

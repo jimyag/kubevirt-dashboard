@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
+import { t } from "./i18n"
+
 export type UnknownRecord = Record<string, unknown>
 
 export type KubeObject = {
@@ -68,12 +70,12 @@ export const relativeTime = (timestamp?: string) => {
   const diff = Date.now() - new Date(timestamp).getTime()
   if (Number.isNaN(diff)) return timestamp
   const seconds = Math.max(0, Math.floor(diff / 1000))
-  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 60) return t("{n}s ago", { n: seconds })
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 60) return t("{n}m ago", { n: minutes })
   const hours = Math.floor(minutes / 60)
-  if (hours < 48) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
+  if (hours < 48) return t("{n}h ago", { n: hours })
+  return t("{n}d ago", { n: Math.floor(hours / 24) })
 }
 
 export const parseQuantityGi = (value?: unknown): number => {
@@ -266,7 +268,7 @@ export function useAsync<T>(loader: () => Promise<T>, initial: T, deps: unknown[
     try {
       setData(await run())
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed")
+      setError(err instanceof Error ? err.message : t("Request failed"))
     } finally {
       setLoading(false)
     }

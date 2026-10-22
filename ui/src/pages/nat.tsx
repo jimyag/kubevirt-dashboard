@@ -26,6 +26,7 @@ import { asRecord, listItems, relativeTime, requestJson, useAsync, useDiscovery,
 import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { isDnsLabel } from "@/lib/validate"
 import { OVN_API, natEngineLabel, natKinds, natManifest, natReady, type NatEngine, type NatKind, type NatRefs, type NatTab } from "@/lib/nat"
+import { t } from "@/lib/i18n"
 
 const tabLabels: Record<NatTab, string> = {
   gateways: "NAT gateways",
@@ -48,7 +49,7 @@ function useNatEngines(): NatEngine[] {
 function EngineSwitch({ engines, value, onChange }: { engines: NatEngine[]; value: NatEngine; onChange: (engine: NatEngine) => void }) {
   if (engines.length < 2) return null
   return (
-    <div className="flex rounded-md border bg-card p-0.5" role="group" aria-label="NAT engine">
+    <div className="flex rounded-md border bg-card p-0.5" role="group" aria-label={t("NAT engine")}>
       {engines.map((engine) => (
         <button
           key={engine}
@@ -57,7 +58,7 @@ function EngineSwitch({ engines, value, onChange }: { engines: NatEngine[]; valu
           onClick={() => onChange(engine)}
           className={cn("rounded px-3 py-1 text-sm transition-colors", value === engine ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:text-foreground")}
         >
-          {natEngineLabel[engine]}
+          {t(natEngineLabel[engine])}
         </button>
       ))}
     </div>
@@ -86,9 +87,9 @@ function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKin
 
   const submit = async () => {
     setError("")
-    if (!isDnsLabel(name)) return setError("Name must be a lowercase DNS label")
+    if (!isDnsLabel(name)) return setError(t("Name must be a lowercase DNS label"))
     const missing = kind.fields.find((field) => field.required && !values[field.name]?.trim())
-    if (missing) return setError(`${missing.label} is required`)
+    if (missing) return setError(t("{field} is required", { field: t(missing.label) }))
     const trimmed = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value.trim()]))
     const invalid = kind.validate?.(trimmed)
     if (invalid) return setError(invalid)
@@ -114,18 +115,18 @@ function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKin
     <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Create {kind.label}</DialogTitle>
+          <DialogTitle>{t("Create {noun}", { noun: t(kind.label) })}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <FieldRow label="Name">
+          <FieldRow label={t("Name")}>
             <Input value={name} onChange={(e) => setName(e.target.value.trim())} placeholder={`${kind.plural.split("-")[0]}-1`} className="font-mono" />
           </FieldRow>
           {kind.fields.map((field) => (
-            <FieldRow key={field.name} label={field.required ? field.label : `${field.label} (optional)`} hint={field.hint}>
+            <FieldRow key={field.name} label={field.required ? field.label : t("{field} (optional)", { field: t(field.label) })} hint={t(field.hint)}>
               {field.choices ? (
                 <div className="grid gap-2 sm:grid-cols-3">
                   {field.choices.map((choice) => (
-                    <ChoiceCard key={choice.value} selected={values[field.name] === choice.value} onClick={() => set(field.name, choice.value)} title={choice.value} description={choice.hint} />
+                    <ChoiceCard key={choice.value} selected={values[field.name] === choice.value} onClick={() => set(field.name, choice.value)} title={choice.value} description={t(choice.hint)} />
                   ))}
                 </div>
               ) : field.suggest ? (
@@ -134,7 +135,7 @@ function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKin
                   onChange={(value) => set(field.name, value)}
                   options={field.suggest(refs, values)}
                   placeholder={field.placeholder}
-                  aria-label={field.label}
+                  aria-label={t(field.label)}
                   className={cn("w-full", field.mono && "font-mono")}
                 />
               ) : (
@@ -143,14 +144,14 @@ function CreateNatDialog({ kind, open, onOpenChange, onCreated }: { kind: NatKin
             </FieldRow>
           ))}
           <details className="rounded-md border bg-muted/30">
-            <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground">Manifest</summary>
+            <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground">{t("Manifest")}</summary>
             <pre className="overflow-x-auto border-t px-3 py-2 font-mono text-xs">{YAML.dump(manifest)}</pre>
           </details>
           {error && <ErrorNote>{error}</ErrorNote>}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={submit} disabled={saving}>{saving ? "Creating..." : "Create"}</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>{t("Cancel")}</Button>
+          <Button onClick={submit} disabled={saving}>{saving ? t("Creating...") : t("Create")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -168,38 +169,38 @@ function NatTable({ kind }: { kind: NatKind }) {
   }, [] as KubeObject[], [kind.plural])
 
   const fields = useMemo<FilterField<KubeObject>[]>(() => [
-    { key: "name", label: "Name", value: (item) => item.metadata.name },
-    ...(kind.hasReady ? [{ key: "status", label: "Status", value: natReady }] : []),
+    { key: "name", label: t("Name"), value: (item) => item.metadata.name },
+    ...(kind.hasReady ? [{ key: "status", label: t("Status"), value: natReady }] : []),
     ...kind.columns.map((column) => ({ key: column.key, label: column.header, value: column.value })),
   ], [kind])
   const rows = useFilteredRows(data, fields, search)
 
   const columns: Column<KubeObject>[] = [
     {
-      header: "Name",
+      header: t("Name"),
       cell: (item) => <Link to={`${kind.catalogPath}/_cluster/${item.metadata.name}`} className="font-medium hover:text-primary transition-colors">{item.metadata.name}</Link>,
     },
-    ...(kind.hasReady ? [{ header: "Status", cell: (item: KubeObject) => <StatusDot status={natReady(item)} label={natReady(item) === "NotReady" ? "Not ready" : undefined} /> }] : []),
+    ...(kind.hasReady ? [{ header: t("Status"), cell: (item: KubeObject) => <StatusDot status={natReady(item)} label={natReady(item) === "NotReady" ? t("Not ready") : undefined} /> }] : []),
     ...kind.columns.map((column): Column<KubeObject> => ({
-      header: column.header,
+      header: t(column.header),
       cell: (item) => {
         const value = column.value(item)
         return value ? <span className={cn("text-sm", column.mono && "font-mono text-xs")}>{value}</span> : <span className="text-sm text-muted-foreground">-</span>
       },
     })),
-    { header: "Created", className: "text-right", cell: (item) => <span className="text-sm text-muted-foreground tabular-nums" title={item.metadata.creationTimestamp}>{relativeTime(item.metadata.creationTimestamp)}</span> },
+    { header: t("Created"), className: "text-right", cell: (item) => <span className="text-sm text-muted-foreground tabular-nums" title={item.metadata.creationTimestamp}>{relativeTime(item.metadata.creationTimestamp)}</span> },
     {
       header: "",
       className: "w-12 text-right",
-      cell: (item) => <Button size="icon" variant="ghost" aria-label={`Delete ${item.metadata.name}`} onClick={() => setDeleting(item)}><Trash2 className="size-4 text-muted-foreground" /></Button>,
+      cell: (item) => <Button size="icon" variant="ghost" aria-label={t("Delete {v0}", { v0: item.metadata.name })} onClick={() => setDeleting(item)}><Trash2 className="size-4 text-muted-foreground" /></Button>,
     },
   ]
 
   return (
     <div className="space-y-3">
       <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={fields} rows={data} />}>
-        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("size-4", loading && "animate-spin")} />Refresh</Button>
-        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create {kind.label}</Button>
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("size-4", loading && "animate-spin")} />{t("Refresh")}</Button>
+        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />{t("Create {noun}", { noun: t(kind.label) })}</Button>
       </Toolbar>
       {error && <ErrorNote>{error}</ErrorNote>}
       <DataTable
@@ -207,17 +208,17 @@ function NatTable({ kind }: { kind: NatKind }) {
         rows={rows}
         rowKey={(item) => item.metadata.name}
         minWidth={900}
-        empty={<EmptyState title={data.length ? `No matching ${kind.label}s` : `No ${kind.label}s`} />}
+        empty={<EmptyState title={data.length ? t("No matching {noun}s", { noun: t(kind.label) }) : t("No {noun}s", { noun: t(kind.label) })} />}
         columns={columns}
       />
       <CreateNatDialog key={kind.plural} kind={kind} open={createOpen} onOpenChange={setCreateOpen} onCreated={reload} />
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
-        title={`Delete ${kind.label} ${deleting?.metadata.name}?`}
-        description={kind.plural.endsWith("eips") ? "Delete the NAT rules that use this address first. This cannot be undone." : "This cannot be undone."}
+        title={t("Delete {noun} {name}?", { noun: t(kind.label), name: deleting?.metadata.name })}
+        description={kind.plural.endsWith("eips") ? t("Delete the NAT rules that use this address first. This cannot be undone.") : t("This cannot be undone.")}
         destructive
-        confirmLabel="Delete"
+        confirmLabel={t("Delete")}
         onConfirm={async () => {
           await requestJson(`${OVN_API}/${kind.plural}/${deleting?.metadata.name}`, { method: "DELETE" })
           reload()
@@ -232,7 +233,7 @@ function KubeOvnRequired({ title }: { title: string }) {
     <div className="space-y-4">
       <PageHeader title={title} />
       <div className="rounded-lg border bg-card">
-        <EmptyState icon={Waypoints} title="NAT needs Kube-OVN" action={<Button asChild size="sm" variant="outline"><Link to="/settings">Settings</Link></Button>} />
+        <EmptyState icon={Waypoints} title={t("NAT needs Kube-OVN")} action={<Button asChild size="sm" variant="outline"><Link to="/settings">{t("Settings")}</Link></Button>} />
       </div>
     </div>
   )
@@ -257,12 +258,12 @@ export function ElasticIpPage() {
   const profile = useNetworkProfile()
   const engines = useNatEngines()
   const { engine, setEngine } = useEngine(engines)
-  if ((profile.loaded && !profile.vpc) || !engine) return <KubeOvnRequired title="Elastic IPs" />
+  if ((profile.loaded && !profile.vpc) || !engine) return <KubeOvnRequired title={t("Elastic IPs")} />
   const kind = natKinds[engine].eips!
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Elastic IPs"
+        title={t("Elastic IPs")}
         subtitle={<span className="font-mono text-xs">{kind.kind} · kubeovn.io/v1</span>}
         actions={<EngineSwitch engines={engines} value={engine} onChange={setEngine} />}
       />
@@ -275,7 +276,7 @@ export function NatGatewayPage() {
   const profile = useNetworkProfile()
   const engines = useNatEngines()
   const { engine, setEngine, params, setParams } = useEngine(engines)
-  if ((profile.loaded && !profile.vpc) || !engine) return <KubeOvnRequired title="NAT Gateways" />
+  if ((profile.loaded && !profile.vpc) || !engine) return <KubeOvnRequired title={t("NAT Gateways")} />
   const tabs: NatTab[] = (Object.keys(natKinds[engine]) as NatTab[]).filter((tab) => tab !== "eips")
   const requestedTab = params.get("tab") as NatTab | null
   const tab = requestedTab && tabs.includes(requestedTab) ? requestedTab : tabs[0]
@@ -289,16 +290,16 @@ export function NatGatewayPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="NAT Gateways"
+        title={t("NAT Gateways")}
         subtitle={<span className="font-mono text-xs">{kind.kind} · kubeovn.io/v1</span>}
         actions={
           <>
-            <Button asChild size="sm" variant="outline" className="gap-1.5"><Link to={engine === engines[0] ? "/vpc/elastic-ips" : `/vpc/elastic-ips?engine=${engine}`}><Globe className="size-4" />Elastic IPs</Link></Button>
+            <Button asChild size="sm" variant="outline" className="gap-1.5"><Link to={engine === engines[0] ? "/vpc/elastic-ips" : `/vpc/elastic-ips?engine=${engine}`}><Globe className="size-4" />{t("Elastic IPs")}</Link></Button>
             <EngineSwitch engines={engines} value={engine} onChange={setEngine} />
           </>
         }
       />
-      <TabBar<NatTab> tabs={tabs.map((id) => ({ id, label: tabLabels[id] }))} value={tab} onChange={setTab} />
+      <TabBar<NatTab> tabs={tabs.map((id) => ({ id, label: t(tabLabels[id]) }))} value={tab} onChange={setTab} />
       <NatTable key={kind.plural} kind={kind} />
     </div>
   )

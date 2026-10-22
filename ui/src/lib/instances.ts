@@ -9,6 +9,7 @@ import {
   type KubeObject,
   type UnknownRecord,
 } from "./kube"
+import { t } from "./i18n"
 
 // --- Instance helpers ---
 
@@ -32,7 +33,7 @@ export const vmShape = (vm: KubeObject, instanceTypes: Record<string, { cpu: num
   const typeName = str(instancetype.name)
   if (typeName) {
     const known = instanceTypes[typeName]
-    return { label: typeName, detail: known ? `${known.cpu} vCPU / ${known.memory}` : "Instance type" }
+    return { label: typeName, detail: known ? `${known.cpu} vCPU / ${known.memory}` : t("Instance type") }
   }
   const domain = asRecord(templateSpec(vm).domain)
   const cpu = asRecord(domain.cpu)
@@ -46,7 +47,7 @@ export const vmNetworkLabel = (vm: KubeObject) => {
   if (subnet) return { kind: "subnet" as const, label: subnet }
   const multus = asList(templateSpec(vm).networks).find((network) => network.multus)
   if (multus) return { kind: "multus" as const, label: str(asRecord(multus.multus).networkName) }
-  return { kind: "pod" as const, label: "Pod network" }
+  return { kind: "pod" as const, label: t("Pod network") }
 }
 
 // --- Create wizard model ---

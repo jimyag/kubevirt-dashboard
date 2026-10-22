@@ -13,7 +13,7 @@ export const kubeOvnVlansConfig: ResourceConfig = {
     createFields: [
       ...shared.nameOnlyFields("vlan100"),
       { name: "id", label: "VLAN ID", section: "VLAN", type: "number", defaultValue: "100" },
-      { name: "provider", label: "Provider Network", section: "VLAN", defaultValue: "provider-net" },
+      { name: "provider", label: "Provider network", section: "VLAN", defaultValue: "provider-net" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "kubeovn.io/v1",

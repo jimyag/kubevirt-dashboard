@@ -12,8 +12,8 @@ export const kubeOvnProviderNetworksConfig: ResourceConfig = {
     kind: "ProviderNetwork",
     createFields: [
       ...shared.nameOnlyFields("provider-net"),
-      { name: "defaultInterface", label: "Default Interface", section: "Provider Network", defaultValue: "eth0" },
-      { name: "excludeNodes", label: "Exclude Nodes", section: "Provider Network", defaultValue: "", placeholder: "comma separated, optional" },
+      { name: "defaultInterface", label: "Default interface", section: "Provider Network", defaultValue: "eth0" },
+      { name: "excludeNodes", label: "Exclude nodes", section: "Provider Network", defaultValue: "", placeholder: "comma separated, optional" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "kubeovn.io/v1",

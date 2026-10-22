@@ -14,7 +14,7 @@ export const virtualmachineclusterinstancetypesConfig: ResourceConfig = {
     createFields: [
       { name: "name", label: "Name", defaultValue: "example-small", required: true },
       { name: "cpu", label: "Guest CPUs", type: "number", defaultValue: "1" },
-      { name: "memory", label: "Guest Memory", defaultValue: "1Gi" },
+      { name: "memory", label: "Guest memory", defaultValue: "1Gi" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "instancetype.kubevirt.io/v1beta1",
@@ -28,9 +28,9 @@ export const virtualmachineclusterinstancetypesConfig: ResourceConfig = {
         title: "Compute Shape",
         items: [
           { label: "Guest CPUs", value: shared.getRecord(spec.cpu).guest },
-          { label: "Guest Memory", value: shared.getRecord(spec.memory).guest },
-          { label: "IO Threads Policy", value: spec.ioThreadsPolicy },
-          { label: "Launch Security", value: spec.launchSecurity },
+          { label: "Guest memory", value: shared.getRecord(spec.memory).guest },
+          { label: "IO threads policy", value: spec.ioThreadsPolicy },
+          { label: "Launch security", value: spec.launchSecurity },
         ],
       }];
     },

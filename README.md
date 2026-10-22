@@ -12,6 +12,7 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 - **Filtering**: every list filter is a text box with suggestions (namespaces, VPCs, kinds), and the search box filters any shown column with `field:value` tokens, e.g. `web status:running host:node-1 -ns:dev`. An exact namespace is sent to the API; partial text filters locally. Long lists are paged.
 - **NAT**: elastic IPs, SNAT, DNAT and floating IPs for both Kube-OVN NAT models: VPC NAT gateways (`IptablesEIP`, `Iptables*Rule`) and OVN native NAT (`OvnEip`, `OvnSnatRule`, `OvnDnatRule`, `OvnFip`).
 - **Events and monitoring**: a cluster-wide event browser, events on every resource detail page, live CPU and memory from metrics-server, and VM history charts from Prometheus when one is configured.
+- **Languages**: English and Simplified Chinese, switched from the header or Settings; the browser language is used by default.
 - **Discovery aware**: the UI checks which API groups and versions the selected cluster serves and hides resources it does not serve.
 - **Multi-cluster**: switch between kubeconfig contexts from the header.
 - **Consoles and pod access**: serial console and VNC for VMs; logs and an interactive shell for related pods.

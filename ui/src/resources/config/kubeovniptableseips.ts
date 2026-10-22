@@ -8,11 +8,11 @@ export const kubeOvnIptablesEIPsConfig: ResourceConfig = shared.kubeOvnResourceC
     subtitle: "Manage Kube-OVN IptablesEIP resources",
     kind: "IptablesEIP",
     createFields: [
-      { name: "natGwDp", label: "NAT Gateway", section: "EIP", defaultValue: "vpc-nat-gw" },
-      { name: "externalSubnet", label: "External Subnet", section: "EIP", defaultValue: "external-subnet" },
+      { name: "natGwDp", label: "NAT gateway", section: "EIP", defaultValue: "vpc-nat-gw" },
+      { name: "externalSubnet", label: "External subnet", section: "EIP", defaultValue: "external-subnet" },
       { name: "v4ip", label: "IPv4", section: "EIP", defaultValue: "", placeholder: "optional" },
-      { name: "macAddress", label: "MAC Address", section: "EIP", defaultValue: "", placeholder: "optional" },
-      { name: "qosPolicy", label: "QoS Policy", section: "EIP", defaultValue: "", placeholder: "optional" },
+      { name: "macAddress", label: "MAC address", section: "EIP", defaultValue: "", placeholder: "optional" },
+      { name: "qosPolicy", label: "QoS policy", section: "EIP", defaultValue: "", placeholder: "optional" },
     ],
     buildSpec: (values) => ({
       natGwDp: shared.stringValue(values.natGwDp),
@@ -23,7 +23,7 @@ export const kubeOvnIptablesEIPsConfig: ResourceConfig = shared.kubeOvnResourceC
     }),
     statusPath: ["status", "ready"],
     extraColumns: [
-      { label: "External Subnet", value: (r) => String(shared.getRecord(r.spec).externalSubnet || "N/A") },
-      { label: "NAT Gateway", value: (r) => String(shared.getRecord(r.spec).natGwDp || "N/A") },
+      { label: "External subnet", value: (r) => String(shared.getRecord(r.spec).externalSubnet || "N/A") },
+      { label: "NAT gateway", value: (r) => String(shared.getRecord(r.spec).natGwDp || "N/A") },
     ],
   });

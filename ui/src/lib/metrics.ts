@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { apiFetch, asRecord, getContext, listItems, str, type KubeObject } from "./kube"
+import { t } from "./i18n"
 
 // --- Quantities ---
 
@@ -156,7 +157,7 @@ const promRequest = async (config: PrometheusConfig, path: string) => {
   try {
     body = JSON.parse(text)
   } catch {
-    throw new Error(res.ok ? "Prometheus returned a non-JSON response" : `${res.status} ${text.slice(0, 200)}`)
+    throw new Error(res.ok ? t("Prometheus returned a non-JSON response") : `${res.status} ${text.slice(0, 200)}`)
   }
   if (!res.ok || body.status !== "success") throw new Error(body.error || body.message || `${res.status} ${res.statusText}`)
   return body.data

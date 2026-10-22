@@ -7,7 +7,7 @@ export const calicoHostEndpointsConfig: ResourceConfig = shared.calicoResourceCo
     title: "Calico Host Endpoints",
     subtitle: "Manage Calico HostEndpoint resources",
     kind: "HostEndpoint",
-    createFields: [{ name: "node", label: "Node", section: "Endpoint", defaultValue: "" }, { name: "interfaceName", label: "Interface Name", section: "Endpoint", defaultValue: "*" }, { name: "expectedIPs", label: "Expected IPs", section: "Endpoint", defaultValue: "", placeholder: "comma-separated IPs" }],
+    createFields: [{ name: "node", label: "Node", section: "Endpoint", defaultValue: "" }, { name: "interfaceName", label: "Interface name", section: "Endpoint", defaultValue: "*" }, { name: "expectedIPs", label: "Expected IPs", section: "Endpoint", defaultValue: "", placeholder: "comma-separated IPs" }],
     buildSpec: (values) => ({ ...(shared.stringValue(values.node) ? { node: shared.stringValue(values.node) } : {}), interfaceName: shared.stringValue(values.interfaceName, "*"), ...(shared.csvList(values.expectedIPs).length ? { expectedIPs: shared.csvList(values.expectedIPs) } : {}) }),
     statusPath: ["spec", "node"],
   });

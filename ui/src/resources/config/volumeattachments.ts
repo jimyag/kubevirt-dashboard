@@ -15,8 +15,8 @@ export const volumeattachmentsConfig: ResourceConfig = {
     createFields: [
       ...shared.nameOnlyFields("example-attachment"),
       { name: "attacher", label: "Attacher", section: "Attachment", defaultValue: "example.csi.io" },
-      { name: "nodeName", label: "Node Name", section: "Attachment", defaultValue: "example-node" },
-      { name: "persistentVolumeName", label: "Persistent Volume", section: "Source", defaultValue: "example-pv" },
+      { name: "nodeName", label: "Node name", section: "Attachment", defaultValue: "example-node" },
+      { name: "persistentVolumeName", label: "Persistent volume", section: "Source", defaultValue: "example-pv" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "storage.k8s.io/v1",

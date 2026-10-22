@@ -14,7 +14,7 @@ export const volumeattributesclassesConfig: ResourceConfig = {
     kind: "VolumeAttributesClass",
     createFields: [
       ...shared.nameOnlyFields("example-volume-attributes"),
-      { name: "driverName", label: "Driver Name", section: "Driver", defaultValue: "example.csi.io" },
+      { name: "driverName", label: "Driver name", section: "Driver", defaultValue: "example.csi.io" },
       { name: "parameters", label: "Parameters", section: "Driver", type: "textarea", defaultValue: "", placeholder: "iops=3000\nthroughput=125" },
     ],
     buildCreateResource: (values) => ({

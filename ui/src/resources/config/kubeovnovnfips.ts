@@ -9,8 +9,8 @@ export const kubeOvnOvnFipsConfig: ResourceConfig = shared.kubeOvnResourceConfig
     kind: "OvnFip",
     createFields: [
       { name: "ovnEip", label: "OVN EIP", section: "FIP", defaultValue: "example-ovn-eip" },
-      { name: "ipName", label: "IP Name", section: "FIP", defaultValue: "example-ip" },
-      { name: "ipType", label: "IP Type", section: "FIP", type: "select", defaultValue: "ip", options: [{ label: "ip", value: "ip" }, { label: "vip", value: "vip" }] },
+      { name: "ipName", label: "IP name", section: "FIP", defaultValue: "example-ip" },
+      { name: "ipType", label: "IP type", section: "FIP", type: "select", defaultValue: "ip", options: [{ label: "ip", value: "ip" }, { label: "vip", value: "vip" }] },
       { name: "type", label: "Mode", section: "FIP", type: "select", defaultValue: "centralized", options: [{ label: "centralized", value: "centralized" }, { label: "distributed", value: "distributed" }] },
     ],
     buildSpec: (values) => ({ ovnEip: shared.stringValue(values.ovnEip), ipName: shared.stringValue(values.ipName), ipType: shared.stringValue(values.ipType, "ip"), type: shared.stringValue(values.type, "centralized") }),

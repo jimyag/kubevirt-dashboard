@@ -3,6 +3,7 @@ import { RefreshCw, Maximize2, Minimize2, AlertCircle } from "lucide-react";
 import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { cn } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 import "xterm/css/xterm.css";
 
 export function SerialConsole({ namespace, name }: { namespace: string, name: string }) {
@@ -67,7 +68,7 @@ export function SerialConsole({ namespace, name }: { namespace: string, name: st
          <div className="flex items-center gap-3">
             <div className={cn("w-2.5 h-2.5 rounded-full", connStatus === "connected" ? "bg-green-600" : connStatus === "error" ? "bg-destructive" : "bg-muted-foreground")} />
             <div className="flex flex-col">
-               <span className="text-[10px] font-semibold text-muted-foreground">{connStatus === "connected" ? "Serial console active" : "Offline"}</span>
+               <span className="text-[10px] font-semibold text-muted-foreground">{connStatus === "connected" ? t("Serial console active") : t("Offline")}</span>
                {connStatus === "connected" && (
                  <div className="flex items-center gap-1.5 text-primary animate-in slide-in-from-top-1">
                     <AlertCircle size={10} />
@@ -77,8 +78,8 @@ export function SerialConsole({ namespace, name }: { namespace: string, name: st
             </div>
          </div>
          <div className="flex gap-2">
-            <button onClick={syncSize} className="flex items-center gap-2 px-3 py-1 bg-background hover:bg-muted/50 text-foreground rounded-md text-[10px] font-bold transition-all border active:scale-95"><RefreshCw size={12} /> Sync Size</button>
-            <button onClick={() => setIsTheaterMode(!isTheaterMode)} className="flex items-center gap-2 px-3 py-1 bg-background hover:bg-muted/50 text-foreground rounded-md text-[10px] font-bold transition-all border">{isTheaterMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />} {isTheaterMode ? "Exit" : "Theater"}</button>
+            <button onClick={syncSize} className="flex items-center gap-2 px-3 py-1 bg-background hover:bg-muted/50 text-foreground rounded-md text-[10px] font-bold transition-all border active:scale-95"><RefreshCw size={12} /> {t("Sync Size")}</button>
+            <button onClick={() => setIsTheaterMode(!isTheaterMode)} className="flex items-center gap-2 px-3 py-1 bg-background hover:bg-muted/50 text-foreground rounded-md text-[10px] font-bold transition-all border">{isTheaterMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />} {isTheaterMode ? t("Exit") : t("Theater")}</button>
          </div>
       </div>
       <div ref={termRef} className="flex-1 p-2" />

@@ -8,6 +8,7 @@ import { Combobox, DataTable, EmptyState, FilterInput, StatusDot, Toolbar } from
 import { relativeTime } from "@/lib/kube"
 import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { eventCount, eventTime, fetchEvents, involvedObjectPath, type KubeEvent } from "@/lib/events"
+import { t } from "@/lib/i18n"
 
 const eventFields: FilterField<KubeEvent>[] = [
   { key: "type", label: "Type", value: (event) => event.type || "Normal" },
@@ -80,18 +81,17 @@ export function EventList({
   return (
     <div className="space-y-3">
       <Toolbar
-        right={<FilterInput value={search} onChange={setSearch} fields={showObject ? eventFields : eventFields.filter((field) => !["kind", "object", "namespace"].includes(field.key))} rows={scoped} placeholder="Filter, e.g. reason:failed kind:pod" />}
+        right={<FilterInput value={search} onChange={setSearch} fields={showObject ? eventFields : eventFields.filter((field) => !["kind", "object", "namespace"].includes(field.key))} rows={scoped} placeholder={t("Filter, e.g. reason:failed kind:pod")} />}
       >
         <Button size="sm" variant="outline" onClick={() => setTick((current) => current + 1)} className="gap-2">
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          Refresh
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}
         </Button>
         <Combobox
           value={type}
           onChange={setType}
           options={[{ value: "Warning", hint: String(warnings) }, { value: "Normal", hint: String(events.length - warnings) }]}
-          placeholder={`All types (${events.length})`}
-          aria-label="Event type"
+          placeholder={t("All types ({v0})", { v0: events.length })}
+          aria-label={t("Event type")}
           className="w-[160px]"
         />
         {toolbarExtra}
@@ -102,12 +102,12 @@ export function EventList({
         rows={rows}
         rowKey={(event) => event.metadata.uid || `${event.metadata.namespace}/${event.metadata.name}`}
         minWidth={showObject ? 900 : 640}
-        empty={<EmptyState icon={Bell} title={events.length ? "No matching events" : "No events"} />}
+        empty={<EmptyState icon={Bell} title={events.length ? t("No matching events") : t("No events")} />}
         columns={[
-          { header: "Type", className: "w-28", cell: (event) => <StatusDot status={event.type === "Warning" ? "Error" : "Ready"} label={event.type || "Normal"} /> },
-          { header: "Reason", className: "w-44", cell: (event) => <span className="text-sm font-medium">{event.reason}</span> },
+          { header: t("Type"), className: "w-28", cell: (event) => <StatusDot status={event.type === "Warning" ? "Error" : "Ready"} label={event.type || t("Normal")} /> },
+          { header: t("Reason"), className: "w-44", cell: (event) => <span className="text-sm font-medium">{event.reason}</span> },
           ...(showObject ? [{
-            header: "Object",
+            header: t("Object"),
             className: "w-64",
             cell: (event: KubeEvent) => {
               const path = involvedObjectPath(event)
@@ -120,9 +120,9 @@ export function EventList({
               )
             },
           }] : []),
-          { header: "Message", cell: (event) => <span className="text-sm text-muted-foreground break-words">{event.message}</span> },
-          { header: "Count", className: "w-16 text-right", cell: (event) => <span className="text-sm tabular-nums">{eventCount(event)}</span> },
-          { header: "Last seen", className: "w-24 text-right", cell: (event) => <span className="text-sm text-muted-foreground tabular-nums" title={eventTime(event)}>{relativeTime(eventTime(event))}</span> },
+          { header: t("Message"), cell: (event) => <span className="text-sm text-muted-foreground break-words">{event.message}</span> },
+          { header: t("Count"), className: "w-16 text-right", cell: (event) => <span className="text-sm tabular-nums">{eventCount(event)}</span> },
+          { header: t("Last seen"), className: "w-24 text-right", cell: (event) => <span className="text-sm text-muted-foreground tabular-nums" title={eventTime(event)}>{relativeTime(eventTime(event))}</span> },
         ]}
       />
     </div>
