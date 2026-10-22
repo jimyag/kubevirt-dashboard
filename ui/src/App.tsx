@@ -35,6 +35,7 @@ import { EventsPage } from "./pages/events";
 import { EventList } from "./components/events";
 import { VmMonitoring } from "./components/monitoring";
 import { eventsUrl } from "./lib/events";
+import { toKubectlYaml } from "./lib/manifest";
 import { InstanceSecurityGroupsDialog, SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
 import { CatalogPage, SettingsPage } from "./pages/settings";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
@@ -296,12 +297,12 @@ function DVList() {
 }
 
 function VMDetailContent() {
-  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [vmYaml, setVmYaml] = useState(""); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [loading, setLoading] = useState(true); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider, providers: sgProviders } = useSgProvider(); const profile = useNetworkProfile();
+  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [loading, setLoading] = useState(true); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider, providers: sgProviders } = useSgProvider(); const profile = useNetworkProfile();
   const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
   const fetchData = useCallback(async () => {
     try {
-      const [vmRes, vmiRes, yamlRes] = await Promise.all([ apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}`), apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}`), apiFetch(`/api/v1/yaml/virtualmachines/${namespace}/${name}`) ]);
-      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null; setVm(vmData); setVmi(vmiRes.ok ? await vmiRes.json() : null); if (yamlRes.ok) setVmYaml(await yamlRes.text());
+      const [vmRes, vmiRes] = await Promise.all([ apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}`), apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}`) ]);
+      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null; setVm(vmData); setVmi(vmiRes.ok ? await vmiRes.json() : null);
       if (vmData?.spec.template?.spec?.volumes) { const dns = vmData.spec.template.spec.volumes.filter((v) => v.dataVolume).map((v) => v.dataVolume!.name); if (dns.length > 0) { const ds = await Promise.all(dns.map((dn:string) => apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${dn}`).then(r => r.ok ? r.json() : null))); setAssociatedDVs(ds.filter(d => d !== null)); } }
     } finally { setLoading(false); }
   }, [name, namespace]);
@@ -786,7 +787,7 @@ function VMDetailContent() {
         {activeTab === "vnc" && <VncConsole namespace={namespace!} name={name!} />}
 
         {activeTab === "manifest" && (
-          <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{vmYaml || t("Loading...")}</pre>
+          <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{toKubectlYaml(vm)}</pre>
         )}
       </div>
     </div>
@@ -794,12 +795,12 @@ function VMDetailContent() {
 }
 
 function DVDetailContent() {
-  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [dv, setDv] = useState<DV | null>(null); const [dvYaml, setDvYaml] = useState(""); const [loading, setLoading] = useState(true); const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
+  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [dv, setDv] = useState<DV | null>(null); const [loading, setLoading] = useState(true); const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
   const loadDv = useCallback(async () => {
     setLoading(true);
     try {
-      const [r, y] = await Promise.all([apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`), apiFetch(`/api/v1/yaml/datavolumes/${namespace}/${name}`)]);
-      if (r.ok) setDv(await r.json()); if (y.ok) setDvYaml(await y.text());
+      const r = await apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`);
+      if (r.ok) setDv(await r.json());
     } finally { setLoading(false); }
   }, [name, namespace]);
   useEffect(() => { loadDv(); }, [loadDv]);
@@ -927,7 +928,7 @@ function DVDetailContent() {
         // Import, upload and clone progress is reported on both the DataVolume and its PVC, which share the name.
         <EventList url={eventsUrl({ namespace, name })} />
       ) : (
-        <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{dvYaml || t("Loading...")}</pre>
+        <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{toKubectlYaml(dv)}</pre>
       )}
     </div>
   );

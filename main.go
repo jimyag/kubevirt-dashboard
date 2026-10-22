@@ -22,7 +22,6 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -33,7 +32,6 @@ import (
 	kvv1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	kvcorev1 "kubevirt.io/client-go/kubevirt/typed/core/v1"
-	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -382,47 +380,6 @@ func runServer(cm *ClusterManager, addr string) error {
 			return
 		}
 		handlePodExec(restConfig, w, r)
-	})
-
-	mux.HandleFunc("/api/v1/yaml/", func(w http.ResponseWriter, r *http.Request) {
-		_, dynClient, _, err := cm.getClient(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/yaml/"), "/")
-		if len(parts) < 3 {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-		resType, ns, name := parts[0], parts[1], parts[2]
-		var gvr schema.GroupVersionResource
-		var apiVersion, kind string
-		if resType == "virtualmachines" {
-			gvr = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"}
-			apiVersion, kind = "kubevirt.io/v1", "VirtualMachine"
-		} else if resType == "datavolumes" {
-			gvr = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"}
-			apiVersion, kind = "cdi.kubevirt.io/v1beta1", "DataVolume"
-		} else {
-			http.Error(w, "unsupported resource type", http.StatusBadRequest)
-			return
-		}
-		obj, err := dynClient.Resource(gvr).Namespace(ns).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		obj.SetManagedFields(nil)
-		obj.SetResourceVersion("")
-		obj.SetGeneration(0)
-		obj.SetUID("")
-		raw := obj.UnstructuredContent()
-		raw["apiVersion"] = apiVersion
-		raw["kind"] = kind
-		data, _ := yaml.Marshal(raw)
-		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-		w.Write(data)
 	})
 
 	mux.HandleFunc("/api/v1/namespaces-list", func(w http.ResponseWriter, r *http.Request) {

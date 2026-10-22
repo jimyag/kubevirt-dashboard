@@ -49,6 +49,7 @@ import {
 import { RelatedPodsCard, type PodSummary } from "@/components/pod-access"
 import { EventList } from "@/components/events"
 import { eventsUrl } from "@/lib/events"
+import { toKubectlYaml } from "@/lib/manifest"
 import { t } from "@/lib/i18n"
 
 type KubeResource = {
@@ -2712,7 +2713,7 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
     )
   }
 
-  const yaml = resource ? YAML.dump(resource, { noRefs: true, lineWidth: 120 }) : ""
+  const yaml = toKubectlYaml(resource)
 
   return (
     <div className="space-y-5">
