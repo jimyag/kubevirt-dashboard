@@ -29,7 +29,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
-import { kubeOvnAnnotations, useNetworkProfile, type KubeObject } from "./lib/kube";
+import { kubeOvnAnnotations, relativeTime, useNetworkProfile, type KubeObject } from "./lib/kube";
 import { engineLabel, sgDetailPath, useSgProvider, vmSecurityGroupRefs } from "./lib/security-groups";
 import { CreateInstancePage, InstanceListPage } from "./pages/instances";
 import { OverviewPage } from "./pages/overview";
@@ -595,82 +595,51 @@ function VMDetailContent() {
       <div className="mt-4">
         {activeTab === "overview" && (
           <div className="space-y-6">
-            {/* Info cards */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <ShadCard>
-                <CardHeader className="pb-2">
-                  <CardDescription>Run Strategy</CardDescription>
-                  <CardTitle className="text-sm font-medium">{vm.spec.runStrategy || "Default"}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Desired State</span>
-                    <span className="font-medium">{vm.spec.running ? "Active" : "Halted"}</span>
+            <ShadCard className="gap-0 py-0 shadow-none">
+              <div className="grid divide-y md:grid-cols-3 md:divide-x md:divide-y-0">
+                {[
+                  {
+                    title: "Instance",
+                    items: [
+                      { label: "Status", value: <StatusDot status={vm.status?.printableStatus} /> },
+                      { label: "Run strategy", value: vm.spec.runStrategy || (vm.spec.running ? "Always" : "Halted") },
+                      { label: "Namespace", value: vm.metadata.namespace },
+                      { label: "Created", value: relativeTime(vm.metadata.creationTimestamp) },
+                    ],
+                  },
+                  {
+                    title: "Compute",
+                    items: [
+                      { label: "vCPU", value: `${(currentCpu.sockets || 1) * (currentCpu.cores || 1) * (currentCpu.threads || 1)} (${currentCpu.sockets || 1} x ${currentCpu.cores || 1} x ${currentCpu.threads || 1})` },
+                      { label: "Memory", value: vm.spec.template?.spec?.domain?.resources?.requests?.memory || "From instance type" },
+                      { label: "Instance type", value: vm.spec.instancetype?.name || "Custom" },
+                      { label: "Machine / arch", value: `${vm.spec.template?.spec?.domain?.machine?.type || "default"} / ${vm.spec.template?.spec?.architecture || "default"}` },
+                    ],
+                  },
+                  {
+                    title: "Runtime",
+                    items: [
+                      { label: "Private IP", value: <span className="font-mono">{vmi?.status.interfaces?.[0]?.ipAddress || "-"}</span> },
+                      { label: "Host", value: vmi?.status.nodeName || "Not running" },
+                      { label: "Subnet", value: templateAnnotations[kubeOvnAnnotations.logicalSwitch] || (profile.vpc ? "Namespace default" : "Pod network") },
+                      { label: "Priority class", value: vm.spec.template?.spec?.priorityClassName || "None" },
+                    ],
+                  },
+                ].map((group) => (
+                  <div key={group.title} className="space-y-4 p-5">
+                    <div className="text-sm font-semibold">{group.title}</div>
+                    <dl className="space-y-3 text-sm">
+                      {group.items.map((item) => (
+                        <div key={item.label} className="flex items-center justify-between gap-4">
+                          <dt className="text-muted-foreground">{item.label}</dt>
+                          <dd className="min-w-0 truncate text-right">{item.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
                   </div>
-                </CardContent>
-              </ShadCard>
-
-              <ShadCard>
-                <CardHeader className="pb-2">
-                  <CardDescription>Compute</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-2xl font-semibold tabular-nums">{[vm.spec.template?.spec?.domain?.cpu?.sockets || 1, vm.spec.template?.spec?.domain?.cpu?.cores || 1, vm.spec.template?.spec?.domain?.cpu?.threads || 1].join("x")}</div>
-                      <div className="text-xs text-muted-foreground">Sockets x Cores x Threads</div>
-                    </div>
-                    <div>
-                      <div className="text-2xl font-semibold">{vm.spec.template?.spec?.domain?.resources?.requests?.memory || "1Gi"}</div>
-                      <div className="text-xs text-muted-foreground">Memory</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </ShadCard>
-
-              <ShadCard>
-                <CardHeader className="pb-2">
-                  <CardDescription>Runtime Status</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {vmi ? (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Phase</span>
-                        <span className="font-medium">{vmi.status.phase}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Node</span>
-                        <span className="font-mono text-xs">{vmi.status.nodeName}</span>
-                      </div>
-                      <div className="text-base font-mono mt-1">{vmi.status.interfaces?.[0]?.ipAddress || "Pending IP..."}</div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No active instance</p>
-                  )}
-                </CardContent>
-              </ShadCard>
-
-              <ShadCard>
-                <CardHeader className="pb-2">
-                  <CardDescription>Scheduling</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Priority Class</span>
-                    <span className="font-medium">{vm.spec.template?.spec?.priorityClassName || "N/A"}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Architecture</span>
-                    <span className="font-medium">{vm.spec.template?.spec?.architecture || "N/A"}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Machine</span>
-                    <span className="font-medium">{vm.spec.template?.spec?.domain?.machine?.type || "N/A"}</span>
-                  </div>
-                </CardContent>
-              </ShadCard>
-            </div>
+                ))}
+              </div>
+            </ShadCard>
 
             {/* Metrics charts */}
             {vmi && metrics.length > 0 && (
@@ -1243,7 +1212,7 @@ function App() {
         <AppSidebar />
         <SidebarInset className="min-h-0 overflow-y-auto">
           <SiteHeader />
-          <div className="flex flex-1 flex-col p-4 lg:p-8 max-w-[100rem] mx-auto w-full">
+          <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-4 py-6 lg:px-8 lg:py-8">
             <Routes>
               <Route path="/" element={<OverviewPage />} />
               <Route path="/catalog" element={<CatalogPage />} />

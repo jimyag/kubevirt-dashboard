@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { Globe } from "lucide-react"
+import { Link, useLocation } from "react-router-dom"
+import { ChevronRight, Server } from "lucide-react"
 
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -11,6 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { getContext, setContext } from "@/lib/kube"
+import { findActiveNav } from "@/lib/navigation"
+import { CommandPalette } from "./command-palette"
 import { ModeToggle } from "./mode-toggle"
 
 function ClusterSwitcher() {
@@ -38,8 +41,8 @@ function ClusterSwitcher() {
 
   return (
     <Select value={current} onValueChange={change} disabled={contexts.length === 0}>
-      <SelectTrigger size="sm" className="h-8 max-w-[220px] gap-2 text-xs font-semibold" aria-label="Cluster">
-        <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+      <SelectTrigger size="sm" className="h-8 max-w-[220px] gap-2 bg-background text-xs font-medium shadow-none" aria-label="Cluster">
+        <Server className="h-3.5 w-3.5 text-muted-foreground" />
         <SelectValue placeholder="Cluster" />
       </SelectTrigger>
       <SelectContent align="start" className="max-h-72">
@@ -51,14 +54,37 @@ function ClusterSwitcher() {
   )
 }
 
+function Breadcrumbs() {
+  const location = useLocation()
+  const active = findActiveNav(location.pathname)
+  if (!active) return null
+  const crumbs = active.section.label === "Home" ? [active.item.name] : [active.section.label, active.item.name]
+  return (
+    <nav className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
+      {crumbs.map((crumb, index) => (
+        <span key={crumb} className="flex min-w-0 items-center gap-1.5">
+          {index > 0 && <ChevronRight className="size-3.5 text-muted-foreground" />}
+          {index === crumbs.length - 1 ? (
+            <Link to={active.item.path} className="truncate font-medium text-foreground hover:text-primary transition-colors">{crumb}</Link>
+          ) : (
+            <span className="truncate text-muted-foreground">{crumb}</span>
+          )}
+        </span>
+      ))}
+    </nav>
+  )
+}
+
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-50 flex h-(--header-height) shrink-0 items-center gap-2 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
-      <div className="flex w-full items-center gap-2 px-4 lg:px-6">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-4" />
-        <ClusterSwitcher />
+    <header className="sticky top-0 z-40 flex h-(--header-height) shrink-0 items-center border-b bg-background/80 backdrop-blur-md">
+      <div className="flex w-full items-center gap-3 px-4 lg:px-6">
+        <SidebarTrigger className="-ml-1 text-muted-foreground" />
+        <Separator orientation="vertical" className="data-[orientation=vertical]:h-4" />
+        <Breadcrumbs />
         <div className="ml-auto flex items-center gap-2">
+          <CommandPalette />
+          <ClusterSwitcher />
           <ModeToggle />
         </div>
       </div>

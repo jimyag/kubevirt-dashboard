@@ -205,13 +205,13 @@ export function InstanceListPage() {
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] caption-bottom text-sm">
-            <thead className="bg-muted">
+            <thead className="bg-muted/50">
               <tr className="border-b">
                 <th className="h-9 w-10 px-3 text-left">
                   <input type="checkbox" className="size-4 accent-primary" aria-label="Select all instances" checked={allSelected} onChange={(e) => setSelected(e.target.checked ? Object.fromEntries(rows.map((vm) => [key(vm), true])) : {})} />
                 </th>
                 {["Name", "Status", "IP address", "Spec", "Network", provider ? "Security groups" : null, "Host", "Created", ""].filter((header) => header !== null).map((header, index) => (
-                  <th key={index} className={cn("h-9 px-3 text-left text-xs font-semibold text-foreground", header === "Created" && "text-right")}>{header}</th>
+                  <th key={index} className={cn("h-10 px-3 text-left text-xs font-medium text-muted-foreground", header === "Created" && "text-right")}>{header}</th>
                 ))}
               </tr>
             </thead>
@@ -238,7 +238,7 @@ export function InstanceListPage() {
                 const status = vmStatus(vm)
                 const groups = vmSecurityGroupRefs(vm, providers)
                 return (
-                  <tr key={key(vm)} className="border-b transition-colors hover:bg-muted/50">
+                  <tr key={key(vm)} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                     <td className="px-3 py-2">
                       <input type="checkbox" className="size-4 accent-primary" aria-label={`Select ${vm.metadata.name}`} checked={Boolean(selected[key(vm)])} onChange={(e) => setSelected((current) => ({ ...current, [key(vm)]: e.target.checked }))} />
                     </td>

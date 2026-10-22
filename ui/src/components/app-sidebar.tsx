@@ -1,27 +1,4 @@
-import type { ComponentType } from "react"
-import {
-  Boxes,
-  Camera,
-  Cpu,
-  Database,
-  Disc3,
-  Globe,
-  HardDrive,
-  Image,
-  LayoutDashboard,
-  Layers,
-  ListChecks,
-  Network,
-  Route,
-  Scale,
-  Server,
-  Settings,
-  Shield,
-  ShieldCheck,
-  Split,
-  Terminal,
-  Waypoints,
-} from "lucide-react"
+import { Hexagon } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 
 import {
@@ -35,127 +12,35 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar"
-import { useNetworkProfile, useDiscovery, type NetworkProfile, type Discovery } from "@/lib/kube"
+import { useNetworkProfile } from "@/lib/kube"
+import { findActiveNav, useNavSections } from "@/lib/navigation"
 
-type NavItem = {
-  name: string
-  path: string
-  icon: ComponentType<{ className?: string }>
-  /** Extra path prefixes that should highlight this entry. */
-  match?: string[]
-  /** API that must be served for the entry to show. */
-  requires?: [groupVersion: string, resource: string]
-  visible?: (profile: NetworkProfile) => boolean
-}
-
-type NavSection = { label: string; items: NavItem[] }
-
-const sections: NavSection[] = [
-  {
-    label: "Compute",
-    items: [
-      { name: "Instances", path: "/kubevirt/virtualization/virtual-machines", icon: Cpu, match: ["/kubevirt/virtualization/virtual-machine-instances"] },
-      { name: "Instance Types", path: "/kubevirt/templates/cluster-instance-types", icon: Layers, match: ["/kubevirt/templates"], requires: ["instancetype.kubevirt.io/v1beta1", "virtualmachineclusterinstancetypes"] },
-      { name: "Images", path: "/kubevirt/cdi/data-sources", icon: Image, match: ["/kubevirt/cdi/data-import-crons"], requires: ["cdi.kubevirt.io/v1beta1", "datasources"] },
-      { name: "Instance Pools", path: "/kubevirt/virtualization/vm-pools", icon: Boxes, requires: ["pool.kubevirt.io/v1alpha1", "virtualmachinepools"] },
-      { name: "Snapshots", path: "/kubevirt/snapshots/snapshots", icon: Camera, match: ["/kubevirt/snapshots"], requires: ["snapshot.kubevirt.io/v1beta1", "virtualmachinesnapshots"] },
-      { name: "Migrations", path: "/kubevirt/operations/migrations", icon: Route },
-      { name: "Hosts", path: "/nodes", icon: Server },
-    ],
-  },
-  {
-    label: "Storage",
-    items: [
-      { name: "Disks", path: "/kubevirt/cdi/data-volumes", icon: HardDrive, requires: ["cdi.kubevirt.io/v1beta1", "datavolumes"] },
-      { name: "Volumes", path: "/storage/kubernetes/persistent-volume-claims", icon: Database, match: ["/storage/kubernetes/persistent-volumes"] },
-      { name: "Storage Classes", path: "/storage/kubernetes/storage-classes", icon: Disc3 },
-      { name: "Volume Snapshots", path: "/storage/kubernetes/volume-snapshots", icon: Camera, requires: ["snapshot.storage.k8s.io/v1", "volumesnapshots"] },
-    ],
-  },
-  {
-    label: "Networking",
-    items: [
-      { name: "VPCs", path: "/vpc/vpcs", icon: Network, visible: (p) => p.vpc },
-      { name: "Subnets", path: "/vpc/subnets", icon: Split, visible: (p) => p.vpc },
-      { name: "Elastic IPs", path: "/networks/kube-ovn/ovn-eips", icon: Globe, match: ["/networks/kube-ovn/iptables-eips", "/networks/kube-ovn/ovn-fips", "/networks/kube-ovn/iptables-fip-rules"], visible: (p) => p.vpc },
-      { name: "NAT Gateways", path: "/networks/kube-ovn/vpc-nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/ovn-snat-rules", "/networks/kube-ovn/ovn-dnat-rules"], visible: (p) => p.vpc },
-      { name: "Load Balancers", path: "/networks/kubernetes/services", icon: Scale },
-      { name: "Multus Networks", path: "/networks/kubernetes/nads", icon: Route, requires: ["k8s.cni.cncf.io/v1", "network-attachment-definitions"] },
-    ],
-  },
-  {
-    label: "Security",
-    items: [
-      { name: "Security Groups", path: "/vpc/security-groups", icon: ShieldCheck, visible: (p) => p.acl !== "networkpolicy" },
-      { name: "Network Policies", path: "/networks/kubernetes/network-policies", icon: Shield, match: ["/networks/cilium/network-policies", "/networks/cilium/clusterwide-network-policies"] },
-    ],
-  },
-  {
-    label: "Platform",
-    items: [
-      { name: "Resource Catalog", path: "/catalog", icon: ListChecks, match: ["/kubernetes", "/kubevirt", "/storage", "/networks"] },
-      { name: "Settings", path: "/settings", icon: Settings },
-    ],
-  },
-]
-
-const isVisible = (item: NavItem, profile: NetworkProfile, discovery: Discovery) => {
-  if (item.visible && !item.visible(profile)) return false
-  if (item.requires && discovery.loaded) {
-    const [groupVersion, resource] = item.requires
-    const group = groupVersion.split("/")[0]
-    // Accept any served version of the group for the resource.
-    return discovery.hasResource(groupVersion, resource) || ["v1", "v1beta1", "v1alpha1", "v1alpha2", "v2"].some((version) => discovery.hasResource(`${group}/${version}`, resource))
-  }
-  return true
-}
-
-/** Navigation rail item: muted text, accent background and a primary indicator bar when active. */
 const navButtonClass = [
-  "relative h-9 text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-  "[&>svg]:text-sidebar-foreground/55 hover:[&>svg]:text-sidebar-accent-foreground",
-  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground data-[active=true]:[&>svg]:text-sidebar-primary",
-  "data-[active=true]:before:absolute data-[active=true]:before:inset-y-2 data-[active=true]:before:-left-2 data-[active=true]:before:w-[3px] data-[active=true]:before:rounded-r-full data-[active=true]:before:bg-sidebar-primary",
+  "h-8 font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+  "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[active=true]:[&>svg]:text-sidebar-primary",
 ].join(" ")
-
-const allItems = sections.flatMap((section) => section.items)
-
-/** Longest-prefix match so specific entries win over generic catalog entries. */
-const activeItemPath = (pathname: string) => {
-  if (pathname === "/") return "/"
-  let best = ""
-  let bestLength = 0
-  for (const item of allItems) {
-    for (const prefix of [item.path, ...(item.match || [])]) {
-      if ((pathname === prefix || pathname.startsWith(`${prefix}/`)) && prefix.length > bestLength) {
-        best = item.path
-        bestLength = prefix.length
-      }
-    }
-  }
-  return best
-}
 
 export function AppSidebar() {
   const location = useLocation()
   const profile = useNetworkProfile()
-  const discovery = useDiscovery()
-  const active = activeItemPath(location.pathname)
+  const sections = useNavSections()
+  const active = findActiveNav(location.pathname)?.item.path
 
   return (
-    <Sidebar collapsible="offcanvas">
-      <SidebarHeader className="border-b border-sidebar-border">
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="h-(--header-height) justify-center border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild className="h-12 hover:bg-sidebar-accent data-[slot=sidebar-menu-button]:!p-1.5">
+            <SidebarMenuButton asChild size="lg" className="h-10 hover:bg-transparent active:bg-transparent">
               <Link to="/">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary">
-                  <Terminal className="size-4 text-sidebar-primary-foreground" />
+                <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                  <Hexagon className="size-4" strokeWidth={2.5} />
                 </div>
                 <div className="flex flex-col leading-tight">
-                  <span className="text-sm font-semibold text-sidebar-accent-foreground">Virt Console</span>
-                  <span className="text-xs text-sidebar-foreground/55">Private cloud</span>
+                  <span className="text-sm font-semibold tracking-tight text-sidebar-accent-foreground">Virt Console</span>
+                  <span className="text-xs text-muted-foreground">KubeVirt cloud</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -163,62 +48,43 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={active === "/"} className={navButtonClass}>
-                  <Link to="/">
-                    <LayoutDashboard />
-                    <span>Overview</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        {sections.map((section) => {
-          const items = section.items.filter((item) => isVisible(item, profile, discovery))
-          if (items.length === 0) return null
-          return (
-            <SidebarGroup key={section.label} className="py-1">
-              <SidebarGroupLabel className="text-sidebar-foreground/45">{section.label}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {items.map((item) => (
-                    <SidebarMenuItem key={item.path}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={active === item.path}
-                        className={navButtonClass}
-                      >
-                        <Link to={item.path}>
-                          <item.icon />
-                          <span>{item.name}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          )
-        })}
+      <SidebarContent className="gap-0 py-2">
+        {sections.map((section) => (
+          <SidebarGroup key={section.label} className="py-1">
+            {section.label !== "Home" && <SidebarGroupLabel className="h-7 text-xs font-medium text-muted-foreground">{section.label}</SidebarGroupLabel>}
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {section.items.map((item) => (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton asChild isActive={active === item.path} tooltip={item.name} className={navButtonClass}>
+                      <Link to={item.path}>
+                        <item.icon />
+                        <span>{item.name}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
-      <SidebarFooter>
-        <Link to="/settings" className="block rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-2.5 transition-colors hover:bg-sidebar-accent">
-          <div className="flex items-center gap-2 text-xs text-sidebar-foreground/55">
-            <span className={profile.loaded ? "size-1.5 rounded-full bg-green-500" : "size-1.5 rounded-full bg-sidebar-foreground/40"} />
-            Network stack
-          </div>
-          <div className="truncate text-sm font-semibold text-sidebar-accent-foreground">{profile.loaded ? profile.label : "Detecting..."}</div>
-          <div className="text-xs text-sidebar-foreground/55">
-            ACL: {profile.aclEngines.length ? profile.aclEngines.map((engine) => engine === "cilium" ? "Cilium" : "Kube-OVN").join(" / ") : "NetworkPolicy"}
+      <SidebarFooter className="border-t border-sidebar-border group-data-[collapsible=icon]:hidden">
+        <Link to="/settings" className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-accent">
+          <span className="relative flex size-2.5 shrink-0">
+            <span className={profile.loaded ? "absolute inline-flex size-full animate-ping rounded-full bg-green-500/50" : "hidden"} />
+            <span className={profile.loaded ? "relative inline-flex size-2.5 rounded-full bg-green-500" : "relative inline-flex size-2.5 rounded-full bg-muted-foreground/40"} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold text-sidebar-accent-foreground">{profile.loaded ? profile.label : "Detecting stack..."}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              ACL {profile.aclEngines.length ? profile.aclEngines.map((engine) => engine === "cilium" ? "Cilium" : "Kube-OVN").join(" / ") : "NetworkPolicy"}
+            </div>
           </div>
         </Link>
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }
