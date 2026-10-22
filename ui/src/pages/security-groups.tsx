@@ -67,7 +67,10 @@ import {
   listAllSecurityGroups,
   setVmSecurityGroupRefs,
   sgRefKey,
+  sgRefOf,
   vmSecurityGroupRefs,
+  isGlobalGroup,
+  listAddressGroups,
 } from "@/lib/security-groups"
 import { isDnsLabel } from "@/lib/validate"
 import { t } from "@/lib/i18n"
@@ -85,7 +88,7 @@ function ProviderNote({ provider }: { provider: SgProvider }) {
       {provider === "kube-ovn" ? (
         <>{t("OVN port ACLs, cluster wide. Attached via")} <code className="font-mono">ovn.kubernetes.io/security_groups</code>{t(". Lower priority runs first.")}</>
       ) : (
-        <>{t("CiliumNetworkPolicy per namespace. Attached via label")} <code className="font-mono">sg.kubevirt-dashboard.io/&lt;name&gt;</code>{t(". Inbound is denied unless allowed; deny wins.")}</>
+        <>{t("CiliumNetworkPolicy per namespace, or CiliumClusterwideNetworkPolicy for cluster-wide groups. Attached via label")} <code className="font-mono">sg.kubevirt-dashboard.io/&lt;name&gt;</code>{t(". Inbound is denied unless allowed; deny wins.")}</>
       )}
     </p>
   )
@@ -98,17 +101,20 @@ function RuleEditor({
   direction,
   provider,
   groups,
+  addressGroups,
   onChange,
 }: {
   rules: SgRule[]
   direction: SgDirection
   provider: SgProvider
   groups: string[]
+  /** CiliumCIDRGroup names; only Cilium rules can reference them. */
+  addressGroups: string[]
   onChange: (rules: SgRule[]) => void
 }) {
   const visible = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => rule.direction === direction)
   const update = (index: number, patch: Partial<SgRule>) => onChange(rules.map((rule, i) => i === index ? { ...rule, ...patch } : rule))
-  const columns = provider === "kube-ovn" ? "grid-cols-[110px_110px_130px_130px_1fr_90px_40px]" : "grid-cols-[110px_110px_130px_130px_1fr_40px]"
+  const columns = provider === "kube-ovn" ? "grid-cols-[110px_110px_130px_150px_1fr_90px_40px]" : "grid-cols-[110px_110px_130px_150px_1fr_40px]"
   return (
     <div className="space-y-2">
       <div className="overflow-x-auto">
@@ -140,9 +146,15 @@ function RuleEditor({
                 <option value="any">{t("Anywhere")}</option>
                 <option value="cidr">{t("CIDR block")}</option>
                 <option value="group">{t("Security group")}</option>
+                {provider === "cilium" && <option value="addressGroup">{t("Address group")}</option>}
               </NativeSelect>
               {rule.remoteType === "cidr" ? (
                 <Input className="font-mono text-xs" value={rule.remote} onChange={(e) => update(index, { remote: e.target.value })} placeholder="10.0.0.0/8" />
+              ) : rule.remoteType === "addressGroup" ? (
+                <NativeSelect value={rule.remote} onChange={(e) => update(index, { remote: e.target.value })}>
+                  <option value="">{t("Select an address group")}</option>
+                  {Array.from(new Set([rule.remote, ...addressGroups].filter(Boolean))).map((group) => <option key={group} value={group}>{group}</option>)}
+                </NativeSelect>
               ) : rule.remoteType === "group" ? (
                 <NativeSelect value={rule.remote} onChange={(e) => update(index, { remote: e.target.value })}>
                   <option value="">{t("Select a group")}</option>
@@ -180,7 +192,7 @@ function RuleTable({ rules, direction, provider }: { rules: SgRule[]; direction:
       columns={[
         { header: t("Action"), cell: ({ rule }) => <Badge variant={rule.action === "allow" ? "success" : "danger"}>{rule.action === "allow" ? t("Allow") : t("Deny")}</Badge> },
         { header: t("Protocol / ports"), cell: ({ rule }) => <span className="text-sm">{ruleSummary(rule)}</span> },
-        { header: direction === "ingress" ? "Source" : "Destination", cell: ({ rule }) => <span className="font-mono text-xs">{remoteSummary(rule)}</span> },
+        { header: direction === "ingress" ? t("Source") : t("Destination"), cell: ({ rule }) => <span className="font-mono text-xs">{remoteSummary(rule)}</span> },
         ...(provider === "kube-ovn" ? [{ header: t("Priority"), cell: ({ rule }: { rule: SgRule }) => <span className="text-sm tabular-nums">{rule.priority}</span> }] : []),
       ]}
     />
@@ -208,6 +220,7 @@ function CreateSecurityGroupDialog({
   const [provider, setProvider] = useState(defaultProvider)
   const [name, setName] = useState("")
   const [namespace, setNamespace] = useState(defaultNamespace)
+  const [clusterWide, setClusterWide] = useState(false)
   const [description, setDescription] = useState("")
   const [template, setTemplate] = useState("ssh")
   const [allowSameGroup, setAllowSameGroup] = useState(true)
@@ -230,9 +243,10 @@ function CreateSecurityGroupDialog({
     setError("")
     try {
       const rules = ruleTemplates.find((item) => item.id === template)?.rules || []
-      await createSecurityGroup(provider, { name: name.trim(), namespace, description: description.trim(), rules, allowSameGroup })
+      const scoped = provider === "cilium" && !clusterWide ? namespace : undefined
+      await createSecurityGroup(provider, { name: name.trim(), namespace: scoped, description: description.trim(), rules, allowSameGroup })
       onOpenChange(false)
-      onCreated({ provider, name: name.trim(), namespace: provider === "cilium" ? namespace : undefined })
+      onCreated({ provider, name: name.trim(), namespace: scoped })
     } catch (err) {
       setError(err instanceof Error ? err.message : t("Failed to create security group"))
     } finally {
@@ -266,8 +280,9 @@ function CreateSecurityGroupDialog({
         <div className="grid gap-4 sm:grid-cols-2">
           <FieldRow label={t("Name")}><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="sg-web" /></FieldRow>
           {provider === "cilium" ? (
-            <FieldRow label={t("Namespace")} hint={t("Cilium groups apply to instances in this namespace.")}>
-              <NativeSelect value={namespace} onChange={(e) => setNamespace(e.target.value)}>
+            <FieldRow label={t("Namespace")} hint={clusterWide ? t("Instances in any namespace can join a cluster-wide group.") : t("Cilium groups apply to instances in this namespace.")}>
+              <NativeSelect value={clusterWide ? "" : namespace} disabled={clusterWide} onChange={(e) => setNamespace(e.target.value)}>
+                {clusterWide && <option value="">{t("All namespaces")}</option>}
                 {Array.from(new Set([namespace, ...namespaces])).map((ns) => <option key={ns} value={ns}>{ns}</option>)}
               </NativeSelect>
             </FieldRow>
@@ -278,6 +293,12 @@ function CreateSecurityGroupDialog({
             <FieldRow label={t("Description")}><Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t("Web tier")} /></FieldRow>
           </div>
         </div>
+        {provider === "cilium" && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <ChoiceCard selected={!clusterWide} onClick={() => setClusterWide(false)} title={t("Namespace")} description="CiliumNetworkPolicy" />
+            <ChoiceCard selected={clusterWide} onClick={() => setClusterWide(true)} title={t("Cluster wide")} description="CiliumClusterwideNetworkPolicy" />
+          </div>
+        )}
         <div className="space-y-2">
           <div className="text-sm font-medium">{t("Start from a template")}</div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -296,7 +317,7 @@ function CreateSecurityGroupDialog({
         {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>{t("Cancel")}</Button>
-          <Button onClick={submit} disabled={busy || !name.trim() || (provider === "cilium" && !namespace)}>{busy ? t("Creating...") : t("Create")}</Button>
+          <Button onClick={submit} disabled={busy || !name.trim() || (provider === "cilium" && !clusterWide && !namespace)}>{busy ? t("Creating...") : t("Create")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -310,7 +331,7 @@ type GroupRow = { sg: SecurityGroup; instances: number }
 const groupFields: FilterField<GroupRow>[] = [
   { key: "name", label: "Name", value: (row) => row.sg.name },
   { key: "description", label: "Description", aliases: ["desc"], value: (row) => row.sg.description },
-  { key: "namespace", label: "Namespace", aliases: ["ns"], value: (row) => row.sg.namespace },
+  { key: "namespace", label: "Namespace", aliases: ["ns"], value: (row) => row.sg.namespace || "cluster" },
   { key: "type", label: "Type", value: (row) => (row.sg.managed ? "Security group" : `Policy ${row.sg.selector}`) },
   { key: "instances", label: "Instances", value: (row) => row.instances },
 ]
@@ -339,7 +360,8 @@ export function SecurityGroupListPage() {
   }, { groups: [] as SecurityGroup[], vms: [] as KubeObject[] }, [provider, scope])
 
   const allRows = useMemo(() => data.groups
-    .filter((sg) => provider !== "cilium" || ns.match(sg.namespace))
+    // Cluster-wide groups apply in every namespace, so a namespace filter keeps them.
+    .filter((sg) => provider !== "cilium" || !sg.namespace || ns.match(sg.namespace))
     .map((sg): GroupRow => ({ sg, instances: data.vms.filter((vm) => vmMatchesGroup(vm, sg)).length })), [data, ns, provider])
   const rows = useFilteredRows(allRows, groupFields, search)
 
@@ -415,7 +437,7 @@ export function SecurityGroupListPage() {
               </div>
             ),
           },
-          ...(provider === "cilium" ? [{ header: t("Namespace"), cell: ({ sg }: GroupRow) => <span className="text-sm text-muted-foreground">{sg.namespace}</span> }] : []),
+          ...(provider === "cilium" ? [{ header: t("Namespace"), cell: ({ sg }: GroupRow) => <span className="text-sm text-muted-foreground">{sg.namespace || t("Cluster wide")}</span> }] : []),
           { header: t("Inbound"), cell: ({ sg }) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "ingress").length}</span> },
           { header: t("Outbound"), cell: ({ sg }) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "egress").length}</span> },
           { header: t("Instances"), cell: ({ instances }) => <span className="text-sm tabular-nums">{instances}</span> },
@@ -473,18 +495,22 @@ export function SecurityGroupDetailPage() {
   const [bindOpen, setBindOpen] = useState(false)
 
   const { data, loading, reload } = useAsync(async () => {
-    const [sg, peers, vms] = await Promise.all([
+    const [sg, peers, vms, addressGroups] = await Promise.all([
       getSecurityGroup(provider, name, namespace),
       listSecurityGroups(provider, namespace),
-      listItems(provider === "cilium" ? `/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines` : "/apis/kubevirt.io/v1/virtualmachines"),
+      listItems(provider === "cilium" && namespace ? `/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines` : "/apis/kubevirt.io/v1/virtualmachines"),
+      provider === "cilium" ? listAddressGroups() : Promise.resolve([]),
     ])
-    return { sg, peers: peers.filter((peer) => peer.managed).map((peer) => peer.name), vms }
-  }, { sg: null as SecurityGroup | null, peers: [] as string[], vms: [] as KubeObject[] }, [provider, name, namespace])
+    // Rules reference groups of the same scope: the namespace, or the cluster-wide groups.
+    const samePeers = peers.filter((peer) => peer.managed && (peer.provider !== "cilium" || (peer.namespace || undefined) === namespace))
+    return { sg, peers: samePeers.map((peer) => peer.name), vms, addressGroups: addressGroups.map((group) => group.name) }
+  }, { sg: null as SecurityGroup | null, peers: [] as string[], vms: [] as KubeObject[], addressGroups: [] as string[] }, [provider, name, namespace])
 
   if (loading && !data.sg) return <LoadingState />
   if (!data.sg) return <EmptyState icon={ShieldCheck} title={t("Security group not found")} action={<Button asChild variant="outline" size="sm"><Link to="/vpc/security-groups">{t("Back to security groups")}</Link></Button>} />
 
   const sg = data.sg
+  const global = isGlobalGroup(sg)
   const members = data.vms.filter((vm) => vmMatchesGroup(vm, sg))
   const editable = sg.unsupported === 0
   const rules = draft?.rules ?? sg.rules
@@ -521,7 +547,7 @@ export function SecurityGroupDetailPage() {
         breadcrumbs={[{ label: t("Security Groups"), to: provider === "kube-ovn" ? "/vpc/security-groups?engine=kube-ovn" : "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
         title={sg.name}
         subtitle={sg.description || undefined}
-        badge={<Badge variant="outline">{providerLabel[provider]}</Badge>}
+        badge={<Badge variant="outline">{global ? "CiliumClusterwideNetworkPolicy" : providerLabel[provider]}</Badge>}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
@@ -532,8 +558,8 @@ export function SecurityGroupDetailPage() {
       <Panel title={t("Basic information")}>
           <KeyValueGrid items={[
             { label: t("Name"), value: sg.name },
-            { label: t("Scope"), value: sg.namespace ? t("Namespace {namespace}", { namespace: sg.namespace }) : "Cluster wide" },
-            { label: t("Backed by"), value: providerLabel[provider] },
+            { label: t("Scope"), value: sg.namespace ? t("Namespace {namespace}", { namespace: sg.namespace }) : t("Cluster wide") },
+            { label: t("Backed by"), value: global ? "CiliumClusterwideNetworkPolicy" : providerLabel[provider] },
             { label: t("Applies to"), value: <span className="font-mono text-xs">{sg.selector}</span> },
             { label: t("Traffic between members"), value: sg.allowSameGroup ? "Allowed" : "Follows rules" },
             { label: t("Created"), value: relativeTime(sg.raw.metadata.creationTimestamp) },
@@ -541,7 +567,7 @@ export function SecurityGroupDetailPage() {
         </Panel>
       <ProviderNote provider={provider} />
       {!editable && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">{t("This policy contains")} {sg.unsupported} rule{sg.unsupported > 1 ? "s" : ""} {t("this editor cannot represent (L7, FQDN or custom selectors). Edit it from the")} <Link className="underline" to={`/networks/cilium/network-policies/${sg.namespace}/${sg.name}/manifest`}>manifest</Link>.
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">{t("This policy contains")} {sg.unsupported} rule{sg.unsupported > 1 ? "s" : ""} {t("this editor cannot represent (L7, FQDN or custom selectors). Edit it from the")} <Link className="underline" to={global ? `/networks/cilium/clusterwide-network-policies/_cluster/${sg.name}/manifest` : `/networks/cilium/network-policies/${sg.namespace}/${sg.name}/manifest`}>{t("manifest")}</Link>.
         </div>
       )}
 
@@ -585,7 +611,7 @@ export function SecurityGroupDetailPage() {
         >
             {draft ? (
               <>
-                <RuleEditor rules={draft.rules} direction={tab} provider={provider} groups={data.peers} onChange={(next) => setDraft({ ...draft, rules: next })} />
+                <RuleEditor rules={draft.rules} direction={tab} provider={provider} groups={data.peers} addressGroups={data.addressGroups} onChange={(next) => setDraft({ ...draft, rules: next })} />
                 {tab === "ingress" && (
                   <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
                     <div>
@@ -652,7 +678,7 @@ export function SecurityGroupDetailPage() {
         confirmLabel={t("Detach")}
         onConfirm={async () => {
           if (!detaching) return
-          await setVmSecurityGroups(detaching, provider, vmSecurityGroups(detaching, provider).filter((group) => group !== sg.name))
+          await setVmSecurityGroups(detaching, provider, vmSecurityGroups(detaching, provider, global).filter((group) => group !== sg.name), global)
           reload()
         }}
       />
@@ -684,7 +710,8 @@ function AttachInstancesDialog({ open, onOpenChange, sg, vms, onDone }: { open: 
       confirmLabel={t("Attach")}
       onConfirm={async () => {
         const targets = vms.filter((vm) => selected[key(vm)])
-        await Promise.all(targets.map((vm) => setVmSecurityGroups(vm, sg.provider, Array.from(new Set([...vmSecurityGroups(vm, sg.provider), sg.name])))))
+        const global = isGlobalGroup(sg)
+        await Promise.all(targets.map((vm) => setVmSecurityGroups(vm, sg.provider, Array.from(new Set([...vmSecurityGroups(vm, sg.provider, global), sg.name])), global)))
         setSelected({})
         onDone()
       }}
@@ -726,7 +753,7 @@ export function InstanceSecurityGroupsDialog({ open, onOpenChange, vm, onDone }:
       description={providers.length > 1 ? t("Pick groups from either engine. Cilium and Kube-OVN rules both apply when an instance uses groups from both.") : t("Updates the instance template and its running pod.")}
       confirmLabel={t("Save")}
       onConfirm={async () => {
-        const refs = groups.filter((sg) => selected.includes(sgRefKey(sg))).map((sg) => ({ provider: sg.provider, name: sg.name }))
+        const refs = groups.filter((sg) => selected.includes(sgRefKey(sgRefOf(sg)))).map(sgRefOf)
         await setVmSecurityGroupRefs(vm, providers, refs)
         onDone()
       }}
@@ -740,7 +767,7 @@ export function InstanceSecurityGroupsDialog({ open, onOpenChange, vm, onDone }:
             <div key={engine} className="space-y-1">
               {providers.length > 1 && <div className="text-xs font-semibold text-muted-foreground">{engineLabel[engine]}</div>}
               {items.map((sg) => {
-                const key = sgRefKey(sg)
+                const key = sgRefKey(sgRefOf(sg))
                 return (
                   <label key={key} className="flex items-center gap-3 rounded-lg border p-2 text-sm hover:bg-muted/50">
                     <input
@@ -750,6 +777,7 @@ export function InstanceSecurityGroupsDialog({ open, onOpenChange, vm, onDone }:
                       onChange={(e) => setSelected((current) => e.target.checked ? [...current, key] : current.filter((item) => item !== key))}
                     />
                     <span className="font-medium">{sg.name}</span>
+                    {isGlobalGroup(sg) && <Badge variant="outline">{t("Cluster wide")}</Badge>}
                     <span className="truncate text-muted-foreground">{sg.description || t("{count} rules", { count: sg.rules.length })}</span>
                   </label>
                 )

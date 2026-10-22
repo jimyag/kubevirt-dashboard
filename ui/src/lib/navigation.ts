@@ -1,6 +1,7 @@
 import type { ComponentType } from "react"
 import {
   Bell,
+  Bookmark,
   Boxes,
   Camera,
   Cpu,
@@ -12,6 +13,7 @@ import {
   LayoutDashboard,
   Layers,
   ListChecks,
+  ListTree,
   Network,
   Route,
   Scale,
@@ -91,6 +93,7 @@ export const navSections: NavSection[] = [
     items: [
       { name: "VPCs", path: "/vpc/vpcs", icon: Network, visible: (p) => p.vpc },
       { name: "Subnets", path: "/vpc/subnets", icon: Split, visible: (p) => p.vpc },
+      { name: "Reserved IPs", path: "/vpc/reserved-ips", icon: Bookmark, match: ["/networks/kube-ovn/vips"], visible: (p) => p.vpc },
       { name: "Elastic IPs", path: "/vpc/elastic-ips", icon: Globe, match: ["/networks/kube-ovn/iptables-eips", "/networks/kube-ovn/ovn-eips"], visible: (p) => p.vpc },
       { name: "NAT Gateways", path: "/vpc/nat-gateways", icon: Waypoints, match: ["/networks/kube-ovn/vpc-nat-gateways", "/networks/kube-ovn/iptables-snat-rules", "/networks/kube-ovn/iptables-dnat-rules", "/networks/kube-ovn/iptables-fip-rules", "/networks/kube-ovn/ovn-snat-rules", "/networks/kube-ovn/ovn-dnat-rules", "/networks/kube-ovn/ovn-fips"], visible: (p) => p.vpc },
       { name: "Load Balancers", path: "/networks/kubernetes/services", icon: Scale },
@@ -102,6 +105,7 @@ export const navSections: NavSection[] = [
     tone: "security",
     items: [
       { name: "Security Groups", path: "/vpc/security-groups", icon: ShieldCheck, visible: (p) => p.acl !== "networkpolicy" },
+      { name: "Address Groups", path: "/vpc/address-groups", icon: ListTree, match: ["/networks/cilium/cidr-groups"], requires: ["cilium.io/v2", "ciliumcidrgroups"], visible: (p) => p.aclEngines.includes("cilium") },
       { name: "Network Policies", path: "/networks/kubernetes/network-policies", icon: Shield, match: ["/networks/cilium/network-policies", "/networks/cilium/clusterwide-network-policies"] },
     ],
   },

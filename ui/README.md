@@ -20,10 +20,13 @@ Run the Go binary (`./kubevirt-dashboard --listen 127.0.0.1:11111`) for the dev 
 | `src/App.tsx` | Routes |
 | `src/pages/` | Console pages: overview, instances and create wizard, VPCs and subnets, elastic IPs and NAT, security groups, events, settings |
 | `src/pages/instance-detail.tsx`, `src/pages/disks.tsx` | Instance detail tabs; disk list and detail |
+| `src/pages/reserved-ips.tsx`, `src/pages/address-groups.tsx` | Reserved IPs (Kube-OVN `Vip`); Cilium address groups (`CiliumCIDRGroup`) |
 | `src/components/console.tsx` | Shared console components (page header, tables, panels, status, dialogs) |
 | `src/components/resource-management.tsx` | Generic list, detail, manifest, create and edit views used by the Resource Catalog |
 | `src/components/resource-overviews.tsx`, `src/components/detail-parts.tsx` | Pod, workload and node detail layouts; shared detail tables and sections |
 | `src/components/instance-eip.tsx` | Elastic IP bindings on the instance network tab |
+| `src/components/instance-network.tsx`, `src/lib/vm-network.ts` | Instance NICs (Multus attachments) and bandwidth limits |
+| `src/components/vpc-routing.tsx`, `src/components/ip-pools.tsx` | VPC route tables and peering; subnet IP pools |
 | `src/components/yaml-editor.tsx`, `src/components/manifest.tsx` | YAML viewer and editor (search, folding, diff) and the manifest tab |
 | `src/components/ui/` | shadcn/ui components; do not edit them directly |
 | `src/resources/config/` | One `ResourceConfig` per API resource: paths, columns, create form and actions |

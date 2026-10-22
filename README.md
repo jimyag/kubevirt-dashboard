@@ -11,6 +11,8 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 - **Network stacks**: detects Kube-OVN and Cilium and adapts instance networking and security groups (see below).
 - **Filtering**: every list filter is a text box with suggestions (namespaces, VPCs, kinds), and the search box filters any shown column with `field:value` tokens, e.g. `web status:running host:node-1 -ns:dev`. An exact namespace is sent to the API; partial text filters locally. Long lists are paged.
 - **NAT**: elastic IPs, SNAT, DNAT and floating IPs for both Kube-OVN NAT models: VPC NAT gateways (`IptablesEIP`, `Iptables*Rule`) and OVN native NAT (`OvnEip`, `OvnSnatRule`, `OvnDnatRule`, `OvnFip`). An instance's network tab shows its elastic IPs and binds a floating IP or adds port forwarding directly.
+- **VPC networking** (Kube-OVN): static and policy routes, VPC peering, reserved private IPs (`Vip`), IP pools per subnet, per-instance bandwidth limits, and extra NICs on Kube-OVN subnets or other networks through Multus.
+- **Cilium security groups**: per namespace (`CiliumNetworkPolicy`) or cluster wide (`CiliumClusterwideNetworkPolicy`), with address groups (`CiliumCIDRGroup`) as rule sources and destinations.
 - **Manifests**: `kubectl get -o yaml` output with highlighting, search and folding; edits are saved after a diff review and rejected if someone else changed the object meanwhile.
 - **Events and monitoring**: a cluster-wide event browser, events on every resource detail page, live CPU and memory from metrics-server, and VM history charts from Prometheus when one is configured.
 - **Languages**: English and Simplified Chinese, switched from the header or Settings; the browser language is used by default.
@@ -40,7 +42,7 @@ The stack is detected from the CRDs the cluster serves and can be overridden per
 | KubeVirt + Kube-OVN + Cilium (recommended) | Kube-OVN VPC and subnet | `CiliumNetworkPolicy` by default; Kube-OVN `SecurityGroup` can be chosen per group and per instance |
 | KubeVirt + Cilium | Pod network | `CiliumNetworkPolicy` |
 
-Cilium security groups are `CiliumNetworkPolicy` objects in the instance namespace that select the label `sg.kubevirt-dashboard.io/<name>=true`; the console sets that label on the VM template. Kube-OVN security groups are cluster scoped and attached through the `ovn.kubernetes.io/security_groups` annotation with port security enabled. Subnets in Kube-OVN mode also have a subnet-level network ACL editor.
+Cilium security groups are `CiliumNetworkPolicy` objects in the instance namespace that select the label `sg.kubevirt-dashboard.io/<name>=true`; the console sets that label on the VM template. Cluster-wide groups are `CiliumClusterwideNetworkPolicy` objects selecting `global.sg.kubevirt-dashboard.io/<name>=true`, so instances in any namespace can join them. Kube-OVN security groups are cluster scoped and attached through the `ovn.kubernetes.io/security_groups` annotation with port security enabled. Subnets in Kube-OVN mode also have a subnet-level network ACL editor.
 
 Attaching or detaching a security group updates the VM template and the running virt-launcher pod. If the CNI does not apply pod changes live, the change takes effect on the next restart.
 

@@ -22,7 +22,7 @@ import { SerialConsole } from "@/components/SerialConsole";
 import { RelatedPodsCard } from "@/components/pod-access";
 import { Button } from "@/components/ui/button";
 import { jsonPost, jsonPut, keyValueText, mergePatch, numberValue, parseKeyValueText, stringValue } from "@/resources/configs";
-import { ConfirmDialog, DataTable, EmptyState, KeyValueGrid, PageHeader, Panel, StatusDot } from "@/components/console";
+import { ConfirmDialog, KeyValueGrid, PageHeader, Panel, StatusDot } from "@/components/console";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { kubeOvnAnnotations, relativeTime, replaceMap, useNetworkProfile, type KubeObject } from "@/lib/kube";
-import { engineLabel, sgDetailPath, useSgProvider, vmSecurityGroupRefs } from "@/lib/security-groups";
+import { engineLabel, sgDetailPath, sgRefKey, useSgProvider, vmSecurityGroupRefs } from "@/lib/security-groups";
 import { EventList } from "@/components/events";
 import { VmMonitoring } from "@/components/monitoring";
 import { eventsUrl } from "@/lib/events";
@@ -43,6 +43,8 @@ import { usePolling } from "@/lib/polling";
 import { CopyableText, StatusBadge, VmActionDialog } from "@/components/vm-dialogs";
 import { apiFetch, isVm, vmPodSelectors, type DV, type VM, type VMI } from "@/lib/vm-pages";
 import { InstanceElasticIps } from "@/components/instance-eip";
+import { BandwidthDialog, InstanceInterfaces } from "@/components/instance-network";
+import { bandwidthSummary } from "@/lib/vm-network";
 
 type VmPowerAction = "start" | "stop" | "restart" | "pause" | "unpause" | "poweroff" | "migrate";
 
@@ -490,38 +492,19 @@ export function VMDetailContent() {
 
         {activeTab === "network" && (
           <div className="grid gap-4 lg:grid-cols-2">
-            <Panel title={t("Network interfaces")} className="lg:col-span-2">
-                <DataTable
-                  minWidth={640}
-                  rows={vm.spec.template?.spec?.domain?.devices?.interfaces || []}
-                  rowKey={(iface) => iface.name}
-                  empty={<EmptyState title={t("No interfaces declared")} />}
-                  columns={[
-                    { header: t("Interface"), cell: (iface) => <span className="font-medium">{iface.name}</span> },
-                    { header: t("Binding"), cell: (iface) => <span className="text-sm">{Object.keys(iface).filter((key) => !["name", "model", "macAddress"].includes(key)).join(", ") || "N/A"}</span> },
-                    {
-                      header: t("Network"),
-                      cell: (iface) => {
-                        const network = vm.spec.template?.spec?.networks?.find((item) => item.name === iface.name) as Record<string, unknown> | undefined;
-                        if (!network) return <span className="text-sm text-muted-foreground">N/A</span>;
-                        if (network.multus) return <span className="text-sm">{t("Multus")} {String((network.multus as Record<string, unknown>).networkName)}</span>;
-                        const subnet = templateAnnotations[kubeOvnAnnotations.logicalSwitch];
-                        return subnet ? <Link to={`/vpc/subnets/${subnet}`} className="text-sm hover:text-primary transition-colors">{t("Subnet")} {subnet}</Link> : <span className="text-sm">{t("Pod network")}</span>;
-                      },
-                    },
-                    { header: t("IP addresses"), cell: (iface) => <span className="font-mono text-xs">{(vmi?.status.interfaces?.find((item) => item.name === iface.name) as { ipAddresses?: string[]; ipAddress?: string } | undefined)?.ipAddresses?.join(", ") || vmi?.status.interfaces?.find((item) => item.name === iface.name)?.ipAddress || "-"}</span> },
-                    { header: t("MAC"), cell: (iface) => <span className="font-mono text-xs text-muted-foreground">{(vmi?.status.interfaces?.find((item) => item.name === iface.name) as { mac?: string } | undefined)?.mac || "-"}</span> },
-                  ]}
-                />
-              </Panel>
-            <Panel title={t("Placement")}>
+            <InstanceInterfaces vm={vm as unknown as KubeObject} runtime={vmi?.status.interfaces || []} onChanged={fetchData} />
+            <Panel title={t("Placement")} actions={profile.vpc && <Button size="sm" variant="outline" onClick={() => setDialog("Bandwidth")}>{t("Bandwidth")}</Button>}>
                 <KeyValueGrid items={[
                   { label: t("Subnet"), value: templateAnnotations[kubeOvnAnnotations.logicalSwitch] || (profile.vpc ? t("Namespace default") : t("Pod network")) },
-                  { label: t("Fixed IP"), value: templateAnnotations[kubeOvnAnnotations.ipAddress] || t("Dynamic") },
+                  templateAnnotations[kubeOvnAnnotations.vip]
+                    ? { label: t("Reserved IP"), value: <Link to="/vpc/reserved-ips" className="hover:text-primary transition-colors">{templateAnnotations[kubeOvnAnnotations.vip]}</Link> }
+                    : { label: t("Fixed IP"), value: templateAnnotations[kubeOvnAnnotations.ipAddress] || t("Dynamic") },
                   { label: t("Port security"), value: templateAnnotations[kubeOvnAnnotations.portSecurity] === "true" ? t("Enabled") : t("Disabled") },
                   { label: t("Host"), value: vmi?.status.nodeName || t("Not running") },
+                  ...(profile.vpc ? [{ label: t("Bandwidth"), value: bandwidthSummary(vm as unknown as KubeObject) }] : []),
                 ]} />
               </Panel>
+            <BandwidthDialog open={dialog === "Bandwidth"} onOpenChange={(open) => setDialog(open ? "Bandwidth" : null)} vm={vm as unknown as KubeObject} onChanged={fetchData} />
             <Panel
               title={t("Security groups")}
               description={sgProviders.length ? sgProviders.map((engine) => engineLabel[engine]).join(" / ") : t("Not available on this network stack")}
@@ -529,9 +512,9 @@ export function VMDetailContent() {
               bodyClassName="space-y-1.5"
             >
               {securityGroups.map((group) => (
-                <Link key={`${group.provider}:${group.name}`} to={sgDetailPath({ ...group, namespace })} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 hover:text-primary">
+                <Link key={sgRefKey(group)} to={sgDetailPath({ ...group, namespace: group.global ? undefined : namespace })} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 hover:text-primary">
                   <ShieldCheck className="size-4 text-muted-foreground" />{group.name}
-                  {sgProviders.length > 1 && <span className="ml-auto text-xs text-muted-foreground">{engineLabel[group.provider]}</span>}
+                  {(group.global || sgProviders.length > 1) && <span className="ml-auto text-xs text-muted-foreground">{[sgProviders.length > 1 ? engineLabel[group.provider] : "", group.global ? t("Cluster wide") : ""].filter(Boolean).join(" · ")}</span>}
                 </Link>
               ))}
               {sgProvider && securityGroups.length === 0 && <p className="text-sm text-muted-foreground">{t("None attached.")}</p>}
