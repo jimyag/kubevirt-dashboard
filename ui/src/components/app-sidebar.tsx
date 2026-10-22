@@ -111,6 +111,14 @@ const isVisible = (item: NavItem, profile: NetworkProfile, discovery: Discovery)
   return true
 }
 
+/** Navigation rail item: muted text, accent background and a primary indicator bar when active. */
+const navButtonClass = [
+  "relative h-9 text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+  "[&>svg]:text-sidebar-foreground/55 hover:[&>svg]:text-sidebar-accent-foreground",
+  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground data-[active=true]:[&>svg]:text-sidebar-primary",
+  "data-[active=true]:before:absolute data-[active=true]:before:inset-y-2 data-[active=true]:before:-left-2 data-[active=true]:before:w-[3px] data-[active=true]:before:rounded-r-full data-[active=true]:before:bg-sidebar-primary",
+].join(" ")
+
 const allItems = sections.flatMap((section) => section.items)
 
 /** Longest-prefix match so specific entries win over generic catalog entries. */
@@ -137,17 +145,17 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="offcanvas">
-      <SidebarHeader>
+      <SidebarHeader className="border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:!p-1.5">
+            <SidebarMenuButton asChild className="h-12 hover:bg-sidebar-accent data-[slot=sidebar-menu-button]:!p-1.5">
               <Link to="/">
-                <div className="bg-sidebar-primary p-1.5 rounded-lg">
-                  <Terminal className="text-sidebar-primary-foreground h-4 w-4" />
+                <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary">
+                  <Terminal className="size-4 text-sidebar-primary-foreground" />
                 </div>
                 <div className="flex flex-col leading-tight">
-                  <span className="text-sm font-semibold">Virt Console</span>
-                  <span className="text-xs text-muted-foreground">Private cloud</span>
+                  <span className="text-sm font-semibold text-sidebar-accent-foreground">Virt Console</span>
+                  <span className="text-xs text-sidebar-foreground/55">Private cloud</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -160,7 +168,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={active === "/"}>
+                <SidebarMenuButton asChild isActive={active === "/"} className={navButtonClass}>
                   <Link to="/">
                     <LayoutDashboard />
                     <span>Overview</span>
@@ -175,7 +183,7 @@ export function AppSidebar() {
           if (items.length === 0) return null
           return (
             <SidebarGroup key={section.label} className="py-1">
-              <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+              <SidebarGroupLabel className="text-sidebar-foreground/45">{section.label}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   {items.map((item) => (
@@ -183,7 +191,7 @@ export function AppSidebar() {
                       <SidebarMenuButton
                         asChild
                         isActive={active === item.path}
-                        className="data-[active=true]:bg-primary/10 data-[active=true]:text-primary"
+                        className={navButtonClass}
                       >
                         <Link to={item.path}>
                           <item.icon />
@@ -200,10 +208,13 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter>
-        <Link to="/settings" className="block rounded-lg border bg-card p-2.5 transition-colors hover:bg-muted/50">
-          <div className="text-xs text-muted-foreground">Network stack</div>
-          <div className="truncate text-sm font-semibold">{profile.loaded ? profile.label : "Detecting..."}</div>
-          <div className="text-xs text-muted-foreground">
+        <Link to="/settings" className="block rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-2.5 transition-colors hover:bg-sidebar-accent">
+          <div className="flex items-center gap-2 text-xs text-sidebar-foreground/55">
+            <span className={profile.loaded ? "size-1.5 rounded-full bg-green-500" : "size-1.5 rounded-full bg-sidebar-foreground/40"} />
+            Network stack
+          </div>
+          <div className="truncate text-sm font-semibold text-sidebar-accent-foreground">{profile.loaded ? profile.label : "Detecting..."}</div>
+          <div className="text-xs text-sidebar-foreground/55">
             ACL: {profile.aclEngines.length ? profile.aclEngines.map((engine) => engine === "cilium" ? "Cilium" : "Kube-OVN").join(" / ") : "NetworkPolicy"}
           </div>
         </Link>
