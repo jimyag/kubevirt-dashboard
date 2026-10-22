@@ -1,9 +1,9 @@
-import { useCallback, useState, useEffect, useMemo } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, Navigate } from "react-router-dom";
 import {
-  Cpu, Terminal, ChevronLeft, FileCode, Info, Network, HardDrive,
-  Layers, ShieldCheck, Server, Database, Hash, Bell, Clock, TrendingUp, BarChart3,
-  Search, Box, Filter, Check, Copy, MousePointer2, RefreshCw
+  Terminal, ChevronLeft, FileCode, Info, Network, HardDrive,
+  Layers, ShieldCheck, Database, Bell, Clock, TrendingUp, BarChart3,
+  Search, Check, Copy, MousePointer2, RefreshCw, Play, Square, RotateCcw, MonitorPlay, ChevronDown
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
@@ -19,7 +19,23 @@ import { Toaster } from "./components/ui/sonner";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card as ShadCard, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
-import { dvCreateConfig, jsonPost, jsonPut, keyValueText, mergePatch, numberValue, parseKeyValueText, resourceConfigs, stringValue, vmCreateConfig } from "./resources/configs";
+import { dvCreateConfig, jsonPost, jsonPut, keyValueText, mergePatch, numberValue, parseKeyValueText, resourceConfigs, stringValue } from "./resources/configs";
+import { DataTable, EmptyState, KeyValueGrid, PageHeader, StatusDot } from "./components/console";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu";
+import { kubeOvnAnnotations, useNetworkProfile, type KubeObject } from "./lib/kube";
+import { sgDetailPath, useSgProvider, vmSecurityGroups } from "./lib/security-groups";
+import { CreateInstancePage, InstanceListPage } from "./pages/instances";
+import { OverviewPage } from "./pages/overview";
+import { InstanceSecurityGroupsDialog, SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
+import { CatalogPage, SettingsPage } from "./pages/settings";
+import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
 import { KubernetesCategoryPage, KubernetesManagementPage, KubeVirtCategoryPage, KubeVirtManagementPage, NetworkCategoryPage, NetworkManagementPage, StorageCategoryPage, StorageManagementPage } from "./resources/group-pages";
 import {
   Dialog,
@@ -48,11 +64,8 @@ interface VM { metadata: ResourceMetadata; spec: { running?: boolean; runStrateg
 interface VMI { metadata: ResourceMetadata; status: { phase: string; interfaces?: Array<{ ipAddress?: string; name: string }>; nodeName?: string }; }
 interface DVStorageSpec { storageClassName?: string; accessModes?: string[]; volumeMode?: string; resources?: { requests?: { storage?: string } } }
 interface DV { metadata: ResourceMetadata; status?: { phase: string; progress?: string; claimName?: string; conditions?: Array<{ type: string; status: string; message?: string; reason?: string }>; }; spec: { storage?: DVStorageSpec; pvc?: DVStorageSpec; source?: Record<string, unknown>; }; }
-interface K8sNode { metadata: ResourceMetadata; status: { capacity: Record<string, string>; allocatable: Record<string, string>; conditions: Array<{ type: string; status: string }>; }; spec: { unschedulable?: boolean }; }
-interface K8sPod { metadata: ResourceMetadata; status: { phase: string; containerStatuses?: Array<{ ready: boolean; restartCount: number }>; }; }
 interface K8sEvent { metadata: ResourceMetadata; involvedObject: { kind: string; name: string; namespace: string; uid: string; }; reason: string; message: string; type: string; lastTimestamp: string; count: number; }
 interface MetricPoint { time: string; timestamp: number; cpuUsage: number; memoryUsage: number; }
-interface DeploymentSummary { spec?: { replicas?: number }; status?: { readyReplicas?: number } }
 
 // --- Utils ---
 const getContext = () => localStorage.getItem("kube-context") || "";
@@ -61,8 +74,6 @@ const apiFetch = (url: string, options: RequestInit = {}) => {
   if (ctx) headers.set("X-Kube-Context", ctx);
   return fetch(url, { ...options, headers });
 };
-const parseStorage = (s?: string): number => { if (!s) return 0; const num = parseFloat(s); if (s.endsWith("Ti")) return num * 1024; if (s.endsWith("Gi")) return num; if (s.endsWith("Mi")) return num / 1024; return num / (1024 * 1024); };
-const formatStorage = (gi: number): string => gi >= 1024 ? `${(gi / 1024).toFixed(1)}Ti` : `${gi.toFixed(1)}Gi`;
 const asRecord = (value: unknown): UnknownRecord => value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
 const namedApiGroup = (group: unknown): group is { name: string } => asRecord(group).name !== undefined;
 const isVm = (value: unknown): value is VM => Boolean(asRecord(value).metadata && asRecord(value).spec);
@@ -126,6 +137,8 @@ function VmActionDialog({
   buildRequest,
   onDone,
   variant = "outline",
+  open: controlledOpen,
+  onOpenChange,
 }: {
   label: string;
   description: string;
@@ -133,8 +146,14 @@ function VmActionDialog({
   buildRequest: (values: Record<string, string>) => { url: string; options: RequestInit };
   onDone: () => void;
   variant?: "default" | "outline" | "destructive" | "secondary";
+  /** When provided, the dialog is controlled and renders no trigger button. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = controlledOpen !== undefined;
+  const open = controlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (next: boolean) => (controlled ? onOpenChange?.(next) : setUncontrolledOpen(next));
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((field) => [field.name, field.defaultValue])));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -161,9 +180,11 @@ function VmActionDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant={variant}>{label}</Button>
-      </DialogTrigger>
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button size="sm" variant={variant}>{label}</Button>
+        </DialogTrigger>
+      )}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
@@ -208,116 +229,6 @@ function VmActionDialog({
 }
 
 // --- Main Views ---
-function VMList() {
-  const [vms, setVms] = useState<VM[]>([]); const [loading, setLoading] = useState(true); const [nss, setNss] = useState<string[]>(["all", "default"]); const [availableS, setAvailableS] = useState<string[]>(["all"]); const [sT, setST] = useState(""); const [nF, setNF] = useState("default"); const [sF, setSF] = useState("all");
-  const fetchVms = useCallback(async () => { setLoading(true); try { const res = await apiFetch(`/api/v1/vms?name=${sT}&status=${sF}&namespace=${nF}`); const data = await res.json(); setVms(data.items || []); } finally { setLoading(false); } }, [nF, sF, sT]);
-  const deleteVmRequest = (vm: VM) => ({
-    url: `/apis/kubevirt.io/v1/namespaces/${vm.metadata.namespace}/virtualmachines/${vm.metadata.name}`,
-    options: { method: "DELETE", headers: { Accept: "application/json" } },
-  });
-  useEffect(() => {
-    apiFetch("/api/v1/namespaces-list").then(r => r.json()).then((data) => {
-      const next = Array.from(new Set(["all", ...(data || []).filter(Boolean)]));
-      setNss(next);
-      setNF((current) => current && next.includes(current) ? current : next.includes("default") ? "default" : next.find((ns) => ns !== "all") || "all");
-    });
-    apiFetch("/api/v1/vm-statuses").then(r => r.json()).then(setAvailableS);
-  }, []);
-  useEffect(() => { const timer = setTimeout(fetchVms, 300); return () => clearTimeout(timer); }, [fetchVms]);
-  return (
-    <div className="space-y-4 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold">Virtual Machines</h1>
-          <p className="text-sm text-muted-foreground">Manage your virtual machine workloads</p>
-        </div>
-        <Badge variant="outline">{vms.length} total</Badge>
-      </div>
-      <div className="flex flex-col gap-3 rounded-lg border bg-card p-2 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" className="gap-2 text-muted-foreground">
-            <span className="size-2 rounded-full bg-muted-foreground/30" />
-            Watch
-          </Button>
-          <Button size="sm" variant="outline" onClick={fetchVms} className="gap-2">
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
-          <div className="flex items-center gap-2">
-            <Box className="h-4 w-4 text-muted-foreground" />
-            <select className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring text-foreground min-w-[140px]" value={nF} onChange={e => setNF(e.target.value)}>
-              {nss.map(ns => <option key={ns} value={ns}>{ns}</option>)}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <select className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring text-foreground min-w-[140px]" value={sF} onChange={e => setSF(e.target.value)}>
-              {availableS.map(s => <option key={s} value={s.toLowerCase()}>{s}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
-          <div className="relative w-full md:w-[320px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search VMs..." value={sT} onChange={e => setST(e.target.value)} />
-          </div>
-          <ResourceCreateDialog config={vmCreateConfig} onCreated={fetchVms} />
-        </div>
-      </div>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="max-h-[calc(100dvh-260px)] overflow-auto">
-          <Table className="min-w-[760px]">
-            <TableHeader className="bg-muted">
-              <TableRow>
-                <TableHead className="w-10"><input type="checkbox" className="size-4 rounded border-border accent-primary" aria-label="Select all VMs" /></TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold">Name</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold">Namespace</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold">Status</TableHead>
-                <TableHead className="h-9 px-3 text-right text-xs font-semibold">Created</TableHead>
-                <TableHead className="w-20" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6}>
-                    <div className="flex items-center justify-center h-32 gap-2">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-                      <span className="text-sm text-muted-foreground">Loading...</span>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : vms.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground">No virtual machines found</TableCell></TableRow>
-              ) : vms.map((vm) => (
-                <TableRow key={vm.metadata.uid} className="hover:bg-muted/50">
-                  <TableCell className="h-9 px-3 py-1.5"><input type="checkbox" className="size-4 rounded border-border accent-primary" aria-label={`Select ${vm.metadata.name}`} /></TableCell>
-                  <TableCell className="h-9 px-3 py-1.5">
-                    <Link to={`/kubevirt/virtualization/virtual-machines/${vm.metadata.namespace}/${vm.metadata.name}/overview`} className="font-semibold text-primary hover:underline">{vm.metadata.name}</Link>
-                  </TableCell>
-                  <TableCell className="h-9 px-3 py-1.5 text-muted-foreground text-sm">{vm.metadata.namespace}</TableCell>
-                  <TableCell className="h-9 px-3 py-1.5"><StatusBadge status={vm.status?.printableStatus} /></TableCell>
-                  <TableCell className="h-9 px-3 py-1.5 text-right text-muted-foreground text-sm tabular-nums">{vm.metadata.creationTimestamp || "N/A"}</TableCell>
-                  <TableCell className="h-9 px-3 py-1.5 text-right">
-                    <VmActionDialog
-                      label="Delete"
-                      description={`Delete VirtualMachine ${vm.metadata.namespace}/${vm.metadata.name}.`}
-                      fields={[]}
-                      variant="destructive"
-                      buildRequest={() => deleteVmRequest(vm)}
-                      onDone={fetchVms}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function DVList() {
   const [dvs, setDvs] = useState<DV[]>([]); const [loading, setLoading] = useState(true); const [searchTerm, setSearchTerm] = useState(""); const [nss, setNss] = useState<string[]>(["all", "default"]); const [namespaceFilter, setNamespaceFilter] = useState("default");
   const loadDvs = useCallback(async () => {
@@ -344,8 +255,8 @@ function DVList() {
     <div className="space-y-4 animate-in fade-in duration-500">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold">Storage</h1>
-          <p className="text-sm text-muted-foreground">Manage your DataVolume storage resources</p>
+          <h1 className="text-2xl font-bold">Disks</h1>
+          <p className="text-sm text-muted-foreground">Persistent disks for instances, backed by CDI DataVolumes</p>
         </div>
         <Badge variant="outline">{dvs.length} total</Badge>
       </div>
@@ -415,246 +326,13 @@ function DVList() {
   );
 }
 
-function DashboardOverview() {
-  const [data, setData] = useState<{ vms: VM[], vmis: VMI[], dvs: DV[], nodes: K8sNode[], kvPods: K8sPod[], pods: K8sPod[], deployments: DeploymentSummary[], services: unknown[], namespaces: unknown[], events: K8sEvent[], loading: boolean }>({ vms: [], vmis: [], dvs: [], nodes: [], kvPods: [], pods: [], deployments: [], services: [], namespaces: [], events: [], loading: true });
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const loadJson = (url: string) => apiFetch(url).then(r => r.ok ? r.json() : { items: [] }).catch(() => ({ items: [] }));
-        const [vmsR, vmisR, dvsR, nodesR, kvPodsR, podsR, deploymentsR, servicesR, namespacesR, eventsR] = await Promise.all([
-          loadJson("/api/v1/vms"),
-          loadJson("/apis/kubevirt.io/v1/virtualmachineinstances"),
-          loadJson("/apis/cdi.kubevirt.io/v1beta1/datavolumes"),
-          loadJson("/api/v1/nodes"),
-          loadJson("/api/v1/namespaces/kubevirt/pods"),
-          loadJson("/api/v1/pods"),
-          loadJson("/apis/apps/v1/deployments"),
-          loadJson("/api/v1/services"),
-          loadJson("/api/v1/namespaces"),
-          loadJson("/api/v1/events"),
-        ]);
-        setData({ vms: vmsR.items || [], vmis: vmisR.items || [], dvs: dvsR.items || [], nodes: nodesR.items || [], kvPods: kvPodsR.items || [], pods: podsR.items || [], deployments: deploymentsR.items || [], services: servicesR.items || [], namespaces: namespacesR.items || [], events: eventsR.items || [], loading: false });
-      } catch { setData(prev => ({ ...prev, loading: false })); }
-    }; load();
-  }, []);
-  const nodeStats = useMemo(() => { const total = data.nodes.length; const unschedulable = data.nodes.filter(n => n.spec.unschedulable).length; const ready = data.nodes.filter(n => n.status.conditions.some(c => c.type === "Ready" && c.status === "True")).length; return { total, unschedulable, ready }; }, [data.nodes]);
-  const nsAnalysis = useMemo(() => { const analysis: Record<string, { vmCount: number, storageGi: number }> = {}; data.vms.forEach(vm => { const ns = vm.metadata.namespace; if (!analysis[ns]) analysis[ns] = { vmCount: 0, storageGi: 0 }; analysis[ns].vmCount++; }); data.dvs.forEach(dv => { const ns = dv.metadata.namespace; if (!analysis[ns]) analysis[ns] = { vmCount: 0, storageGi: 0 }; const requested = dv.spec.storage?.resources?.requests?.storage || dv.spec.pvc?.resources?.requests?.storage; analysis[ns].storageGi += parseStorage(requested); }); return Object.entries(analysis).sort((a, b) => b[1].vmCount - a[1].vmCount).map(([name, stats]) => ({ name, ...stats })); }, [data.vms, data.dvs]);
-  const infraHealth = useMemo(() => { const components = ["virt-api", "virt-controller", "virt-handler"]; return components.map(c => { const pods = data.kvPods.filter(p => p.metadata.name.startsWith(c)); const healthy = pods.length > 0 && pods.every(p => p.status.phase === "Running"); return { name: c, healthy, count: pods.length }; }); }, [data.kvPods]);
-  const totalStorage = nsAnalysis.reduce((acc, curr) => acc + curr.storageGi, 0);
-  const workloadHealth = useMemo(() => {
-    const runningPods = data.pods.filter(p => p.status.phase === "Running").length;
-    const warningEvents = data.events.filter(e => e.type === "Warning").length;
-    const readyDeployments = data.deployments.filter(d => (d.status?.readyReplicas || 0) >= (d.spec?.replicas || 1)).length;
-    return { runningPods, warningEvents, readyDeployments };
-  }, [data.pods, data.deployments, data.events]);
-
-  if (data.loading) return (
-    <div className="flex items-center justify-center h-64 gap-2">
-      <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-      <span className="text-sm text-muted-foreground">Loading dashboard...</span>
-    </div>
-  );
-
-  return (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">Cluster Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Kubernetes and KubeVirt infrastructure overview</p>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <ShadCard>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950/50">
-                <Server className="size-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <CardDescription>Compute Nodes</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{nodeStats.total}</CardTitle>
-                <div className="text-sm text-muted-foreground">{nodeStats.ready} Ready{nodeStats.unschedulable > 0 && ` / ${nodeStats.unschedulable} Cordoned`}</div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-
-        <ShadCard>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-50 dark:bg-green-950/50">
-                <Cpu className="size-5 text-green-600 dark:text-green-400" />
-              </div>
-              <div>
-                <CardDescription>Virtual Machines</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{data.vms.length}</CardTitle>
-                <div className="text-sm text-muted-foreground">{data.vmis.length} running</div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-
-        <ShadCard>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-950/50">
-                <Database className="size-5 text-purple-600 dark:text-purple-400" />
-              </div>
-              <div>
-                <CardDescription>Disk Allocation</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{formatStorage(totalStorage)}</CardTitle>
-                <div className="text-sm text-muted-foreground">{data.dvs.length} data volumes</div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-
-        <ShadCard className={!infraHealth.every(i => i.healthy) ? "border-red-200 dark:border-red-900" : ""}>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-orange-50 dark:bg-orange-950/50">
-                <ShieldCheck className="size-5 text-orange-600 dark:text-orange-400" />
-              </div>
-              <div>
-                <CardDescription>Infrastructure</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{infraHealth.every(i => i.healthy) ? "Stable" : "Degraded"}</CardTitle>
-                <div className="flex gap-1.5 mt-1">
-                  {infraHealth.map(i => (
-                    <div key={i.name} title={i.name} className={cn("w-2 h-2 rounded-full", i.healthy ? "bg-green-500" : "bg-red-500 animate-pulse")} />
-                  ))}
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <ShadCard>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950/50">
-                <Box className="size-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <CardDescription>Pods</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{data.pods.length}</CardTitle>
-                <div className="text-sm text-muted-foreground">{workloadHealth.runningPods} Running</div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-        <ShadCard>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-50 dark:bg-green-950/50">
-                <Layers className="size-5 text-green-600 dark:text-green-400" />
-              </div>
-              <div>
-                <CardDescription>Deployments</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{data.deployments.length}</CardTitle>
-                <div className="text-sm text-muted-foreground">{workloadHealth.readyDeployments} Ready</div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-        <ShadCard>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-950/50">
-                <Network className="size-5 text-purple-600 dark:text-purple-400" />
-              </div>
-              <div>
-                <CardDescription>Services</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{data.services.length}</CardTitle>
-                <div className="text-sm text-muted-foreground">{data.namespaces.length} Namespaces</div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-        <ShadCard>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-orange-50 dark:bg-orange-950/50">
-                <Bell className="size-5 text-orange-600 dark:text-orange-400" />
-              </div>
-              <div>
-                <CardDescription>Events</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums">{data.events.length}</CardTitle>
-                <div className="text-sm text-muted-foreground">{workloadHealth.warningEvents} Warning</div>
-              </div>
-            </div>
-          </CardHeader>
-        </ShadCard>
-      </div>
-
-      {/* Namespace Analysis + Node Distribution */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <ShadCard className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-base">Namespace Analysis</CardTitle>
-            <CardDescription>VM and storage distribution by namespace</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {nsAnalysis.slice(0, 8).map(ns => (
-                <div key={ns.name} className="flex items-center justify-between py-1 border-b last:border-0">
-                  <span className="text-sm font-medium text-foreground truncate flex-1">{ns.name}</span>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <Badge variant="outline" className="gap-1"><Cpu className="size-3" />{ns.vmCount}</Badge>
-                    <span className="text-xs text-muted-foreground tabular-nums">{formatStorage(ns.storageGi)}</span>
-                  </div>
-                </div>
-              ))}
-              {nsAnalysis.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No namespaces found</p>}
-            </div>
-          </CardContent>
-        </ShadCard>
-
-        <ShadCard className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Node Distribution</CardTitle>
-            <CardDescription>VM placement across cluster nodes</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid sm:grid-cols-2 gap-3">
-              {data.nodes.slice(0, 10).map(node => {
-                const nodeVmis = data.vmis.filter(v => v.status.nodeName === node.metadata.name);
-                const isReady = node.status.conditions.some(c => c.type === "Ready" && c.status === "True");
-                return (
-                  <div key={node.metadata.uid} className="flex items-start justify-between p-3 rounded-lg border bg-muted/30">
-                    <div className="flex items-center gap-3">
-                      <div className={cn("p-2 rounded-lg", isReady ? "bg-green-50 dark:bg-green-950/50 text-green-600 dark:text-green-400" : "bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400")}>
-                        <Server className="size-4" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-foreground break-all leading-tight">{node.metadata.name}</div>
-                        <div className="text-xs text-muted-foreground">{node.status.capacity.cpu} cores / {node.status.capacity.memory}</div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <Badge variant="outline" className="gap-1"><Hash className="size-3" />{nodeVmis.length}</Badge>
-                      <StatusBadge status={isReady ? "Ready" : "NotReady"} />
-                    </div>
-                  </div>
-                );
-              })}
-              {data.nodes.length === 0 && <div className="col-span-2 py-8 text-center text-muted-foreground text-sm">No cluster nodes found</div>}
-            </div>
-          </CardContent>
-        </ShadCard>
-      </div>
-    </div>
-  );
-}
-
 function VMDetailContent() {
-  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [vmYaml, setVmYaml] = useState(""); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [events, setEvents] = useState<K8sEvent[]>([]); const [metrics, setMetrics] = useState<MetricPoint[]>([]); const [loading, setLoading] = useState(true); const [mStrategy, setMStrategy] = useState<string | null>(null);
+  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [vmYaml, setVmYaml] = useState(""); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [events, setEvents] = useState<K8sEvent[]>([]); const [metrics, setMetrics] = useState<MetricPoint[]>([]); const [loading, setLoading] = useState(true); const [mStrategy, setMStrategy] = useState<string | null>(null); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider } = useSgProvider(); const profile = useNetworkProfile();
   const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
   const fetchData = useCallback(async () => {
     try {
       const [vmRes, vmiRes, yamlRes, eventsRes] = await Promise.all([ apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}`), apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}`), apiFetch(`/api/v1/yaml/virtualmachines/${namespace}/${name}`), apiFetch(`/api/v1/namespaces/${namespace}/events?fieldSelector=involvedObject.name=${name}`) ]);
-      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null; setVm(vmData); if (vmiRes.ok) setVmi(await vmiRes.json()); if (yamlRes.ok) setVmYaml(await yamlRes.text()); if (eventsRes.ok) setEvents((await eventsRes.json()).items || []);
+      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null; setVm(vmData); setVmi(vmiRes.ok ? await vmiRes.json() : null); if (yamlRes.ok) setVmYaml(await yamlRes.text()); if (eventsRes.ok) setEvents((await eventsRes.json()).items || []);
       let strat = mStrategy; if (strat === null) { const apisRes = await apiFetch("/apis"); if (apisRes.ok) { strat = (await apisRes.json()).groups?.some((g: unknown) => namedApiGroup(g) && g.name === "metrics.kubevirt.io") ? "vmi" : "pod"; setMStrategy(strat); } }
       if (strat === "vmi") { const m = await apiFetch(`/apis/metrics.kubevirt.io/v1beta1/namespaces/${namespace}/virtualmachineinstances/${name}`); if (m.ok) { const d = await m.json(); setMetrics(p => [...p.slice(-19), { timestamp: Date.now(), time: new Date().toISOString(), cpuUsage: d.status?.cpu?.usageCores || 0, memoryUsage: (d.status?.memory?.usageBytes || 0) / (1024 * 1024) }]); } }
       else if (strat === "pod") { const pod = await findVmPod(namespace!, name!); if (pod) { const pm = await apiFetch(`/apis/metrics.k8s.io/v1beta1/namespaces/${namespace}/pods/${pod.metadata.name}`); if (pm.ok) { const d = await pm.json(); const cpu = d.containers?.[0]?.usage?.cpu || "0n"; const mem = d.containers?.[0]?.usage?.memory || "0Ki"; const pCpu = (c:string) => c.endsWith("n") ? parseInt(c)/1e9 : c.endsWith("u") ? parseInt(c)/1e6 : c.endsWith("m") ? parseInt(c)/1e3 : parseInt(c); const pMem = (m:string) => m.endsWith("Ki") ? parseInt(m)/1024 : m.endsWith("Mi") ? parseInt(m) : m.endsWith("Gi") ? parseInt(m)*1024 : parseInt(m)/(1024*1024); setMetrics(p => [...p.slice(-19), { timestamp: Date.now(), time: new Date().toISOString(), cpuUsage: pCpu(cpu), memoryUsage: pMem(mem) }]); } } }
@@ -698,9 +376,13 @@ function VMDetailContent() {
   );
   const currentCpu = vm.spec.template?.spec?.domain?.cpu || {};
   const currentMemory = vm.spec.template?.spec?.domain?.resources?.requests?.memory || "1Gi";
+  const isRunning = vmi?.status.phase === "Running";
+  const templateAnnotations = vm.spec.template?.metadata?.annotations || {};
+  const securityGroups = sgProvider ? vmSecurityGroups(vm as unknown as KubeObject, sgProvider) : [];
 
   const tabs = [
     { id: "overview", name: "Overview", icon: Info },
+    { id: "network", name: "Network & Security", icon: ShieldCheck },
     { id: "events", name: "Events", icon: Bell },
     { id: "console", name: "Console", icon: Terminal },
     { id: "vnc", name: "VNC", icon: MousePointer2 },
@@ -709,28 +391,53 @@ function VMDetailContent() {
 
   return (
     <div className={cn("space-y-6 animate-in fade-in duration-500", activeTab === "console" || activeTab === "vnc" ? "max-w-full" : "")}>
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/kubevirt/virtualization/virtual-machines")}>
-          <ChevronLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{vm.metadata.name}</h1>
-            <StatusBadge status={vm.status?.printableStatus} />
-          </div>
-          <p className="text-sm text-muted-foreground">{vm.metadata.namespace}</p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button size="sm" onClick={() => handleAction('start')}>Start</Button>
-          <Button size="sm" variant="outline" onClick={() => handleAction('stop')}>Stop</Button>
-          <Button size="sm" variant="outline" onClick={() => handleAction('restart')}>Restart</Button>
-          <Button size="sm" variant="outline" onClick={() => handleAction('pause')}>Pause</Button>
-          <Button size="sm" variant="outline" onClick={() => handleAction('unpause')}>Resume</Button>
-          <Button size="sm" variant="outline" onClick={() => handleAction('migrate')}>Migrate</Button>
-          <Button size="sm" variant="outline" onClick={() => handleAction('poweroff')}>Power Off</Button>
+      <PageHeader
+        breadcrumbs={[{ label: "Instances", to: "/kubevirt/virtualization/virtual-machines" }, { label: vm.metadata.namespace }, { label: vm.metadata.name }]}
+        title={vm.metadata.name}
+        badge={<StatusDot status={vm.status?.printableStatus} />}
+        subtitle={[vm.metadata.namespace, vmi?.status.interfaces?.[0]?.ipAddress, vmi?.status.nodeName].filter(Boolean).join(" / ")}
+        actions={
+          <>
+            {isRunning ? (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => handleAction("stop")}><Square className="size-3.5" />Stop</Button>
+            ) : (
+              <Button size="sm" className="gap-1.5" onClick={() => handleAction("start")}><Play className="size-3.5" />Start</Button>
+            )}
+            <Button size="sm" variant="outline" className="gap-1.5" disabled={!isRunning} onClick={() => handleAction("restart")}><RotateCcw className="size-3.5" />Restart</Button>
+            <Button size="sm" variant="outline" className="gap-1.5" disabled={!isRunning} onClick={() => navigate(`/kubevirt/virtualization/virtual-machines/${namespace}/${name}/vnc`)}><MonitorPlay className="size-3.5" />Connect</Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="gap-1.5">More<ChevronDown className="size-3.5" /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel>Power</DropdownMenuLabel>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => handleAction("pause")}>Pause</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleAction("unpause")}>Resume</DropdownMenuItem>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => handleAction("poweroff")}>Force power off</DropdownMenuItem>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => handleAction("migrate")}>Live migrate</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Configuration</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => setDialog("Resize")}>Change spec</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDialog("Instance Type")}>Change instance type</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDialog("Run Strategy")}>Run strategy</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDialog("Priority Class")}>Priority class</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDialog("Metadata")}>Labels and annotations</DropdownMenuItem>
+                {sgProvider && <DropdownMenuItem onClick={() => setDialog("Security Groups")}>Security groups</DropdownMenuItem>}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Disks</DropdownMenuLabel>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => setDialog("Hotplug Volume")}>Attach disk</DropdownMenuItem>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => setDialog("Unplug Volume")}>Detach disk</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => setDialog("Delete")}>Delete instance</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
           <VmActionDialog
             label="Resize"
+            open={dialog === "Resize"}
+            onOpenChange={(next) => setDialog(next ? "Resize" : null)}
             description="Patch CPU sockets, cores, threads, and requested memory on this VM template."
             fields={[
               { name: "sockets", label: "Sockets", type: "number", defaultValue: String(currentCpu.sockets || 1) },
@@ -761,6 +468,8 @@ function VMDetailContent() {
           />
           <VmActionDialog
             label="Run Strategy"
+            open={dialog === "Run Strategy"}
+            onOpenChange={(next) => setDialog(next ? "Run Strategy" : null)}
             description="Patch spec.runStrategy on this VirtualMachine."
             fields={[{ name: "runStrategy", label: "Run Strategy", type: "select", defaultValue: vm.spec.runStrategy || "Halted", options: [{ label: "Always", value: "Always" }, { label: "Halted", value: "Halted" }, { label: "Manual", value: "Manual" }] }]}
             buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { runStrategy: stringValue(values.runStrategy, "Halted") } }) })}
@@ -768,6 +477,8 @@ function VMDetailContent() {
           />
           <VmActionDialog
             label="Instance Type"
+            open={dialog === "Instance Type"}
+            onOpenChange={(next) => setDialog(next ? "Instance Type" : null)}
             description="Patch spec.instancetype.name on this VirtualMachine."
             fields={[{ name: "instanceType", label: "Cluster Instance Type", defaultValue: String(vm.spec.instancetype?.name || "") }]}
             buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { instancetype: { name: stringValue(values.instanceType) } } }) })}
@@ -775,6 +486,8 @@ function VMDetailContent() {
           />
           <VmActionDialog
             label="Priority Class"
+            open={dialog === "Priority Class"}
+            onOpenChange={(next) => setDialog(next ? "Priority Class" : null)}
             description="Patch template priorityClassName on this VirtualMachine."
             fields={[{ name: "priorityClassName", label: "Priority Class Name", defaultValue: String(vm.spec.template?.spec?.priorityClassName || "") }]}
             buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { template: { spec: { priorityClassName: stringValue(values.priorityClassName) } } } }) })}
@@ -782,6 +495,8 @@ function VMDetailContent() {
           />
           <VmActionDialog
             label="Metadata"
+            open={dialog === "Metadata"}
+            onOpenChange={(next) => setDialog(next ? "Metadata" : null)}
             description="Patch VM and VM template labels/annotations from key=value lines."
             fields={[
               { name: "labels", label: "Labels", type: "textarea", defaultValue: keyValueText(vm.metadata.labels) },
@@ -802,6 +517,8 @@ function VMDetailContent() {
           />
           <VmActionDialog
             label="Hotplug Volume"
+            open={dialog === "Hotplug Volume"}
+            onOpenChange={(next) => setDialog(next ? "Hotplug Volume" : null)}
             description="Attach an existing DataVolume to the running VMI."
             fields={[
               { name: "volume", label: "DataVolume Name", defaultValue: "" },
@@ -825,6 +542,8 @@ function VMDetailContent() {
           />
           <VmActionDialog
             label="Unplug Volume"
+            open={dialog === "Unplug Volume"}
+            onOpenChange={(next) => setDialog(next ? "Unplug Volume" : null)}
             description="Detach a hotplugged volume from the running VMI."
             fields={[{ name: "volume", label: "Volume Name", defaultValue: "" }]}
             buildRequest={(values) => ({
@@ -835,6 +554,8 @@ function VMDetailContent() {
           />
           <VmActionDialog
             label="Delete"
+            open={dialog === "Delete"}
+            onOpenChange={(next) => setDialog(next ? "Delete" : null)}
             description="Delete this VirtualMachine resource."
             fields={[]}
             variant="destructive"
@@ -844,8 +565,12 @@ function VMDetailContent() {
             })}
             onDone={() => navigate("/kubevirt/virtualization/virtual-machines")}
           />
-        </div>
-      </div>
+      <InstanceSecurityGroupsDialog
+        open={dialog === "Security Groups"}
+        onOpenChange={(next) => setDialog(next ? "Security Groups" : null)}
+        vm={vm as unknown as KubeObject}
+        onDone={fetchData}
+      />
 
       {/* Tab Navigation */}
       <div className="flex gap-1 border-b">
@@ -1155,6 +880,75 @@ function VMDetailContent() {
           </div>
         )}
 
+        {activeTab === "network" && (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ShadCard className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="text-base">Network interfaces</CardTitle>
+                <CardDescription>Interfaces declared on the instance and their runtime addresses.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <DataTable
+                  minWidth={640}
+                  rows={vm.spec.template?.spec?.domain?.devices?.interfaces || []}
+                  rowKey={(iface) => iface.name}
+                  empty={<EmptyState title="No interfaces declared" />}
+                  columns={[
+                    { header: "Interface", cell: (iface) => <span className="font-medium">{iface.name}</span> },
+                    { header: "Binding", cell: (iface) => <span className="text-sm">{Object.keys(iface).filter((key) => !["name", "model", "macAddress"].includes(key)).join(", ") || "N/A"}</span> },
+                    {
+                      header: "Network",
+                      cell: (iface) => {
+                        const network = vm.spec.template?.spec?.networks?.find((item) => item.name === iface.name) as Record<string, unknown> | undefined;
+                        if (!network) return <span className="text-sm text-muted-foreground">N/A</span>;
+                        if (network.multus) return <span className="text-sm">Multus {String((network.multus as Record<string, unknown>).networkName)}</span>;
+                        const subnet = templateAnnotations[kubeOvnAnnotations.logicalSwitch];
+                        return subnet ? <Link to={`/vpc/subnets/${subnet}`} className="text-sm hover:text-primary transition-colors">Subnet {subnet}</Link> : <span className="text-sm">Pod network</span>;
+                      },
+                    },
+                    { header: "IP addresses", cell: (iface) => <span className="font-mono text-xs">{(vmi?.status.interfaces?.find((item) => item.name === iface.name) as { ipAddresses?: string[]; ipAddress?: string } | undefined)?.ipAddresses?.join(", ") || vmi?.status.interfaces?.find((item) => item.name === iface.name)?.ipAddress || "-"}</span> },
+                    { header: "MAC", cell: (iface) => <span className="font-mono text-xs text-muted-foreground">{(vmi?.status.interfaces?.find((item) => item.name === iface.name) as { mac?: string } | undefined)?.mac || "-"}</span> },
+                  ]}
+                />
+              </CardContent>
+            </ShadCard>
+            <ShadCard>
+              <CardHeader>
+                <CardTitle className="text-base">Placement</CardTitle>
+                <CardDescription>{profile.label}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <KeyValueGrid items={[
+                  { label: "Subnet", value: templateAnnotations[kubeOvnAnnotations.logicalSwitch] || (profile.vpc ? "Namespace default" : "Pod network") },
+                  { label: "Fixed IP", value: templateAnnotations[kubeOvnAnnotations.ipAddress] || "Dynamic" },
+                  { label: "Port security", value: templateAnnotations[kubeOvnAnnotations.portSecurity] === "true" ? "Enabled" : "Disabled" },
+                  { label: "Host", value: vmi?.status.nodeName || "Not running" },
+                ]} />
+              </CardContent>
+            </ShadCard>
+            <ShadCard>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base">Security groups</CardTitle>
+                    <CardDescription>{sgProvider === "cilium" ? "Enforced by Cilium" : sgProvider === "kube-ovn" ? "Enforced by Kube-OVN" : "Not available on this network stack"}</CardDescription>
+                  </div>
+                  {sgProvider && <Button size="sm" variant="outline" onClick={() => setDialog("Security Groups")}>Change</Button>}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {securityGroups.map((group) => (
+                  <Link key={group} to={sgDetailPath({ provider: sgProvider!, name: group, namespace })} className="flex items-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition-colors hover:bg-muted/50 hover:text-primary">
+                    <ShieldCheck className="size-4 text-muted-foreground" />{group}
+                  </Link>
+                ))}
+                {sgProvider && securityGroups.length === 0 && <p className="text-sm text-muted-foreground">No security groups attached. Traffic is not filtered by security groups.</p>}
+                {!sgProvider && <p className="text-sm text-muted-foreground">Use <Link to="/networks/kubernetes/network-policies" className="text-primary hover:underline">network policies</Link> to restrict traffic.</p>}
+              </CardContent>
+            </ShadCard>
+          </div>
+        )}
+
         {activeTab === "events" && (
           <ShadCard className="p-0 gap-0">
             <CardContent className="p-0">
@@ -1450,12 +1244,22 @@ function App() {
           <SiteHeader />
           <div className="flex flex-1 flex-col p-4 lg:p-8 max-w-[100rem] mx-auto w-full">
             <Routes>
-              <Route path="/" element={<DashboardOverview />} />
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/catalog" element={<CatalogPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/vpc/vpcs" element={<VpcListPage />} />
+              <Route path="/vpc/vpcs/:name" element={<VpcDetailPage />} />
+              <Route path="/vpc/subnets" element={<SubnetListPage />} />
+              <Route path="/vpc/subnets/:name" element={<SubnetDetailPage />} />
+              <Route path="/vpc/security-groups" element={<SecurityGroupListPage />} />
+              <Route path="/vpc/security-groups/:provider/:name" element={<SecurityGroupDetailPage />} />
+              <Route path="/vpc/security-groups/:provider/:namespace/:name" element={<SecurityGroupDetailPage />} />
               <Route path="/kubernetes" element={<KubernetesManagementPage />} />
               <Route path="/kubernetes/:category" element={<KubernetesCategoryPage />} />
               <Route path="/kubevirt" element={<KubeVirtManagementPage />} />
               <Route path="/kubevirt/:category" element={<KubeVirtCategoryPage />} />
-              <Route path="/kubevirt/virtualization/virtual-machines" element={<VMList />} />
+              <Route path="/kubevirt/virtualization/virtual-machines" element={<InstanceListPage />} />
+              <Route path="/kubevirt/virtualization/virtual-machines/create" element={<CreateInstancePage />} />
               <Route path="/kubevirt/virtualization/virtual-machines/:namespace/:name" element={<Navigate to="overview" replace />} />
               <Route path="/kubevirt/virtualization/virtual-machines/:namespace/:name/:tab" element={<VMDetailContent />} />
               <Route path="/kubevirt/cdi/data-volumes" element={<DVList />} />

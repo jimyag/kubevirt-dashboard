@@ -1,0 +1,673 @@
+import { useEffect, useMemo, useState } from "react"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import { ArrowDownToLine, ArrowUpFromLine, Info, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react"
+
+import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  ChoiceCard,
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  FieldRow,
+  KeyValueGrid,
+  LoadingState,
+  NativeSelect,
+  PageHeader,
+  StatusDot,
+  Toolbar,
+} from "@/components/console"
+import {
+  listItems,
+  relativeTime,
+  str,
+  asRecord,
+  useAsync,
+  useNamespaces,
+  type KubeObject,
+} from "@/lib/kube"
+import {
+  createSecurityGroup,
+  deleteSecurityGroup,
+  emptyRule,
+  getSecurityGroup,
+  listSecurityGroups,
+  remoteSummary,
+  ruleSummary,
+  ruleTemplates,
+  saveSecurityGroupRules,
+  sgDetailPath,
+  useSgProvider,
+  setVmSecurityGroups,
+  vmMatchesGroup,
+  vmSecurityGroups,
+  type SecurityGroup,
+  type SgDirection,
+  type SgProvider,
+  type SgRule,
+} from "@/lib/security-groups"
+
+const providerLabel: Record<SgProvider, string> = {
+  "kube-ovn": "Kube-OVN SecurityGroup",
+  cilium: "CiliumNetworkPolicy",
+}
+
+function ProviderNote({ provider }: { provider: SgProvider }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+      <Info className="mt-0.5 size-4 shrink-0" />
+      {provider === "kube-ovn" ? (
+        <span>Enforced by Kube-OVN as OVN port ACLs. Groups are cluster wide; instances attach through the <code className="font-mono">ovn.kubernetes.io/security_groups</code> annotation with port security enabled. Lower priority numbers are evaluated first.</span>
+      ) : (
+        <span>Enforced by Cilium as a <code className="font-mono">CiliumNetworkPolicy</code> per namespace. Instances attach through a <code className="font-mono">sg.kubevirt-dashboard.io/&lt;name&gt;</code> label. Once attached, inbound traffic is denied unless a rule allows it; deny rules take precedence over allow rules.</span>
+      )}
+    </div>
+  )
+}
+
+// --- Rule editor ---
+
+function RuleEditor({
+  rules,
+  direction,
+  provider,
+  groups,
+  onChange,
+}: {
+  rules: SgRule[]
+  direction: SgDirection
+  provider: SgProvider
+  groups: string[]
+  onChange: (rules: SgRule[]) => void
+}) {
+  const visible = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => rule.direction === direction)
+  const update = (index: number, patch: Partial<SgRule>) => onChange(rules.map((rule, i) => i === index ? { ...rule, ...patch } : rule))
+  const columns = provider === "kube-ovn" ? "grid-cols-[110px_110px_130px_130px_1fr_90px_40px]" : "grid-cols-[110px_110px_130px_130px_1fr_40px]"
+  return (
+    <div className="space-y-2">
+      <div className="overflow-x-auto">
+        <div className="min-w-[760px] space-y-2">
+          <div className={cn("grid gap-2 px-1 text-xs font-semibold text-muted-foreground", columns)}>
+            <span>Action</span><span>Protocol</span><span>Port range</span><span>{direction === "ingress" ? "Source" : "Destination"}</span><span />
+            {provider === "kube-ovn" && <span>Priority</span>}
+            <span />
+          </div>
+          {visible.map(({ rule, index }) => (
+            <div key={index} className={cn("grid items-center gap-2", columns)}>
+              <NativeSelect value={rule.action} onChange={(e) => update(index, { action: e.target.value as SgRule["action"] })}>
+                <option value="allow">Allow</option>
+                <option value="deny">Deny</option>
+              </NativeSelect>
+              <NativeSelect value={rule.protocol} onChange={(e) => update(index, { protocol: e.target.value as SgRule["protocol"], ports: e.target.value === "tcp" || e.target.value === "udp" ? rule.ports : "" })}>
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+                <option value="icmp">ICMP</option>
+                <option value="all">All</option>
+              </NativeSelect>
+              <Input
+                value={rule.ports}
+                disabled={rule.protocol === "all" || rule.protocol === "icmp"}
+                onChange={(e) => update(index, { ports: e.target.value })}
+                placeholder={rule.protocol === "all" || rule.protocol === "icmp" ? "N/A" : "22 or 8000-8100"}
+              />
+              <NativeSelect value={rule.remoteType} onChange={(e) => update(index, { remoteType: e.target.value as SgRule["remoteType"], remote: "" })}>
+                <option value="any">Anywhere</option>
+                <option value="cidr">CIDR block</option>
+                <option value="group">Security group</option>
+              </NativeSelect>
+              {rule.remoteType === "cidr" ? (
+                <Input className="font-mono text-xs" value={rule.remote} onChange={(e) => update(index, { remote: e.target.value })} placeholder="10.0.0.0/8" />
+              ) : rule.remoteType === "group" ? (
+                <NativeSelect value={rule.remote} onChange={(e) => update(index, { remote: e.target.value })}>
+                  <option value="">Select a group</option>
+                  {Array.from(new Set([rule.remote, ...groups].filter(Boolean))).map((group) => <option key={group} value={group}>{group}</option>)}
+                </NativeSelect>
+              ) : (
+                <span className="px-1 text-sm text-muted-foreground">0.0.0.0/0, ::/0</span>
+              )}
+              {provider === "kube-ovn" && (
+                <Input type="number" min={1} max={200} value={rule.priority} onChange={(e) => update(index, { priority: Number(e.target.value) })} />
+              )}
+              <Button size="icon" variant="ghost" aria-label="Remove rule" onClick={() => onChange(rules.filter((_, i) => i !== index))}>
+                <Trash2 className="size-4 text-muted-foreground" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      </div>
+      {visible.length === 0 && <p className="text-sm text-muted-foreground">No {direction === "ingress" ? "inbound" : "outbound"} rules.</p>}
+      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onChange([...rules, { ...emptyRule(direction), ...(direction === "egress" ? { protocol: "all" as const, ports: "" } : {}) }])}>
+        <Plus className="size-4" />Add {direction === "ingress" ? "inbound" : "outbound"} rule
+      </Button>
+    </div>
+  )
+}
+
+function RuleTable({ rules, direction, provider }: { rules: SgRule[]; direction: SgDirection; provider: SgProvider }) {
+  const visible = rules.filter((rule) => rule.direction === direction)
+  return (
+    <DataTable
+      rows={visible.map((rule, index) => ({ rule, index }))}
+      rowKey={({ index }) => String(index)}
+      minWidth={560}
+      empty={<EmptyState title={`No ${direction === "ingress" ? "inbound" : "outbound"} rules`} description={direction === "ingress" ? "Inbound traffic to attached instances is denied." : provider === "cilium" ? "Outbound traffic is not restricted." : "Outbound traffic follows the subnet default."} />}
+      columns={[
+        { header: "Action", cell: ({ rule }) => <Badge variant={rule.action === "allow" ? "success" : "danger"}>{rule.action === "allow" ? "Allow" : "Deny"}</Badge> },
+        { header: "Protocol / ports", cell: ({ rule }) => <span className="text-sm">{ruleSummary(rule)}</span> },
+        { header: direction === "ingress" ? "Source" : "Destination", cell: ({ rule }) => <span className="font-mono text-xs">{remoteSummary(rule)}</span> },
+        ...(provider === "kube-ovn" ? [{ header: "Priority", cell: ({ rule }: { rule: SgRule }) => <span className="text-sm tabular-nums">{rule.priority}</span> }] : []),
+      ]}
+    />
+  )
+}
+
+// --- Create dialog ---
+
+function CreateSecurityGroupDialog({
+  open,
+  onOpenChange,
+  provider,
+  defaultNamespace,
+  onCreated,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  provider: SgProvider
+  defaultNamespace: string
+  onCreated: (sg: { name: string; namespace?: string }) => void
+}) {
+  const namespaces = useNamespaces()
+  const [name, setName] = useState("")
+  const [namespace, setNamespace] = useState(defaultNamespace)
+  const [description, setDescription] = useState("")
+  const [template, setTemplate] = useState("ssh")
+  const [allowSameGroup, setAllowSameGroup] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (open) setNamespace(defaultNamespace)
+  }, [defaultNamespace, open])
+
+  const submit = async () => {
+    setBusy(true)
+    setError("")
+    try {
+      const rules = ruleTemplates.find((item) => item.id === template)?.rules || []
+      await createSecurityGroup(provider, { name: name.trim(), namespace, description: description.trim(), rules, allowSameGroup })
+      onOpenChange(false)
+      onCreated({ name: name.trim(), namespace: provider === "cilium" ? namespace : undefined })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create security group")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Create security group</DialogTitle>
+          <DialogDescription>A stateful firewall for instances. Backed by {providerLabel[provider]}.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FieldRow label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="sg-web" /></FieldRow>
+          {provider === "cilium" ? (
+            <FieldRow label="Namespace" hint="Cilium groups apply to instances in this namespace.">
+              <NativeSelect value={namespace} onChange={(e) => setNamespace(e.target.value)}>
+                {Array.from(new Set([namespace, ...namespaces])).map((ns) => <option key={ns} value={ns}>{ns}</option>)}
+              </NativeSelect>
+            </FieldRow>
+          ) : (
+            <FieldRow label="Scope"><Input value="Cluster wide" disabled /></FieldRow>
+          )}
+          <div className="sm:col-span-2">
+            <FieldRow label="Description"><Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Web tier" /></FieldRow>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Start from a template</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {ruleTemplates.map((item) => (
+              <ChoiceCard key={item.id} selected={template === item.id} onClick={() => setTemplate(item.id)} title={item.label} description={item.description} />
+            ))}
+          </div>
+        </div>
+        <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+          <div>
+            <div className="text-sm font-medium">Allow traffic between members</div>
+            <div className="text-xs text-muted-foreground">Instances in this group can reach each other on all ports.</div>
+          </div>
+          <Switch checked={allowSameGroup} onCheckedChange={setAllowSameGroup} />
+        </label>
+        {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || !name.trim() || (provider === "cilium" && !namespace)}>{busy ? "Creating..." : "Create"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// --- List ---
+
+export function SecurityGroupListPage() {
+  const { provider, loaded } = useSgProvider()
+  const navigate = useNavigate()
+  const namespaces = useNamespaces()
+  const [namespace, setNamespace] = useState("all")
+  const [search, setSearch] = useState("")
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deleting, setDeleting] = useState<SecurityGroup | null>(null)
+
+  const { data, loading, reload } = useAsync(async () => {
+    if (!provider) return { groups: [] as SecurityGroup[], vms: [] as KubeObject[] }
+    const [groups, vms] = await Promise.all([
+      listSecurityGroups(provider, namespace),
+      listItems("/apis/kubevirt.io/v1/virtualmachines"),
+    ])
+    return { groups, vms }
+  }, { groups: [] as SecurityGroup[], vms: [] as KubeObject[] }, [provider, namespace])
+
+  const rows = useMemo(() => data.groups.filter((sg) => {
+    const needle = search.trim().toLowerCase()
+    return !needle || sg.name.toLowerCase().includes(needle) || sg.description.toLowerCase().includes(needle)
+  }), [data.groups, search])
+
+  if (!loaded) return <LoadingState />
+  if (!provider) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Security Groups" subtitle="Stateful firewalls for instances" />
+        <Card>
+          <CardContent>
+            <EmptyState
+              icon={ShieldCheck}
+              title="Security groups need Kube-OVN or Cilium"
+              description="The current network stack enforces access control with Kubernetes NetworkPolicy. Install Kube-OVN or Cilium, or pick a different network stack in Settings."
+              action={
+                <div className="flex gap-2">
+                  <Button asChild size="sm" variant="outline"><Link to="/networks/kubernetes/network-policies">Network policies</Link></Button>
+                  <Button asChild size="sm"><Link to="/settings">Settings</Link></Button>
+                </div>
+              }
+            />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4 animate-in fade-in duration-500">
+      <PageHeader
+        title="Security Groups"
+        subtitle="Stateful firewalls that control inbound and outbound traffic of instances"
+        badge={<Badge variant="outline">{providerLabel[provider]}</Badge>}
+        actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create security group</Button>}
+      />
+      <ProviderNote provider={provider} />
+      <Toolbar
+        right={
+          <div className="relative w-full md:w-[280px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-9" placeholder="Filter by name or description" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+        }
+      >
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
+        {provider === "cilium" && (
+          <NativeSelect value={namespace} onChange={(e) => setNamespace(e.target.value)} aria-label="Namespace" className="min-w-[160px]">
+            <option value="all">All namespaces</option>
+            {namespaces.map((ns) => <option key={ns} value={ns}>{ns}</option>)}
+          </NativeSelect>
+        )}
+      </Toolbar>
+      <DataTable
+        loading={loading}
+        rows={rows}
+        rowKey={(sg) => `${sg.namespace || ""}/${sg.name}`}
+        empty={<EmptyState icon={ShieldCheck} title="No security groups" description="Create a security group and attach it to instances to control their traffic." action={<Button size="sm" onClick={() => setCreateOpen(true)}>Create security group</Button>} />}
+        columns={[
+          {
+            header: "Name",
+            cell: (sg) => (
+              <div className="flex flex-col">
+                <Link to={sgDetailPath(sg)} className="font-medium hover:text-primary transition-colors">{sg.name}</Link>
+                {sg.description && <span className="text-xs text-muted-foreground">{sg.description}</span>}
+              </div>
+            ),
+          },
+          ...(provider === "cilium" ? [{ header: "Namespace", cell: (sg: SecurityGroup) => <span className="text-sm text-muted-foreground">{sg.namespace}</span> }] : []),
+          { header: "Inbound", cell: (sg) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "ingress").length}</span> },
+          { header: "Outbound", cell: (sg) => <span className="text-sm tabular-nums">{sg.rules.filter((rule) => rule.direction === "egress").length}</span> },
+          { header: "Instances", cell: (sg) => <span className="text-sm tabular-nums">{data.vms.filter((vm) => vmMatchesGroup(vm, sg)).length}</span> },
+          {
+            header: "Type",
+            cell: (sg) => sg.managed
+              ? <Badge variant="outline">Security group</Badge>
+              : <Badge variant="outline" className="text-muted-foreground">Policy ({sg.selector})</Badge>,
+          },
+          { header: "Created", className: "text-right", cell: (sg) => <span className="text-sm text-muted-foreground tabular-nums">{relativeTime(sg.raw.metadata.creationTimestamp)}</span> },
+          {
+            header: "",
+            className: "w-12 text-right",
+            cell: (sg) => <Button size="icon" variant="ghost" aria-label={`Delete ${sg.name}`} onClick={() => setDeleting(sg)}><Trash2 className="size-4 text-muted-foreground" /></Button>,
+          },
+        ]}
+      />
+      <CreateSecurityGroupDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        provider={provider}
+        defaultNamespace={namespace === "all" ? "default" : namespace}
+        onCreated={(sg) => navigate(sgDetailPath({ provider, ...sg }))}
+      />
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete security group ${deleting?.name}?`}
+        description="Instances attached to this group lose its rules immediately."
+        destructive
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (deleting) await deleteSecurityGroup(deleting)
+          reload()
+        }}
+      />
+    </div>
+  )
+}
+
+// --- Detail ---
+
+export function SecurityGroupDetailPage() {
+  const { provider: routeProvider, namespace, name = "" } = useParams()
+  const provider = (routeProvider === "cilium" ? "cilium" : "kube-ovn") as SgProvider
+  const navigate = useNavigate()
+  const [tab, setTab] = useState<"ingress" | "egress" | "instances">("ingress")
+  const [draft, setDraft] = useState<{ rules: SgRule[]; allowSameGroup: boolean } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [bindOpen, setBindOpen] = useState(false)
+
+  const { data, loading, reload } = useAsync(async () => {
+    const [sg, peers, vms] = await Promise.all([
+      getSecurityGroup(provider, name, namespace),
+      listSecurityGroups(provider, namespace),
+      listItems(provider === "cilium" ? `/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines` : "/apis/kubevirt.io/v1/virtualmachines"),
+    ])
+    return { sg, peers: peers.filter((peer) => peer.managed).map((peer) => peer.name), vms }
+  }, { sg: null as SecurityGroup | null, peers: [] as string[], vms: [] as KubeObject[] }, [provider, name, namespace])
+
+  if (loading && !data.sg) return <LoadingState />
+  if (!data.sg) return <EmptyState icon={ShieldCheck} title="Security group not found" action={<Button asChild variant="outline" size="sm"><Link to="/vpc/security-groups">Back to security groups</Link></Button>} />
+
+  const sg = data.sg
+  const members = data.vms.filter((vm) => vmMatchesGroup(vm, sg))
+  const editable = sg.unsupported === 0
+  const rules = draft?.rules ?? sg.rules
+
+  const save = async () => {
+    if (!draft) return
+    const invalid = draft.rules.find((rule) => (rule.remoteType !== "any" && !rule.remote.trim()) || ((rule.protocol === "tcp" || rule.protocol === "udp") && rule.ports && !/^\d+(-\d+)?$/.test(rule.ports.trim())))
+    if (invalid) {
+      setError("Every rule needs a valid source/destination, and ports must look like 22 or 8000-8100.")
+      return
+    }
+    setSaving(true)
+    setError("")
+    try {
+      await saveSecurityGroupRules(sg, draft.rules.map((rule) => ({ ...rule, ports: rule.ports.trim(), remote: rule.remote.trim() })), draft.allowSameGroup)
+      setDraft(null)
+      reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save rules")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const tabs = [
+    { id: "ingress" as const, label: `Inbound rules (${rules.filter((rule) => rule.direction === "ingress").length})`, icon: ArrowDownToLine },
+    { id: "egress" as const, label: `Outbound rules (${rules.filter((rule) => rule.direction === "egress").length})`, icon: ArrowUpFromLine },
+    { id: "instances" as const, label: `Instances (${members.length})`, icon: ShieldCheck },
+  ]
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <PageHeader
+        breadcrumbs={[{ label: "Security Groups", to: "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
+        title={sg.name}
+        subtitle={sg.description || undefined}
+        badge={<Badge variant="outline">{providerLabel[provider]}</Badge>}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
+            <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>Delete</Button>
+          </>
+        }
+      />
+      <Card>
+        <CardHeader><CardTitle className="text-base">Basic information</CardTitle></CardHeader>
+        <CardContent>
+          <KeyValueGrid items={[
+            { label: "Name", value: sg.name },
+            { label: "Scope", value: sg.namespace ? `Namespace ${sg.namespace}` : "Cluster wide" },
+            { label: "Backed by", value: providerLabel[provider] },
+            { label: "Applies to", value: <span className="font-mono text-xs">{sg.selector}</span> },
+            { label: "Traffic between members", value: sg.allowSameGroup ? "Allowed" : "Follows rules" },
+            { label: "Created", value: relativeTime(sg.raw.metadata.creationTimestamp) },
+          ]} />
+        </CardContent>
+      </Card>
+      <ProviderNote provider={provider} />
+      {!editable && (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">
+          This policy contains {sg.unsupported} rule{sg.unsupported > 1 ? "s" : ""} this editor cannot represent (L7, FQDN or custom selectors). Edit it from the <Link className="underline" to={`/networks/cilium/network-policies/${sg.namespace}/${sg.name}/manifest`}>manifest</Link>.
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-1 border-b">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setTab(item.id)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+              tab === item.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <item.icon className="h-4 w-4" />
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab !== "instances" ? (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="text-base">{tab === "ingress" ? "Inbound rules" : "Outbound rules"}</CardTitle>
+                <CardDescription>{tab === "ingress" ? "Traffic allowed to reach attached instances." : "Traffic attached instances may send."}</CardDescription>
+              </div>
+              {editable && (
+                <div className="flex gap-2">
+                  {draft ? (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => { setDraft(null); setError("") }}>Cancel</Button>
+                      <Button size="sm" onClick={save} disabled={saving}>{saving ? "Saving..." : "Save rules"}</Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setDraft({ rules: sg.rules, allowSameGroup: sg.allowSameGroup })}>Edit rules</Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {draft ? (
+              <>
+                <RuleEditor rules={draft.rules} direction={tab} provider={provider} groups={data.peers} onChange={(next) => setDraft({ ...draft, rules: next })} />
+                {tab === "ingress" && (
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <div className="text-sm font-medium">Allow traffic between members</div>
+                      <div className="text-xs text-muted-foreground">Instances in this group can reach each other on all ports.</div>
+                    </div>
+                    <Switch checked={draft.allowSameGroup} onCheckedChange={(checked) => setDraft({ ...draft, allowSameGroup: checked })} />
+                  </label>
+                )}
+              </>
+            ) : (
+              <RuleTable rules={sg.rules} direction={tab} provider={provider} />
+            )}
+            {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {sg.managed && (
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setBindOpen(true)} className="gap-1.5"><Plus className="size-4" />Attach instances</Button>
+            </div>
+          )}
+          <DataTable
+            rows={members}
+            rowKey={(vm) => `${vm.metadata.namespace}/${vm.metadata.name}`}
+            minWidth={560}
+            empty={<EmptyState title="No attached instances" description="Attach instances to apply this group's rules to them." />}
+            columns={[
+              { header: "Instance", cell: (vm) => <Link to={`/kubevirt/virtualization/virtual-machines/${vm.metadata.namespace}/${vm.metadata.name}/overview`} className="font-medium hover:text-primary transition-colors">{vm.metadata.name}</Link> },
+              { header: "Namespace", cell: (vm) => <span className="text-sm text-muted-foreground">{vm.metadata.namespace}</span> },
+              { header: "Status", cell: (vm) => <StatusDot status={str(asRecord(vm.status).printableStatus)} /> },
+              {
+                header: "",
+                className: "text-right",
+                cell: (vm) => sg.managed ? (
+                  <Button size="sm" variant="ghost" onClick={async () => {
+                    await setVmSecurityGroups(vm, provider, vmSecurityGroups(vm, provider).filter((group) => group !== sg.name))
+                    reload()
+                  }}>Detach</Button>
+                ) : null,
+              },
+            ]}
+          />
+        </div>
+      )}
+
+      <AttachInstancesDialog
+        open={bindOpen}
+        onOpenChange={setBindOpen}
+        sg={sg}
+        vms={data.vms.filter((vm) => !vmMatchesGroup(vm, sg))}
+        onDone={reload}
+      />
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={`Delete security group ${sg.name}?`}
+        description={`${members.length} attached instance${members.length === 1 ? "" : "s"} lose this group's rules immediately.`}
+        destructive
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          await deleteSecurityGroup(sg)
+          navigate("/vpc/security-groups")
+        }}
+      />
+    </div>
+  )
+}
+
+function AttachInstancesDialog({ open, onOpenChange, sg, vms, onDone }: { open: boolean; onOpenChange: (open: boolean) => void; sg: SecurityGroup; vms: KubeObject[]; onDone: () => void }) {
+  const [selected, setSelected] = useState<Record<string, boolean>>({})
+  const key = (vm: KubeObject) => `${vm.metadata.namespace}/${vm.metadata.name}`
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={(next) => { if (!next) setSelected({}); onOpenChange(next) }}
+      title={`Attach instances to ${sg.name}`}
+      description="Updates the instance template and its running pod. Instances that cannot be updated live pick up the change on next restart."
+      confirmLabel="Attach"
+      onConfirm={async () => {
+        const targets = vms.filter((vm) => selected[key(vm)])
+        await Promise.all(targets.map((vm) => setVmSecurityGroups(vm, sg.provider, Array.from(new Set([...vmSecurityGroups(vm, sg.provider), sg.name])))))
+        setSelected({})
+        onDone()
+      }}
+    >
+      <div className="max-h-72 space-y-1 overflow-y-auto">
+        {vms.length === 0 && <p className="text-sm text-muted-foreground">No other instances available{sg.namespace ? ` in ${sg.namespace}` : ""}.</p>}
+        {vms.map((vm) => (
+          <label key={key(vm)} className="flex items-center gap-3 rounded-lg border p-2 text-sm hover:bg-muted/50">
+            <input type="checkbox" className="size-4 accent-primary" checked={Boolean(selected[key(vm)])} onChange={(e) => setSelected((current) => ({ ...current, [key(vm)]: e.target.checked }))} />
+            <span className="font-medium">{vm.metadata.name}</span>
+            <span className="text-muted-foreground">{vm.metadata.namespace}</span>
+          </label>
+        ))}
+      </div>
+    </ConfirmDialog>
+  )
+}
+
+/** Dialog used from the instance detail page to choose its security groups. */
+export function InstanceSecurityGroupsDialog({ open, onOpenChange, vm, onDone }: { open: boolean; onOpenChange: (open: boolean) => void; vm: KubeObject; onDone: () => void }) {
+  const { provider } = useSgProvider()
+  const [groups, setGroups] = useState<SecurityGroup[]>([])
+  const [selected, setSelected] = useState<string[]>([])
+  useEffect(() => {
+    if (!open || !provider) return
+    listSecurityGroups(provider, vm.metadata.namespace).then((items) => {
+      setGroups(items.filter((item) => item.managed))
+      setSelected(vmSecurityGroups(vm, provider))
+    })
+  }, [open, provider, vm])
+  if (!provider) return null
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Change security groups"
+      description="Updates the instance template and its running pod."
+      confirmLabel="Save"
+      onConfirm={async () => {
+        await setVmSecurityGroups(vm, provider, selected)
+        onDone()
+      }}
+    >
+      <div className="max-h-72 space-y-1 overflow-y-auto">
+        {groups.length === 0 && <p className="text-sm text-muted-foreground">No security groups available. <Link to="/vpc/security-groups" className="text-primary hover:underline">Create one</Link>.</p>}
+        {groups.map((sg) => (
+          <label key={sg.name} className="flex items-center gap-3 rounded-lg border p-2 text-sm hover:bg-muted/50">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={selected.includes(sg.name)}
+              onChange={(e) => setSelected((current) => e.target.checked ? [...current, sg.name] : current.filter((item) => item !== sg.name))}
+            />
+            <span className="font-medium">{sg.name}</span>
+            <span className="text-muted-foreground">{sg.description || `${sg.rules.length} rules`}</span>
+          </label>
+        ))}
+      </div>
+    </ConfirmDialog>
+  )
+}
+

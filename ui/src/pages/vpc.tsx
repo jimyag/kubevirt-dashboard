@@ -1,0 +1,705 @@
+import { useMemo, useState } from "react"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import { Network, Plus, RefreshCw, Search, Split, Trash2 } from "lucide-react"
+
+import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  FieldRow,
+  KeyValueGrid,
+  LoadingState,
+  NativeSelect,
+  PageHeader,
+  StatusDot,
+  Toolbar,
+  UsageBar,
+} from "@/components/console"
+import {
+  apiFetch,
+  asList,
+  asRecord,
+  kubeOvnAnnotations,
+  listItems,
+  relativeTime,
+  requestJson,
+  str,
+  subnetUsage,
+  useAsync,
+  useNetworkProfile,
+  type KubeObject,
+} from "@/lib/kube"
+
+const OVN = "/apis/kubeovn.io/v1"
+const VM_API = "/apis/kubevirt.io/v1"
+
+const jsonBody = (method: string, body: unknown, contentType = "application/json"): RequestInit => ({
+  method,
+  headers: { "Content-Type": contentType },
+  body: JSON.stringify(body),
+})
+
+const subnetReady = (subnet: KubeObject) => {
+  const conditions = asList(asRecord(subnet.status).conditions)
+  const ready = conditions.find((condition) => condition.type === "Ready")
+  if (!ready) return "Pending"
+  return ready.status === "True" ? "Available" : "NotReady"
+}
+
+const vmSubnet = (vm: KubeObject) =>
+  asRecord(asRecord(asRecord(vm.spec).template).metadata).annotations
+    ? str(asRecord(asRecord(asRecord(asRecord(vm.spec).template).metadata).annotations)[kubeOvnAnnotations.logicalSwitch])
+    : ""
+
+export function KubeOvnMissing() {
+  const profile = useNetworkProfile()
+  return (
+    <Card>
+      <CardContent>
+        <EmptyState
+          icon={Network}
+          title="VPC networking is not enabled"
+          description={profile.kubeOvnInstalled
+            ? "Kube-OVN is installed, but the current network stack does not use VPCs. Switch the network stack in Settings."
+            : "VPCs and subnets require Kube-OVN. Install Kube-OVN, or switch the network stack in Settings if detection was wrong."}
+          action={<Button asChild variant="outline" size="sm"><Link to="/settings">Open settings</Link></Button>}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+// --- Create dialogs ---
+
+export function CreateSubnetDialog({
+  open,
+  onOpenChange,
+  vpcs,
+  defaultVpc,
+  onCreated,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  vpcs: string[]
+  defaultVpc?: string
+  onCreated: () => void
+}) {
+  const [values, setValues] = useState({ name: "", vpc: defaultVpc || "ovn-cluster", cidrBlock: "10.100.0.0/24", gateway: "", namespaces: "", excludeIps: "", natOutgoing: true, isPrivate: false })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const set = (patch: Partial<typeof values>) => setValues((current) => ({ ...current, ...patch }))
+  const submit = async () => {
+    setBusy(true)
+    setError("")
+    try {
+      const spec: Record<string, unknown> = {
+        vpc: values.vpc,
+        cidrBlock: values.cidrBlock.trim(),
+        protocol: values.cidrBlock.includes(":") ? (values.cidrBlock.includes(",") ? "Dual" : "IPv6") : "IPv4",
+        natOutgoing: values.natOutgoing,
+        private: values.isPrivate,
+      }
+      if (values.gateway.trim()) spec.gateway = values.gateway.trim()
+      const namespaces = values.namespaces.split(",").map((item) => item.trim()).filter(Boolean)
+      if (namespaces.length) spec.namespaces = namespaces
+      const excludeIps = values.excludeIps.split(",").map((item) => item.trim()).filter(Boolean)
+      if (excludeIps.length) spec.excludeIps = excludeIps
+      await requestJson(`${OVN}/subnets`, jsonBody("POST", { apiVersion: "kubeovn.io/v1", kind: "Subnet", metadata: { name: values.name.trim() }, spec }))
+      onOpenChange(false)
+      onCreated()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create subnet")
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Create subnet</DialogTitle>
+          <DialogDescription>A Kube-OVN logical switch inside a VPC. Instances placed in this subnet get an address from its CIDR.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FieldRow label="Name"><Input value={values.name} onChange={(e) => set({ name: e.target.value })} placeholder="subnet-web" /></FieldRow>
+          <FieldRow label="VPC">
+            <NativeSelect value={values.vpc} onChange={(e) => set({ vpc: e.target.value })}>
+              {Array.from(new Set([values.vpc, ...vpcs])).map((vpc) => <option key={vpc} value={vpc}>{vpc}</option>)}
+            </NativeSelect>
+          </FieldRow>
+          <FieldRow label="IPv4 CIDR" hint="Use a comma to add an IPv6 CIDR for dual stack."><Input value={values.cidrBlock} onChange={(e) => set({ cidrBlock: e.target.value })} /></FieldRow>
+          <FieldRow label="Gateway" hint="Defaults to the first address."><Input value={values.gateway} onChange={(e) => set({ gateway: e.target.value })} placeholder="auto" /></FieldRow>
+          <FieldRow label="Bound namespaces" hint="Pods in these namespaces default to this subnet."><Input value={values.namespaces} onChange={(e) => set({ namespaces: e.target.value })} placeholder="ns-a, ns-b" /></FieldRow>
+          <FieldRow label="Reserved IPs"><Input value={values.excludeIps} onChange={(e) => set({ excludeIps: e.target.value })} placeholder="10.100.0.1..10.100.0.10" /></FieldRow>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div>
+              <div className="text-sm font-medium">NAT outgoing</div>
+              <div className="text-xs text-muted-foreground">SNAT traffic leaving the cluster</div>
+            </div>
+            <Switch checked={values.natOutgoing} onCheckedChange={(checked) => set({ natOutgoing: checked })} />
+          </label>
+          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div>
+              <div className="text-sm font-medium">Private</div>
+              <div className="text-xs text-muted-foreground">Deny traffic from other subnets</div>
+            </div>
+            <Switch checked={values.isPrivate} onCheckedChange={(checked) => set({ isPrivate: checked })} />
+          </label>
+        </div>
+        {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || !values.name.trim() || !values.cidrBlock.trim()}>{busy ? "Creating..." : "Create subnet"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function CreateVpcDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (open: boolean) => void; onCreated: (name: string) => void }) {
+  const [values, setValues] = useState({ name: "", namespaces: "", withSubnet: true, subnetName: "", cidrBlock: "192.168.0.0/24" })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const set = (patch: Partial<typeof values>) => setValues((current) => ({ ...current, ...patch }))
+  const submit = async () => {
+    setBusy(true)
+    setError("")
+    const name = values.name.trim()
+    try {
+      const namespaces = values.namespaces.split(",").map((item) => item.trim()).filter(Boolean)
+      await requestJson(`${OVN}/vpcs`, jsonBody("POST", { apiVersion: "kubeovn.io/v1", kind: "Vpc", metadata: { name }, spec: namespaces.length ? { namespaces } : {} }))
+      if (values.withSubnet) {
+        await requestJson(`${OVN}/subnets`, jsonBody("POST", {
+          apiVersion: "kubeovn.io/v1",
+          kind: "Subnet",
+          metadata: { name: values.subnetName.trim() || `${name}-default` },
+          spec: { vpc: name, cidrBlock: values.cidrBlock.trim(), protocol: "IPv4", ...(namespaces.length ? { namespaces } : {}) },
+        }))
+      }
+      onOpenChange(false)
+      onCreated(name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create VPC")
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Create VPC</DialogTitle>
+          <DialogDescription>An isolated virtual network with its own router. Subnets in different VPCs can reuse address ranges.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <FieldRow label="Name"><Input value={values.name} onChange={(e) => set({ name: e.target.value })} placeholder="vpc-prod" /></FieldRow>
+          <FieldRow label="Namespaces" hint="Namespaces allowed to use this VPC. Leave empty to allow all."><Input value={values.namespaces} onChange={(e) => set({ namespaces: e.target.value })} placeholder="prod, prod-db" /></FieldRow>
+          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div>
+              <div className="text-sm font-medium">Create a default subnet</div>
+              <div className="text-xs text-muted-foreground">Recommended: instances need a subnet to attach to.</div>
+            </div>
+            <Switch checked={values.withSubnet} onCheckedChange={(checked) => set({ withSubnet: checked })} />
+          </label>
+          {values.withSubnet && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FieldRow label="Subnet name"><Input value={values.subnetName} onChange={(e) => set({ subnetName: e.target.value })} placeholder={values.name ? `${values.name}-default` : "default"} /></FieldRow>
+              <FieldRow label="Subnet CIDR"><Input value={values.cidrBlock} onChange={(e) => set({ cidrBlock: e.target.value })} /></FieldRow>
+            </div>
+          )}
+        </div>
+        {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || !values.name.trim()}>{busy ? "Creating..." : "Create VPC"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// --- VPC list ---
+
+export function VpcListPage() {
+  const profile = useNetworkProfile()
+  const navigate = useNavigate()
+  const [search, setSearch] = useState("")
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deleting, setDeleting] = useState<KubeObject | null>(null)
+  const { data, loading, reload } = useAsync(async () => {
+    const [vpcs, subnets, natGateways] = await Promise.all([
+      listItems(`${OVN}/vpcs`),
+      listItems(`${OVN}/subnets`),
+      listItems(`${OVN}/vpc-nat-gateways`),
+    ])
+    return { vpcs, subnets, natGateways }
+  }, { vpcs: [] as KubeObject[], subnets: [] as KubeObject[], natGateways: [] as KubeObject[] }, [])
+
+  const rows = useMemo(() => data.vpcs.filter((vpc) => vpc.metadata.name.includes(search.trim())), [data.vpcs, search])
+
+  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="VPCs" subtitle="Isolated virtual networks" /><KubeOvnMissing /></div>
+
+  return (
+    <div className="space-y-4 animate-in fade-in duration-500">
+      <PageHeader
+        title="VPCs"
+        subtitle="Isolated virtual networks backed by Kube-OVN logical routers"
+        actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create VPC</Button>}
+      />
+      <Toolbar
+        right={
+          <div className="relative w-full md:w-[280px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-9" placeholder="Filter by name" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+        }
+      >
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
+        <span className="text-sm text-muted-foreground">{data.vpcs.length} VPCs, {data.subnets.length} subnets</span>
+      </Toolbar>
+      <DataTable
+        loading={loading}
+        rows={rows}
+        rowKey={(vpc) => vpc.metadata.name}
+        empty={<EmptyState icon={Network} title="No VPCs" description="Create a VPC to isolate tenant networks." action={<Button size="sm" onClick={() => setCreateOpen(true)}>Create VPC</Button>} />}
+        columns={[
+          {
+            header: "Name",
+            cell: (vpc) => (
+              <div className="flex items-center gap-2">
+                <Link to={`/vpc/vpcs/${vpc.metadata.name}`} className="font-medium hover:text-primary transition-colors">{vpc.metadata.name}</Link>
+                {asRecord(vpc.status).default === true && <Badge variant="outline">Default</Badge>}
+              </div>
+            ),
+          },
+          { header: "Status", cell: (vpc) => <StatusDot status={asRecord(vpc.status).standby === true ? "Available" : "Pending"} /> },
+          {
+            header: "Subnets",
+            cell: (vpc) => {
+              const subnets = data.subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === vpc.metadata.name)
+              return <span className="text-sm tabular-nums">{subnets.length}</span>
+            },
+          },
+          {
+            header: "CIDRs",
+            cell: (vpc) => {
+              const cidrs = data.subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === vpc.metadata.name).map((subnet) => str(asRecord(subnet.spec).cidrBlock))
+              return <span className="font-mono text-xs text-muted-foreground">{cidrs.slice(0, 3).join(", ") || "N/A"}{cidrs.length > 3 ? ` +${cidrs.length - 3}` : ""}</span>
+            },
+          },
+          { header: "NAT Gateways", cell: (vpc) => <span className="text-sm tabular-nums">{data.natGateways.filter((gw) => str(asRecord(gw.spec).vpc) === vpc.metadata.name).length}</span> },
+          { header: "Namespaces", cell: (vpc) => <span className="text-sm text-muted-foreground">{(asRecord(vpc.spec).namespaces as string[] | undefined)?.join(", ") || "All"}</span> },
+          { header: "Created", className: "text-right", cell: (vpc) => <span className="text-sm text-muted-foreground tabular-nums">{relativeTime(vpc.metadata.creationTimestamp)}</span> },
+          {
+            header: "",
+            className: "w-12 text-right",
+            cell: (vpc) => asRecord(vpc.status).default === true ? null : (
+              <Button size="icon" variant="ghost" aria-label={`Delete ${vpc.metadata.name}`} onClick={() => setDeleting(vpc)}><Trash2 className="size-4 text-muted-foreground" /></Button>
+            ),
+          },
+        ]}
+      />
+      <CreateVpcDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={(name) => navigate(`/vpc/vpcs/${name}`)} />
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete VPC ${deleting?.metadata.name}?`}
+        description="Subnets in this VPC must be deleted first. This cannot be undone."
+        destructive
+        confirmLabel="Delete VPC"
+        onConfirm={async () => {
+          await requestJson(`${OVN}/vpcs/${deleting?.metadata.name}`, { method: "DELETE" })
+          reload()
+        }}
+      />
+    </div>
+  )
+}
+
+// --- VPC detail ---
+
+export function VpcDetailPage() {
+  const { name = "" } = useParams()
+  const [subnetOpen, setSubnetOpen] = useState(false)
+  const { data, loading, reload } = useAsync(async () => {
+    const [vpcRes, subnets, natGateways, vms] = await Promise.all([
+      apiFetch(`${OVN}/vpcs/${name}`),
+      listItems(`${OVN}/subnets`),
+      listItems(`${OVN}/vpc-nat-gateways`),
+      listItems(`${VM_API}/virtualmachines`),
+    ])
+    const vpc = vpcRes.ok ? await vpcRes.json() as KubeObject : null
+    return { vpc, subnets: subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === name), natGateways: natGateways.filter((gw) => str(asRecord(gw.spec).vpc) === name), vms }
+  }, { vpc: null as KubeObject | null, subnets: [] as KubeObject[], natGateways: [] as KubeObject[], vms: [] as KubeObject[] }, [name])
+
+  if (loading && !data.vpc) return <LoadingState />
+  if (!data.vpc) return <EmptyState icon={Network} title="VPC not found" action={<Button asChild variant="outline" size="sm"><Link to="/vpc/vpcs">Back to VPCs</Link></Button>} />
+
+  const spec = asRecord(data.vpc.spec)
+  const subnetNames = new Set(data.subnets.map((subnet) => subnet.metadata.name))
+  const instances = data.vms.filter((vm) => subnetNames.has(vmSubnet(vm)))
+  const staticRoutes = asList(spec.staticRoutes)
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <PageHeader
+        breadcrumbs={[{ label: "VPCs", to: "/vpc/vpcs" }, { label: name }]}
+        title={name}
+        badge={<StatusDot status={asRecord(data.vpc.status).standby === true ? "Available" : "Pending"} />}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
+            <Button size="sm" onClick={() => setSubnetOpen(true)} className="gap-1.5"><Plus className="size-4" />Create subnet</Button>
+          </>
+        }
+      />
+      <Card>
+        <CardHeader><CardTitle className="text-base">Basic information</CardTitle></CardHeader>
+        <CardContent>
+          <KeyValueGrid items={[
+            { label: "VPC name", value: name },
+            { label: "Router", value: str(asRecord(data.vpc.status).router, `vpc-${name}`) },
+            { label: "Namespaces", value: (spec.namespaces as string[] | undefined)?.join(", ") || "All namespaces" },
+            { label: "External gateway", value: spec.enableExternal ? "Enabled" : "Disabled" },
+            { label: "Subnets", value: data.subnets.length },
+            { label: "Instances", value: instances.length },
+            { label: "Created", value: relativeTime(data.vpc.metadata.creationTimestamp) },
+          ]} />
+        </CardContent>
+      </Card>
+
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">Subnets</h2>
+        <SubnetTable subnets={data.subnets} loading={false} vms={data.vms} onCreate={() => setSubnetOpen(true)} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">NAT gateways</CardTitle>
+            <CardDescription>Provide SNAT, DNAT and elastic IPs for this VPC.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {data.natGateways.map((gw) => (
+              <div key={gw.metadata.name} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+                <Link to={`/networks/kube-ovn/vpc-nat-gateways/_cluster/${gw.metadata.name}`} className="font-medium hover:text-primary transition-colors">{gw.metadata.name}</Link>
+                <span className="font-mono text-xs text-muted-foreground">{str(asRecord(gw.spec).subnet)} / {str(asRecord(gw.spec).lanIp, "auto")}</span>
+              </div>
+            ))}
+            {data.natGateways.length === 0 && <p className="text-sm text-muted-foreground">No NAT gateways. <Link to="/networks/kube-ovn/vpc-nat-gateways" className="text-primary hover:underline">Create one</Link> to give instances internet access or elastic IPs.</p>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Route table</CardTitle>
+            <CardDescription>Static routes on the VPC router.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {staticRoutes.map((route, index) => (
+              <div key={index} className="flex items-center justify-between gap-3 rounded-lg border p-3 font-mono text-xs">
+                <span>{str(route.cidr)}</span>
+                <span className="text-muted-foreground">via {str(route.nextHopIP)} ({str(route.policy, "policyDst")})</span>
+              </div>
+            ))}
+            {staticRoutes.length === 0 && <p className="text-sm text-muted-foreground">No static routes. Subnet routes are managed automatically.</p>}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">Instances in this VPC</h2>
+        <DataTable
+          rows={instances}
+          rowKey={(vm) => `${vm.metadata.namespace}/${vm.metadata.name}`}
+          minWidth={560}
+          empty={<EmptyState title="No instances" description="Instances attached to subnets of this VPC appear here." />}
+          columns={[
+            { header: "Instance", cell: (vm) => <Link to={`/kubevirt/virtualization/virtual-machines/${vm.metadata.namespace}/${vm.metadata.name}/overview`} className="font-medium hover:text-primary transition-colors">{vm.metadata.name}</Link> },
+            { header: "Namespace", cell: (vm) => <span className="text-sm text-muted-foreground">{vm.metadata.namespace}</span> },
+            { header: "Subnet", cell: (vm) => <span className="text-sm">{vmSubnet(vm)}</span> },
+            { header: "Status", cell: (vm) => <StatusDot status={str(asRecord(vm.status).printableStatus)} /> },
+          ]}
+        />
+      </div>
+
+      <CreateSubnetDialog open={subnetOpen} onOpenChange={setSubnetOpen} vpcs={[name]} defaultVpc={name} onCreated={reload} />
+    </div>
+  )
+}
+
+// --- Subnets ---
+
+function SubnetTable({ subnets, loading, vms, onCreate, onDelete }: { subnets: KubeObject[]; loading: boolean; vms: KubeObject[]; onCreate?: () => void; onDelete?: (subnet: KubeObject) => void }) {
+  return (
+    <DataTable
+      loading={loading}
+      rows={subnets}
+      rowKey={(subnet) => subnet.metadata.name}
+      empty={<EmptyState icon={Split} title="No subnets" description="Create a subnet to place instances in this network." action={onCreate && <Button size="sm" onClick={onCreate}>Create subnet</Button>} />}
+      columns={[
+        { header: "Name", cell: (subnet) => <Link to={`/vpc/subnets/${subnet.metadata.name}`} className="font-medium hover:text-primary transition-colors">{subnet.metadata.name}</Link> },
+        { header: "Status", cell: (subnet) => <StatusDot status={subnetReady(subnet)} /> },
+        { header: "VPC", cell: (subnet) => <Link to={`/vpc/vpcs/${str(asRecord(subnet.spec).vpc, "ovn-cluster")}`} className="text-sm hover:text-primary transition-colors">{str(asRecord(subnet.spec).vpc, "ovn-cluster")}</Link> },
+        { header: "CIDR", cell: (subnet) => <span className="font-mono text-xs">{str(asRecord(subnet.spec).cidrBlock)}</span> },
+        { header: "Gateway", cell: (subnet) => <span className="font-mono text-xs text-muted-foreground">{str(asRecord(subnet.spec).gateway, "N/A")}</span> },
+        {
+          header: "IP usage",
+          cell: (subnet) => {
+            const usage = subnetUsage(subnet)
+            return <UsageBar used={usage.used} total={usage.total} />
+          },
+        },
+        { header: "Instances", cell: (subnet) => <span className="text-sm tabular-nums">{vms.filter((vm) => vmSubnet(vm) === subnet.metadata.name).length}</span> },
+        { header: "ACL rules", cell: (subnet) => <span className="text-sm tabular-nums">{asList(asRecord(subnet.spec).acls).length}</span> },
+        ...(onDelete ? [{
+          header: "",
+          className: "w-12 text-right",
+          cell: (subnet: KubeObject) => ["ovn-default", "join"].includes(subnet.metadata.name) ? null : (
+            <Button size="icon" variant="ghost" aria-label={`Delete ${subnet.metadata.name}`} onClick={() => onDelete(subnet)}><Trash2 className="size-4 text-muted-foreground" /></Button>
+          ),
+        }] : []),
+      ]}
+    />
+  )
+}
+
+export function SubnetListPage() {
+  const profile = useNetworkProfile()
+  const [search, setSearch] = useState("")
+  const [vpcFilter, setVpcFilter] = useState("all")
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deleting, setDeleting] = useState<KubeObject | null>(null)
+  const { data, loading, reload } = useAsync(async () => {
+    const [subnets, vpcs, vms] = await Promise.all([listItems(`${OVN}/subnets`), listItems(`${OVN}/vpcs`), listItems(`${VM_API}/virtualmachines`)])
+    return { subnets, vpcs, vms }
+  }, { subnets: [] as KubeObject[], vpcs: [] as KubeObject[], vms: [] as KubeObject[] }, [])
+
+  const vpcNames = data.vpcs.map((vpc) => vpc.metadata.name)
+  const rows = data.subnets.filter((subnet) => {
+    const vpc = str(asRecord(subnet.spec).vpc, "ovn-cluster")
+    const needle = search.trim()
+    return (vpcFilter === "all" || vpc === vpcFilter) && (!needle || subnet.metadata.name.includes(needle) || str(asRecord(subnet.spec).cidrBlock).includes(needle))
+  })
+
+  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="Subnets" subtitle="Address ranges inside VPCs" /><KubeOvnMissing /></div>
+
+  return (
+    <div className="space-y-4 animate-in fade-in duration-500">
+      <PageHeader
+        title="Subnets"
+        subtitle="Address ranges inside VPCs. Each subnet can carry its own network ACL."
+        actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create subnet</Button>}
+      />
+      <Toolbar
+        right={
+          <div className="relative w-full md:w-[280px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-9" placeholder="Filter by name or CIDR" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+        }
+      >
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
+        <NativeSelect value={vpcFilter} onChange={(e) => setVpcFilter(e.target.value)} aria-label="Filter by VPC" className="min-w-[160px]">
+          <option value="all">All VPCs</option>
+          {vpcNames.map((vpc) => <option key={vpc} value={vpc}>{vpc}</option>)}
+        </NativeSelect>
+      </Toolbar>
+      <SubnetTable subnets={rows} loading={loading} vms={data.vms} onCreate={() => setCreateOpen(true)} onDelete={setDeleting} />
+      <CreateSubnetDialog open={createOpen} onOpenChange={setCreateOpen} vpcs={vpcNames} defaultVpc={vpcFilter === "all" ? undefined : vpcFilter} onCreated={reload} />
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete subnet ${deleting?.metadata.name}?`}
+        description="Instances still using this subnet lose connectivity. This cannot be undone."
+        destructive
+        confirmLabel="Delete subnet"
+        onConfirm={async () => {
+          await requestJson(`${OVN}/subnets/${deleting?.metadata.name}`, { method: "DELETE" })
+          reload()
+        }}
+      />
+    </div>
+  )
+}
+
+// --- Subnet detail with network ACL editor ---
+
+type AclRule = { direction: string; priority: string; match: string; action: string }
+
+const aclDirections = [
+  { value: "to-lport", label: "Inbound (to-lport)" },
+  { value: "from-lport", label: "Outbound (from-lport)" },
+]
+const aclActions = ["allow-related", "allow", "drop", "reject"]
+
+const aclTemplates: Array<{ label: string; rule: (cidr: string) => AclRule }> = [
+  { label: "Allow SSH from anywhere", rule: () => ({ direction: "to-lport", priority: "1100", match: "tcp.dst == 22", action: "allow-related" }) },
+  { label: "Allow ICMP", rule: () => ({ direction: "to-lport", priority: "1100", match: "icmp4", action: "allow-related" }) },
+  { label: "Allow traffic within subnet", rule: (cidr) => ({ direction: "to-lport", priority: "1050", match: `ip4.src == ${cidr.split(",")[0]}`, action: "allow-related" }) },
+  { label: "Deny all other inbound", rule: (cidr) => ({ direction: "to-lport", priority: "1000", match: `ip4.dst == ${cidr.split(",")[0]}`, action: "drop" }) },
+]
+
+export function SubnetDetailPage() {
+  const { name = "" } = useParams()
+  const [rules, setRules] = useState<AclRule[] | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const { data, loading, reload } = useAsync(async () => {
+    const [subnetRes, ips, vms] = await Promise.all([
+      apiFetch(`${OVN}/subnets/${name}`),
+      listItems(`${OVN}/ips`),
+      listItems(`${VM_API}/virtualmachines`),
+    ])
+    const subnet = subnetRes.ok ? await subnetRes.json() as KubeObject : null
+    return { subnet, ips: ips.filter((ip) => str(asRecord(ip.spec).subnet) === name), vms: vms.filter((vm) => vmSubnet(vm) === name) }
+  }, { subnet: null as KubeObject | null, ips: [] as KubeObject[], vms: [] as KubeObject[] }, [name])
+
+  if (loading && !data.subnet) return <LoadingState />
+  if (!data.subnet) return <EmptyState icon={Split} title="Subnet not found" action={<Button asChild variant="outline" size="sm"><Link to="/vpc/subnets">Back to subnets</Link></Button>} />
+
+  const spec = asRecord(data.subnet.spec)
+  const savedRules: AclRule[] = asList(spec.acls).map((rule) => ({ direction: str(rule.direction, "to-lport"), priority: str(rule.priority, "1000"), match: str(rule.match), action: str(rule.action, "allow-related") }))
+  const editing = rules !== null
+  const shownRules = rules ?? savedRules
+  const usage = subnetUsage(data.subnet)
+  const updateRule = (index: number, patch: Partial<AclRule>) => setRules((current) => (current ?? savedRules).map((rule, i) => i === index ? { ...rule, ...patch } : rule))
+
+  const save = async () => {
+    setSaving(true)
+    setError("")
+    try {
+      const acls = (rules ?? []).filter((rule) => rule.match.trim()).map((rule) => ({ direction: rule.direction, priority: Number(rule.priority) || 1000, match: rule.match.trim(), action: rule.action }))
+      await requestJson(`${OVN}/subnets/${name}`, jsonBody("PATCH", { spec: { acls } }, "application/merge-patch+json"))
+      setRules(null)
+      reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save ACL")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <PageHeader
+        breadcrumbs={[{ label: "Subnets", to: "/vpc/subnets" }, { label: name }]}
+        title={name}
+        badge={<StatusDot status={subnetReady(data.subnet)} />}
+        actions={<Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>}
+      />
+      <Card>
+        <CardHeader><CardTitle className="text-base">Basic information</CardTitle></CardHeader>
+        <CardContent>
+          <KeyValueGrid items={[
+            { label: "VPC", value: <Link to={`/vpc/vpcs/${str(spec.vpc, "ovn-cluster")}`} className="hover:text-primary transition-colors">{str(spec.vpc, "ovn-cluster")}</Link> },
+            { label: "CIDR", value: <span className="font-mono">{str(spec.cidrBlock)}</span> },
+            { label: "Gateway", value: <span className="font-mono">{str(spec.gateway, "N/A")}</span> },
+            { label: "Protocol", value: str(spec.protocol, "IPv4") },
+            { label: "IP usage", value: <UsageBar used={usage.used} total={usage.total} label={`${usage.used} used / ${usage.total} total`} /> },
+            { label: "Bound namespaces", value: (spec.namespaces as string[] | undefined)?.join(", ") || "None" },
+            { label: "NAT outgoing", value: spec.natOutgoing ? "Enabled" : "Disabled" },
+            { label: "Private", value: spec.private ? "Yes" : "No" },
+            { label: "Reserved IPs", value: (spec.excludeIps as string[] | undefined)?.join(", ") || "None" },
+            { label: "Provider", value: str(spec.provider, "ovn") },
+          ]} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base">Network ACL</CardTitle>
+              <CardDescription>Stateless subnet-level rules evaluated by OVN. Higher priority wins. Use OVN match expressions such as <code className="font-mono">tcp.dst == 443</code>.</CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {editing ? (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => { setRules(null); setError("") }}>Cancel</Button>
+                  <Button size="sm" onClick={save} disabled={saving}>{saving ? "Saving..." : "Save rules"}</Button>
+                </>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setRules(savedRules)}>Edit rules</Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {shownRules.length === 0 && !editing && <p className="text-sm text-muted-foreground">No ACL rules. All traffic allowed by the VPC and security groups passes.</p>}
+          {shownRules.length > 0 && (
+            <div className="overflow-x-auto">
+              <div className="min-w-[680px] space-y-2">
+                <div className="grid grid-cols-[180px_100px_1fr_150px_40px] gap-2 px-1 text-xs font-semibold text-muted-foreground">
+                  <span>Direction</span><span>Priority</span><span>Match</span><span>Action</span><span />
+                </div>
+                {shownRules.map((rule, index) => editing ? (
+                  <div key={index} className="grid grid-cols-[180px_100px_1fr_150px_40px] items-center gap-2">
+                    <NativeSelect value={rule.direction} onChange={(e) => updateRule(index, { direction: e.target.value })}>
+                      {aclDirections.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </NativeSelect>
+                    <Input type="number" value={rule.priority} onChange={(e) => updateRule(index, { priority: e.target.value })} />
+                    <Input className="font-mono text-xs" value={rule.match} onChange={(e) => updateRule(index, { match: e.target.value })} placeholder="ip4.src == 10.0.0.0/8 && tcp.dst == 22" />
+                    <NativeSelect value={rule.action} onChange={(e) => updateRule(index, { action: e.target.value })}>
+                      {aclActions.map((action) => <option key={action} value={action}>{action}</option>)}
+                    </NativeSelect>
+                    <Button size="icon" variant="ghost" aria-label="Remove rule" onClick={() => setRules((current) => (current ?? []).filter((_, i) => i !== index))}><Trash2 className="size-4 text-muted-foreground" /></Button>
+                  </div>
+                ) : (
+                  <div key={index} className="grid grid-cols-[180px_100px_1fr_150px_40px] items-center gap-2 rounded-lg border px-1 py-2 text-sm">
+                    <span>{rule.direction === "to-lport" ? "Inbound" : "Outbound"}</span>
+                    <span className="tabular-nums">{rule.priority}</span>
+                    <span className="font-mono text-xs break-all">{rule.match}</span>
+                    <Badge variant={rule.action.startsWith("allow") ? "success" : "danger"}>{rule.action}</Badge>
+                    <span />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {editing && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setRules((current) => [...(current ?? []), { direction: "to-lport", priority: "1000", match: "", action: "allow-related" }])}><Plus className="size-4" />Add rule</Button>
+              <span className="text-xs text-muted-foreground">Quick add:</span>
+              {aclTemplates.map((template) => (
+                <Button key={template.label} size="sm" variant="ghost" onClick={() => setRules((current) => [...(current ?? []), template.rule(str(spec.cidrBlock, "0.0.0.0/0"))])}>{template.label}</Button>
+              ))}
+            </div>
+          )}
+          {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
+        </CardContent>
+      </Card>
+
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">Allocated addresses</h2>
+        <DataTable
+          rows={data.ips}
+          rowKey={(ip) => ip.metadata.name}
+          minWidth={600}
+          empty={<EmptyState title="No allocated addresses" />}
+          columns={[
+            { header: "Address", cell: (ip) => <span className="font-mono text-xs">{str(asRecord(ip.spec).v4IpAddress || asRecord(ip.spec).ipAddress)}</span> },
+            { header: "MAC", cell: (ip) => <span className="font-mono text-xs text-muted-foreground">{str(asRecord(ip.spec).macAddress, "N/A")}</span> },
+            { header: "Owner", cell: (ip) => <span className="text-sm">{str(asRecord(ip.spec).namespace)}/{str(asRecord(ip.spec).podName)}</span> },
+            { header: "Node", cell: (ip) => <span className="text-sm text-muted-foreground">{str(asRecord(ip.spec).nodeName, "N/A")}</span> },
+          ]}
+        />
+      </div>
+    </div>
+  )
+}

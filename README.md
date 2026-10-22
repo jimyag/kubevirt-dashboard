@@ -19,6 +19,25 @@ A lightweight, single-binary, and modern web-based management console for KubeVi
 - **Clean Manifests**: Manifest routes show YAML separately from the overview pages.
 - **Single Binary**: All static assets are embedded into the Go binary for easy deployment.
 
+## Cloud Console Layout
+
+The UI is organized like a public cloud console: **Compute** (instances, instance types, images, snapshots, migrations, hosts), **Storage** (disks, volumes, storage classes, volume snapshots), **Networking** (VPCs, subnets, elastic IPs, NAT gateways, load balancers) and **Security** (security groups, network policies). Every raw API resource remains reachable from the **Resource Catalog**.
+
+Instances are created with a step-by-step wizard (spec, image and disks, network and security groups, login, review with the generated manifest).
+
+### Network Stacks
+
+The console detects the installed CNI components and adapts networking and access control. The detected stack can be overridden per cluster in **Settings**.
+
+| Stack | Instance networking | Security groups enforced by |
+|-------|---------------------|-----------------------------|
+| KubeVirt | Pod network | Kubernetes NetworkPolicy |
+| KubeVirt + Kube-OVN | Kube-OVN VPC and subnet (`ovn.kubernetes.io/logical_switch`) | Kube-OVN `SecurityGroup` (`ovn.kubernetes.io/security_groups`) |
+| KubeVirt + Kube-OVN + Cilium | Kube-OVN VPC and subnet | `CiliumNetworkPolicy` selecting `sg.kubevirt-dashboard.io/<name>` |
+| KubeVirt + Cilium | Pod network | `CiliumNetworkPolicy` selecting `sg.kubevirt-dashboard.io/<name>` |
+
+Security groups use the same inbound/outbound rule editor for both engines. With Kube-OVN, subnets also expose a subnet-level network ACL editor.
+
 ## UI Preview
 
 ### Dashboard Overview
