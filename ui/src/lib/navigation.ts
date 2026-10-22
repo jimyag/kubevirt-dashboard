@@ -35,15 +35,32 @@ export type NavItem = {
   visible?: (profile: NetworkProfile) => boolean
 }
 
-export type NavSection = { label: string; items: NavItem[] }
+export type SectionTone = "slate" | "blue" | "amber" | "teal" | "rose" | "violet"
+
+export type NavSection = { label: string; tone: SectionTone; items: NavItem[] }
+
+/**
+ * Per-section accent classes. Each console area keeps one hue across the sidebar icon,
+ * header breadcrumb and overview metrics, so color doubles as orientation.
+ */
+export const toneClasses: Record<SectionTone, { text: string; bg: string; dot: string; soft: string }> = {
+  slate: { text: "text-slate-600 dark:text-slate-300", bg: "bg-slate-500", dot: "bg-slate-400", soft: "bg-slate-500/10" },
+  blue: { text: "text-blue-600 dark:text-blue-400", bg: "bg-blue-600 dark:bg-blue-500", dot: "bg-blue-500", soft: "bg-blue-500/10" },
+  amber: { text: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500", dot: "bg-amber-500", soft: "bg-amber-500/10" },
+  teal: { text: "text-teal-600 dark:text-teal-400", bg: "bg-teal-600 dark:bg-teal-500", dot: "bg-teal-500", soft: "bg-teal-500/10" },
+  rose: { text: "text-rose-600 dark:text-rose-400", bg: "bg-rose-600 dark:bg-rose-500", dot: "bg-rose-500", soft: "bg-rose-500/10" },
+  violet: { text: "text-violet-600 dark:text-violet-400", bg: "bg-violet-600 dark:bg-violet-500", dot: "bg-violet-500", soft: "bg-violet-500/10" },
+}
 
 export const navSections: NavSection[] = [
   {
     label: "Home",
+    tone: "slate",
     items: [{ name: "Overview", path: "/", icon: LayoutDashboard }],
   },
   {
     label: "Compute",
+    tone: "blue",
     items: [
       { name: "Instances", path: "/kubevirt/virtualization/virtual-machines", icon: Cpu, match: ["/kubevirt/virtualization/virtual-machine-instances"] },
       { name: "Instance Types", path: "/kubevirt/templates/cluster-instance-types", icon: Layers, match: ["/kubevirt/templates"], requires: ["instancetype.kubevirt.io/v1beta1", "virtualmachineclusterinstancetypes"] },
@@ -56,6 +73,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Storage",
+    tone: "amber",
     items: [
       { name: "Disks", path: "/kubevirt/cdi/data-volumes", icon: HardDrive, requires: ["cdi.kubevirt.io/v1beta1", "datavolumes"] },
       { name: "Volumes", path: "/storage/kubernetes/persistent-volume-claims", icon: Database, match: ["/storage/kubernetes/persistent-volumes"] },
@@ -65,6 +83,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Networking",
+    tone: "teal",
     items: [
       { name: "VPCs", path: "/vpc/vpcs", icon: Network, visible: (p) => p.vpc },
       { name: "Subnets", path: "/vpc/subnets", icon: Split, visible: (p) => p.vpc },
@@ -76,6 +95,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Security",
+    tone: "rose",
     items: [
       { name: "Security Groups", path: "/vpc/security-groups", icon: ShieldCheck, visible: (p) => p.acl !== "networkpolicy" },
       { name: "Network Policies", path: "/networks/kubernetes/network-policies", icon: Shield, match: ["/networks/cilium/network-policies", "/networks/cilium/clusterwide-network-policies"] },
@@ -83,6 +103,7 @@ export const navSections: NavSection[] = [
   },
   {
     label: "Platform",
+    tone: "violet",
     items: [
       { name: "Resource Catalog", path: "/catalog", icon: ListChecks, match: ["/kubernetes", "/kubevirt", "/storage", "/networks"] },
       { name: "Settings", path: "/settings", icon: Settings },

@@ -32,7 +32,12 @@ kubevirt-console/
 
 ### 2. 色彩系统
 
-只使用语义化 Tailwind token，禁止硬编码颜色。主题为接近无彩的中性灰 + 单一克制的钢蓝主色。颜色只用于状态（运行 / 警告 / 失败）和主操作按钮，不用于装饰。
+只使用语义化 Tailwind token，禁止硬编码颜色。主题为冷灰画布 + 白色表面 + 钴蓝主色（`--primary`）。
+
+颜色有三种用途，不要用于其他装饰：
+- 主色：主操作按钮、选中项、链接悬停
+- 状态色：绿 / 琥珀 / 红，只通过 `StatusDot` 等共享组件使用
+- 分区色：每个导航分区一个色相（Compute=blue、Storage=amber、Networking=teal、Security=rose、Platform=violet），定义在 `ui/src/lib/navigation.ts` 的 `toneClasses`，用于侧边栏图标、面包屑、页面标题图标和总览指标；新增分区色只在这里加
 
 禁止使用的 class：`bg-white`、`text-zinc-*`、`bg-zinc-*`、`border-zinc-*`、`text-gray-*`、`bg-gray-*`
 

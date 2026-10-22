@@ -14,11 +14,11 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { useNetworkProfile } from "@/lib/kube"
-import { findActiveNav, useNavSections } from "@/lib/navigation"
+import { findActiveNav, toneClasses, useNavSections } from "@/lib/navigation"
 
 const navButtonClass = [
-  "h-8 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&>svg]:text-muted-foreground",
-  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[active=true]:[&>svg]:text-sidebar-accent-foreground",
+  "h-8 text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
 ].join(" ")
 
 export function AppSidebar() {
@@ -34,7 +34,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton asChild className="h-9 hover:bg-transparent active:bg-transparent">
               <Link to="/">
-                <div className="flex aspect-square size-7 shrink-0 items-center justify-center rounded-md bg-foreground font-mono text-xs font-semibold text-background">kv</div>
+                <div className="flex aspect-square size-7 shrink-0 items-center justify-center rounded-md bg-primary font-mono text-xs font-semibold text-primary-foreground">kv</div>
                 <span className="text-sm font-semibold text-sidebar-accent-foreground">virt console</span>
               </Link>
             </SidebarMenuButton>
@@ -52,7 +52,7 @@ export function AppSidebar() {
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton asChild isActive={active === item.path} tooltip={item.name} className={navButtonClass}>
                       <Link to={item.path}>
-                        <item.icon />
+                        <item.icon className={toneClasses[section.tone].text} />
                         <span>{item.name}</span>
                       </Link>
                     </SidebarMenuButton>

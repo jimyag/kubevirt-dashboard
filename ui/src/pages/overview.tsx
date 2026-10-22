@@ -19,6 +19,7 @@ import {
 } from "@/lib/kube"
 import { engineLabel, listAllSecurityGroups, useSgProvider } from "@/lib/security-groups"
 import { vmStatus, vmStatusGroup } from "@/lib/instances"
+import { toneClasses, type SectionTone } from "@/lib/navigation"
 
 type EventLike = KubeObject & { type?: string; reason?: string; message?: string; lastTimestamp?: string; eventTime?: string; involvedObject?: { kind?: string; name?: string; namespace?: string } }
 
@@ -31,12 +32,22 @@ const statusRows = [
 
 const nodeReady = (node: KubeObject) => asList(asRecord(node.status).conditions).some((condition) => condition.type === "Ready" && condition.status === "True")
 
-function Metric({ label, value, detail, to }: { label: string; value: ReactNode; detail?: ReactNode; to?: string }) {
+function Metric({ label, value, detail, to, tone, ratio }: { label: string; value: ReactNode; detail?: ReactNode; to?: string; tone: SectionTone; ratio?: number }) {
+  const colors = toneClasses[tone]
   const body = (
-    <div className={cn("h-full px-4 py-3", to && "transition-colors hover:bg-muted/50")}>
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className={cn("relative h-full px-4 pt-3.5 pb-3", to && "transition-colors hover:bg-muted/50")}>
+      <span className={cn("absolute inset-x-0 top-0 h-0.5", colors.bg)} />
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className={cn("size-1.5 rounded-full", colors.dot)} />
+        {label}
+      </div>
       <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
-      {detail && <div className="text-xs text-muted-foreground tabular-nums">{detail}</div>}
+      {ratio !== undefined && (
+        <div className={cn("mt-1.5 h-1 overflow-hidden rounded-full", colors.soft)}>
+          <div className={cn("h-full rounded-full", ratio > 0.9 ? "bg-red-500" : colors.bg)} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
+        </div>
+      )}
+      {detail && <div className="mt-1 text-xs text-muted-foreground tabular-nums">{detail}</div>}
     </div>
   )
   return to ? <Link to={to}>{body}</Link> : body
@@ -123,12 +134,12 @@ export function OverviewPage() {
         actions={<Button asChild size="sm" className="gap-1.5"><Link to="/kubevirt/virtualization/virtual-machines/create"><Plus className="size-4" />Create instance</Link></Button>}
       />
 
-      <div className="grid grid-cols-2 divide-x divide-y rounded-lg border bg-card md:grid-cols-5 md:divide-y-0">
-        <Metric label="Hosts" value={data.nodes.length} detail={`${readyNodes} ready`} to="/nodes" />
-        <Metric label="Instances" value={data.vms.length} detail={`${statusCounts.running} running`} to="/kubevirt/virtualization/virtual-machines" />
-        <Metric label="vCPU allocated" value={pct(allocation.vcpu, allocation.capacityCpu)} detail={`${allocation.vcpu} of ${allocation.capacityCpu}`} />
-        <Metric label="Memory allocated" value={pct(allocation.memoryGi, allocation.capacityMemory)} detail={`${formatGi(Math.round(allocation.memoryGi))} of ${formatGi(Math.round(allocation.capacityMemory))}`} />
-        <Metric label="Disks" value={formatGi(diskGi)} detail={`${data.dvs.length} volumes`} to="/kubevirt/cdi/data-volumes" />
+      <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border bg-card md:grid-cols-5 md:divide-y-0">
+        <Metric tone="slate" label="Hosts" value={data.nodes.length} detail={`${readyNodes} ready`} to="/nodes" />
+        <Metric tone="blue" label="Instances" value={data.vms.length} detail={`${statusCounts.running} running`} to="/kubevirt/virtualization/virtual-machines" />
+        <Metric tone="blue" label="vCPU allocated" value={pct(allocation.vcpu, allocation.capacityCpu)} ratio={allocation.capacityCpu ? allocation.vcpu / allocation.capacityCpu : 0} detail={`${allocation.vcpu} of ${allocation.capacityCpu}`} />
+        <Metric tone="violet" label="Memory allocated" value={pct(allocation.memoryGi, allocation.capacityMemory)} ratio={allocation.capacityMemory ? allocation.memoryGi / allocation.capacityMemory : 0} detail={`${formatGi(Math.round(allocation.memoryGi))} of ${formatGi(Math.round(allocation.capacityMemory))}`} />
+        <Metric tone="amber" label="Disks" value={formatGi(diskGi)} detail={`${data.dvs.length} volumes`} to="/kubevirt/cdi/data-volumes" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -168,6 +179,11 @@ export function OverviewPage() {
 
         <div className="space-y-4">
           <Panel title="Instances" bodyClassName="p-0 divide-y">
+            <div className="flex h-1.5 overflow-hidden">
+              {[["running", "bg-green-500"], ["transitioning", "bg-amber-500"], ["error", "bg-red-500"], ["stopped", "bg-muted-foreground/30"]].map(([id, color]) => statusCounts[id] > 0 && (
+                <div key={id} className={color} style={{ width: `${(statusCounts[id] / Math.max(1, data.vms.length)) * 100}%` }} />
+              ))}
+            </div>
             {statusRows.map((row) => (
               <CountRow key={row.id} label={row.label} value={statusCounts[row.id]} to="/kubevirt/virtualization/virtual-machines">
                 <StatusDot status={row.status} label={row.label} />

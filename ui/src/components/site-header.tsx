@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { getContext, setContext } from "@/lib/kube"
-import { findActiveNav } from "@/lib/navigation"
+import { findActiveNav, toneClasses } from "@/lib/navigation"
 import { CommandPalette } from "./command-palette"
 import { ModeToggle } from "./mode-toggle"
 
@@ -64,6 +64,7 @@ function Breadcrumbs() {
       {crumbs.map((crumb, index) => (
         <span key={crumb} className="flex min-w-0 items-center gap-1.5">
           {index > 0 && <ChevronRight className="size-3.5 text-muted-foreground" />}
+          {index === 0 && <span className={`size-2 rounded-sm ${toneClasses[active.section.tone].dot}`} />}
           {index === crumbs.length - 1 ? (
             <Link to={active.item.path} className="truncate font-medium text-foreground hover:text-primary transition-colors">{crumb}</Link>
           ) : (

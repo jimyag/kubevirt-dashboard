@@ -1,8 +1,9 @@
 import { useState, type ComponentProps, type ComponentType, type ReactNode } from "react"
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { Check, ChevronRight, Inbox } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { findActiveNav, toneClasses } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -36,6 +37,9 @@ export function PageHeader({
   actions?: ReactNode
   badge?: ReactNode
 }) {
+  const active = findActiveNav(useLocation().pathname)
+  const tone = active ? toneClasses[active.section.tone] : null
+  const Icon = active?.item.icon
   return (
     <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
@@ -50,6 +54,11 @@ export function PageHeader({
           </nav>
         )}
         <div className="flex flex-wrap items-center gap-2.5">
+          {Icon && tone && (
+            <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md", tone.soft, tone.text)}>
+              <Icon className="size-4" />
+            </span>
+          )}
           <h1 className="text-xl font-semibold break-all">{title}</h1>
           {badge}
         </div>
