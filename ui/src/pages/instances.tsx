@@ -78,6 +78,10 @@ const vmDelete = async (vm: KubeObject) =>
 
 // --- Instance list ---
 
+type PowerAction = "start" | "stop" | "restart"
+type PowerRequest = { action: PowerAction; vms: KubeObject[] }
+const powerLabel: Record<PowerAction, string> = { start: "Start", stop: "Stop", restart: "Restart" }
+
 const statusTabs = [
   { id: "all", label: "All" },
   { id: "running", label: "Running" },
@@ -123,6 +127,7 @@ export function InstanceListPage() {
   const [search, setSearch] = useState("")
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<KubeObject[] | null>(null)
+  const [powering, setPowering] = useState<PowerRequest | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -188,12 +193,12 @@ export function InstanceListPage() {
   const selectedVms = rows.filter((row) => selected[row.key]).map((row) => row.vm)
   const allSelected = rows.length > 0 && selectedVms.length === rows.length
 
-  const runBatch = async (action: "start" | "stop" | "restart") => {
+  const runActions = async ({ action, vms }: PowerRequest) => {
     setBusy(true)
     try {
-      const results = await Promise.allSettled(selectedVms.map((vm) => vmAction(vm, action)))
-      const failed = results.flatMap((result, index) => result.status === "rejected" ? [`${selectedVms[index].metadata.name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`] : [])
-      if (failed.length) toast.error(t("{action} failed for {failed} of {total}", { action: t(action.charAt(0).toUpperCase() + action.slice(1)), failed: failed.length, total: selectedVms.length }), { description: failed.slice(0, 5).join("\n") })
+      const results = await Promise.allSettled(vms.map((vm) => vmAction(vm, action)))
+      const failed = results.flatMap((result, index) => result.status === "rejected" ? [`${vms[index].metadata.name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`] : [])
+      if (failed.length) toast.error(t("{action} failed for {failed} of {total}", { action: t(powerLabel[action]), failed: failed.length, total: vms.length }), { description: failed.slice(0, 5).join("\n") })
       setSelected({})
       reload()
     } finally {
@@ -237,9 +242,9 @@ export function InstanceListPage() {
         {selectedVms.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-2 py-1">
             <span className="text-sm text-muted-foreground">{selectedVms.length} selected</span>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("start")} className="gap-1.5"><Play className="size-3.5" />{t("Start")}</Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("stop")} className="gap-1.5"><Square className="size-3.5" />{t("Stop")}</Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("restart")} className="gap-1.5"><RotateCcw className="size-3.5" />{t("Restart")}</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setPowering({ action: "start", vms: selectedVms })} className="gap-1.5"><Play className="size-3.5" />{t("Start")}</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setPowering({ action: "stop", vms: selectedVms })} className="gap-1.5"><Square className="size-3.5" />{t("Stop")}</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setPowering({ action: "restart", vms: selectedVms })} className="gap-1.5"><RotateCcw className="size-3.5" />{t("Restart")}</Button>
             <Button size="sm" variant="destructive" disabled={busy} onClick={() => setDeleting(selectedVms)} className="gap-1.5"><Trash2 className="size-3.5" />{t("Delete")}</Button>
           </div>
         )}
@@ -319,7 +324,7 @@ export function InstanceListPage() {
                     <td className="px-3 py-2 text-sm text-muted-foreground">{node || "-"}</td>
                     <td className="px-3 py-2 text-right text-sm text-muted-foreground tabular-nums">{relativeTime(vm.metadata.creationTimestamp)}</td>
                     <td className="px-3 py-2 text-right">
-                      <InstanceRowMenu vm={vm} running={vmStatusGroup(status) === "running"} onChanged={reload} onDelete={() => setDeleting([vm])} />
+                      <InstanceRowMenu vm={vm} running={vmStatusGroup(status) === "running"} onPower={(action) => setPowering({ action, vms: [vm] })} onDelete={() => setDeleting([vm])} />
                     </td>
                   </tr>
                 )
@@ -329,6 +334,25 @@ export function InstanceListPage() {
         </div>
         <Pager {...paging} />
       </div>
+
+      <ConfirmDialog
+        open={powering !== null}
+        onOpenChange={(open) => !open && setPowering(null)}
+        title={powering && powering.vms.length > 1
+          ? t(`${powerLabel[powering.action]} {count} instances?`, { count: powering.vms.length })
+          : t(`${powerLabel[powering?.action || "start"]} instance {name}?`, { name: powering?.vms[0]?.metadata.name })}
+        description={powering?.action === "stop" ? t("The guest OS is asked to shut down.") : powering?.action === "restart" ? t("The guest OS is restarted.") : undefined}
+        confirmLabel={t(powerLabel[powering?.action || "start"])}
+        onConfirm={async () => {
+          if (powering) await runActions(powering)
+        }}
+      >
+        {powering && powering.vms.length > 1 && (
+          <div className="max-h-40 overflow-y-auto rounded-lg border bg-muted/30 p-2 text-sm">
+            {powering.vms.map((vm) => <div key={key(vm)}>{vm.metadata.namespace}/{vm.metadata.name}</div>)}
+          </div>
+        )}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={deleting !== null}
@@ -355,11 +379,9 @@ export function InstanceListPage() {
   )
 }
 
-function InstanceRowMenu({ vm, running, onChanged, onDelete }: { vm: KubeObject; running: boolean; onChanged: () => void; onDelete: () => void }) {
+function InstanceRowMenu({ vm, running, onPower, onDelete }: { vm: KubeObject; running: boolean; onPower: (action: PowerAction) => void; onDelete: () => void }) {
   const navigate = useNavigate()
-  const run = (action: "start" | "stop" | "restart") => vmAction(vm, action)
-    .catch((err) => toast.error(t("{action} {name} failed", { action: t(action.charAt(0).toUpperCase() + action.slice(1)), name: vm.metadata.name }), { description: err instanceof Error ? err.message : String(err) }))
-    .then(onChanged)
+  const run = onPower
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

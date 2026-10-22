@@ -4,7 +4,6 @@ import * as YAML from "js-yaml"
 import {
   AlertTriangle,
   ChevronDown,
-  Copy,
   Plus,
   RefreshCw,
   Trash2,
@@ -49,6 +48,7 @@ import {
 import { RelatedPodsCard, type PodSummary } from "@/components/pod-access"
 import { EventList } from "@/components/events"
 import { eventsUrl } from "@/lib/events"
+import { ManifestPanel } from "@/components/manifest"
 import { t } from "@/lib/i18n"
 
 type KubeResource = {
@@ -2671,6 +2671,7 @@ export function ResourceEvents({ config }: { config: ResourceConfig }) {
 export function ResourceManifest({ config }: { config: ResourceConfig }) {
   const { namespace, name } = useParams()
   const [resource, setResource] = useState<KubeResource | null>(null)
+  const [url, setUrl] = useState("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -2681,9 +2682,11 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
       let loaded = false
       let lastError = ""
       for (const path of await servedPaths(config)) {
-        const res = await apiFetch(resourcePathUrl(config, path.resourcePath, name!, namespace))
+        const resourceUrl = resourcePathUrl(config, path.resourcePath, name!, namespace)
+        const res = await apiFetch(resourceUrl)
         if (res.ok) {
           setResource(await res.json())
+          setUrl(resourceUrl)
           loaded = true
           break
         }
@@ -2712,8 +2715,6 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
     )
   }
 
-  const yaml = resource ? YAML.dump(resource, { noRefs: true, lineWidth: 120 }) : ""
-
   return (
     <div className="space-y-5">
       <PageHeader
@@ -2721,14 +2722,9 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
         title={name}
         subtitle={<span className="font-mono text-xs">{config.kind}</span>}
         actions={
-          <>
-            <Button size="sm" variant="outline" disabled={!yaml} onClick={() => navigator.clipboard.writeText(yaml)} className="gap-2">
-              <Copy className="h-4 w-4" />{t("Copy")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={load} className="gap-2">
-              <RefreshCw className="h-4 w-4" />{t("Refresh")}
-            </Button>
-          </>
+          <Button size="sm" variant="outline" onClick={load} className="gap-2">
+            <RefreshCw className="h-4 w-4" />{t("Refresh")}
+          </Button>
         }
       />
 
@@ -2737,9 +2733,7 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
       {error ? (
         <ErrorNote>{error}</ErrorNote>
       ) : (
-        <pre className="min-h-[calc(100dvh-260px)] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">
-          {yaml}
-        </pre>
+        <ManifestPanel object={resource} url={canDeleteResource(config) ? url : undefined} onSaved={load} />
       )}
     </div>
   )

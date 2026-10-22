@@ -466,6 +466,8 @@ export function SecurityGroupDetailPage() {
   const [tab, setTab] = useState<"ingress" | "egress" | "instances">("ingress")
   const [draft, setDraft] = useState<{ rules: SgRule[]; allowSameGroup: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [confirmSave, setConfirmSave] = useState(false)
+  const [detaching, setDetaching] = useState<KubeObject | null>(null)
   const [error, setError] = useState("")
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [bindOpen, setBindOpen] = useState(false)
@@ -569,7 +571,11 @@ export function SecurityGroupDetailPage() {
                   {draft ? (
                     <>
                       <Button size="sm" variant="outline" onClick={() => { setDraft(null); setError("") }}>{t("Cancel")}</Button>
-                      <Button size="sm" onClick={save} disabled={saving}>{saving ? t("Saving...") : t("Save rules")}</Button>
+                      <Button size="sm" onClick={() => {
+                        const problem = draft.rules.map(ruleProblem).find(Boolean)
+                        if (problem) setError(problem)
+                        else setConfirmSave(true)
+                      }} disabled={saving}>{saving ? t("Saving...") : t("Save rules")}</Button>
                     </>
                   ) : (
                     <Button size="sm" variant="outline" onClick={() => setDraft({ rules: sg.rules, allowSameGroup: sg.allowSameGroup })}>{t("Edit rules")}</Button>
@@ -615,10 +621,7 @@ export function SecurityGroupDetailPage() {
                 header: "",
                 className: "text-right",
                 cell: (vm) => sg.managed ? (
-                  <Button size="sm" variant="ghost" onClick={async () => {
-                    await setVmSecurityGroups(vm, provider, vmSecurityGroups(vm, provider).filter((group) => group !== sg.name))
-                    reload()
-                  }}>{t("Detach")}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setDetaching(vm)}>{t("Detach")}</Button>
                 ) : null,
               },
             ]}
@@ -632,6 +635,26 @@ export function SecurityGroupDetailPage() {
         sg={sg}
         vms={data.vms.filter((vm) => !vmMatchesGroup(vm, sg))}
         onDone={reload}
+      />
+      <ConfirmDialog
+        open={confirmSave}
+        onOpenChange={setConfirmSave}
+        title={t("Save rules for security group {name}?", { name: sg.name })}
+        description={t("{count} attached instances get the new rules immediately.", { count: members.length })}
+        confirmLabel={t("Save rules")}
+        onConfirm={save}
+      />
+      <ConfirmDialog
+        open={detaching !== null}
+        onOpenChange={(open) => !open && setDetaching(null)}
+        title={t("Detach {instance} from {group}?", { instance: detaching?.metadata.name, group: sg.name })}
+        description={t("The instance loses this group's rules immediately.")}
+        confirmLabel={t("Detach")}
+        onConfirm={async () => {
+          if (!detaching) return
+          await setVmSecurityGroups(detaching, provider, vmSecurityGroups(detaching, provider).filter((group) => group !== sg.name))
+          reload()
+        }}
       />
       <ConfirmDialog
         open={deleteOpen}
