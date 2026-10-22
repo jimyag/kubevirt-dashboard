@@ -4,7 +4,6 @@ import { Check, ChevronRight, Inbox } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -38,8 +37,8 @@ export function PageHeader({
   badge?: ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-      <div className="flex min-w-0 flex-col gap-1.5">
+    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <div className="flex min-w-0 flex-col gap-1">
         {breadcrumbs && breadcrumbs.length > 0 && (
           <nav className="flex flex-wrap items-center gap-1 text-xs font-medium text-muted-foreground">
             {breadcrumbs.map((crumb, index) => (
@@ -51,7 +50,7 @@ export function PageHeader({
           </nav>
         )}
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-2xl font-semibold tracking-tight break-all">{title}</h1>
+          <h1 className="text-xl font-semibold break-all">{title}</h1>
           {badge}
         </div>
         {subtitle && <p className="max-w-2xl text-sm text-muted-foreground">{subtitle}</p>}
@@ -67,7 +66,7 @@ export function Section({ title, description, actions, children }: { title: Reac
     <section className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+          <h2 className="text-sm font-semibold">{title}</h2>
           {description && <p className="text-sm text-muted-foreground">{description}</p>}
         </div>
         {actions}
@@ -92,28 +91,28 @@ const toneForStatus = (status?: string): Tone => {
   return "info"
 }
 
-const pillTone: Record<Tone, string> = {
-  success: "border-green-200 bg-green-50 text-green-700 dark:border-green-500/20 dark:bg-green-500/10 dark:text-green-400",
-  warning: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400",
-  danger: "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400",
-  neutral: "border-border bg-muted text-muted-foreground",
-  info: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-400",
-}
-
 const dotTone: Record<Tone, string> = {
-  success: "bg-green-500",
+  success: "bg-green-600 dark:bg-green-500",
   warning: "bg-amber-500",
-  danger: "bg-red-500",
+  danger: "bg-red-600 dark:bg-red-500",
   neutral: "bg-muted-foreground/50",
-  info: "bg-blue-500",
+  info: "bg-primary",
 }
 
-/** Status pill with a colored dot; tone is inferred from the status text. */
+const textTone: Record<Tone, string> = {
+  success: "text-foreground",
+  warning: "text-foreground",
+  danger: "text-red-700 dark:text-red-400",
+  neutral: "text-muted-foreground",
+  info: "text-foreground",
+}
+
+/** Status as a colored dot plus text; tone is inferred from the status text. */
 export function StatusDot({ status, label }: { status?: string; label?: string }) {
   const tone = toneForStatus(status)
   return (
-    <span className={cn("inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border px-2 text-xs font-medium whitespace-nowrap", pillTone[tone])}>
-      <span className={cn("size-1.5 rounded-full", dotTone[tone], tone === "warning" && "animate-pulse")} />
+    <span className={cn("inline-flex shrink-0 items-center gap-1.5 text-sm whitespace-nowrap", textTone[tone])}>
+      <span className={cn("size-2 rounded-full", dotTone[tone])} />
       {label || status || "Unknown"}
     </span>
   )
@@ -121,7 +120,7 @@ export function StatusDot({ status, label }: { status?: string; label?: string }
 
 export function LoadingState({ label = "Loading..." }: { label?: string }) {
   return (
-    <div className="flex h-64 items-center justify-center gap-2.5">
+    <div className="flex h-48 items-center justify-center gap-2.5">
       <div className="size-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
       <span className="text-sm text-muted-foreground">{label}</span>
     </div>
@@ -140,12 +139,10 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-      <div className="flex size-11 items-center justify-center rounded-full border bg-muted/50">
-        <Icon className="size-5 text-muted-foreground" />
-      </div>
+    <div className="flex flex-col items-center justify-center gap-2.5 px-6 py-10 text-center">
+      <Icon className="size-5 text-muted-foreground" />
       <div className="space-y-1">
-        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <div className="text-sm font-medium text-foreground">{title}</div>
         {description && <p className="max-w-sm text-sm text-muted-foreground">{description}</p>}
       </div>
       {action}
@@ -155,50 +152,39 @@ export function EmptyState({
 
 // --- Metrics ---
 
-const tileColors = {
-  blue: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  green: "bg-green-500/10 text-green-600 dark:text-green-400",
-  purple: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  orange: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  cyan: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  red: "bg-red-500/10 text-red-600 dark:text-red-400",
-}
-
-export type TileColor = keyof typeof tileColors
+/** Kept for call sites; tiles and badges are neutral so color stays reserved for state. */
+export type TileColor = "blue" | "green" | "purple" | "orange" | "cyan" | "red"
 
 export function StatTile({
   icon: Icon,
-  color,
   label,
   value,
   hint,
   to,
 }: {
   icon: ComponentType<{ className?: string }>
-  color: TileColor
+  color?: TileColor
   label: string
   value: ReactNode
   hint?: ReactNode
   to?: string
 }) {
-  const card = (
-    <Card className={cn("h-full gap-0 p-5 shadow-none", to && "transition-colors hover:border-primary/40")}>
-      <div className="flex items-start justify-between gap-3">
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
-        <div className={cn("flex size-8 items-center justify-center rounded-lg", tileColors[color])}>
-          <Icon className="size-4" />
-        </div>
+  const body = (
+    <div className={cn("h-full rounded-lg border bg-card px-4 py-3.5", to && "transition-colors hover:border-foreground/25")}>
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon className="size-3.5" />
+        {label}
       </div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{value}</div>
-      {hint && <div className="mt-1 text-sm text-muted-foreground">{hint}</div>}
-    </Card>
+      <div className="mt-1.5 text-2xl font-semibold tabular-nums">{value}</div>
+      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+    </div>
   )
-  return to ? <Link to={to} className="block">{card}</Link> : card
+  return to ? <Link to={to} className="block">{body}</Link> : body
 }
 
-export function IconBadge({ icon: Icon, color }: { icon: ComponentType<{ className?: string }>; color: TileColor }) {
+export function IconBadge({ icon: Icon }: { icon: ComponentType<{ className?: string }>; color?: TileColor }) {
   return (
-    <div className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg", tileColors[color])}>
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50 text-muted-foreground">
       <Icon className="size-4" />
     </div>
   )
@@ -219,10 +205,10 @@ export function UsageBar({ used, total, label }: { used: number; total: number; 
 
 export function KeyValueGrid({ items }: { items: Array<{ label: string; value: ReactNode }> }) {
   return (
-    <dl className="grid gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
+    <dl className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
       {items.map((item) => (
         <div key={item.label} className="flex min-w-0 flex-col gap-1">
-          <dt className="text-xs font-medium text-muted-foreground">{item.label}</dt>
+          <dt className="text-xs text-muted-foreground">{item.label}</dt>
           <dd className="min-w-0 break-all text-foreground">{item.value ?? "N/A"}</dd>
         </div>
       ))}
@@ -286,7 +272,7 @@ export function ConfirmDialog({
 }
 
 export function ErrorNote({ children }: { children: ReactNode }) {
-  return <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive break-all">{children}</div>
+  return <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive break-all">{children}</div>
 }
 
 export function FieldRow({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
@@ -331,23 +317,17 @@ export function ChoiceCard({
       onClick={onClick}
       aria-pressed={selected}
       className={cn(
-        "relative flex h-full w-full items-start gap-3 rounded-lg border bg-card p-3.5 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50",
-        selected ? "border-primary ring-3 ring-primary/15" : "hover:border-foreground/20 hover:bg-muted/40"
+        "relative flex h-full w-full items-start gap-2.5 rounded-md border bg-card px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        selected ? "border-primary bg-accent/50 shadow-[inset_0_0_0_1px_var(--primary)]" : "hover:border-foreground/25"
       )}
     >
-      {Icon && (
-        <div className={cn("flex size-8 shrink-0 items-center justify-center rounded-md", selected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
-          <Icon className="size-4" />
-        </div>
-      )}
+      {Icon && <Icon className={cn("mt-0.5 size-4 shrink-0", selected ? "text-primary" : "text-muted-foreground")} />}
       <div className="min-w-0 flex-1 space-y-0.5 pr-5">
         <div className="text-sm font-medium text-foreground">{title}</div>
-        {description && <div className="text-xs leading-relaxed text-muted-foreground">{description}</div>}
+        {description && <div className="text-xs text-muted-foreground">{description}</div>}
       </div>
       {selected && (
-        <span className="absolute top-3 right-3 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
-          <Check className="size-3" strokeWidth={3} />
-        </span>
+        <Check className="absolute top-2.5 right-2.5 size-4 text-primary" strokeWidth={2.5} />
       )}
     </button>
   )
@@ -363,8 +343,8 @@ export function TabBar<T extends string>({ tabs, value, onChange }: { tabs: Arra
           type="button"
           onClick={() => onChange(tab.id)}
           className={cn(
-            "-mb-px flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
-            value === tab.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+            "-mb-px flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm transition-colors",
+            value === tab.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
           )}
         >
           {tab.icon && <tab.icon className="size-4" />}
@@ -402,10 +382,10 @@ export function DataTable<T>({
     <div className="overflow-hidden rounded-lg border bg-card">
       <div className="overflow-x-auto">
         <Table style={{ minWidth }}>
-          <TableHeader className="bg-muted/50">
+          <TableHeader className="bg-muted/60">
             <TableRow className="hover:bg-transparent">
               {columns.map((column, index) => (
-                <TableHead key={index} className={cn("h-10 px-4 text-xs font-medium text-muted-foreground", column.className)}>{column.header}</TableHead>
+                <TableHead key={index} className={cn("h-9 px-3 text-xs font-medium text-muted-foreground", column.className)}>{column.header}</TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -419,9 +399,9 @@ export function DataTable<T>({
                 <TableCell colSpan={columns.length}>{empty ?? <EmptyState title="No resources found" />}</TableCell>
               </TableRow>
             ) : rows.map((row) => (
-              <TableRow key={rowKey(row)} className="hover:bg-muted/40">
+              <TableRow key={rowKey(row)} className="hover:bg-muted/50">
                 {columns.map((column, index) => (
-                  <TableCell key={index} className={cn("px-4 py-3", column.className)}>{column.cell(row)}</TableCell>
+                  <TableCell key={index} className={cn("px-3 py-2", column.className)}>{column.cell(row)}</TableCell>
                 ))}
               </TableRow>
             ))}
@@ -439,5 +419,35 @@ export function Toolbar({ children, right }: { children?: ReactNode; right?: Rea
       <div className="flex flex-wrap items-center gap-2">{children}</div>
       {right && <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">{right}</div>}
     </div>
+  )
+}
+
+/** Bordered block with a title bar; the default container for detail page content. */
+export function Panel({
+  title,
+  description,
+  actions,
+  className,
+  bodyClassName,
+  children,
+}: {
+  title: ReactNode
+  description?: ReactNode
+  actions?: ReactNode
+  className?: string
+  bodyClassName?: string
+  children: ReactNode
+}) {
+  return (
+    <section className={cn("min-w-0 rounded-lg border bg-card", className)}>
+      <header className="flex min-h-11 items-center justify-between gap-3 border-b px-4 py-2">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">{title}</h2>
+          {description && <p className="text-xs text-muted-foreground">{description}</p>}
+        </div>
+        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      </header>
+      <div className={cn("p-4", bodyClassName)}>{children}</div>
+    </section>
   )
 }

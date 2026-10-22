@@ -1,8 +1,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, Navigate } from "react-router-dom";
 import {
-  Terminal, ChevronLeft, FileCode, Info, Network, HardDrive,
-  Layers, ShieldCheck, Database, Bell, Clock, TrendingUp, BarChart3,
+  Terminal, FileCode, Info, ShieldCheck, Bell,
   Search, Check, Copy, MousePointer2, RefreshCw, Play, Square, RotateCcw, MonitorPlay, ChevronDown
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,11 +15,9 @@ import { ResourceCreateDialog, ResourceDetail, ResourceList, ResourceManifest, t
 import { SiteHeader } from "./components/site-header";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
 import { Toaster } from "./components/ui/sonner";
-import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
-import { Card as ShadCard, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { dvCreateConfig, jsonPost, jsonPut, keyValueText, mergePatch, numberValue, parseKeyValueText, resourceConfigs, stringValue } from "./resources/configs";
-import { DataTable, EmptyState, KeyValueGrid, PageHeader, StatusDot } from "./components/console";
+import { DataTable, EmptyState, KeyValueGrid, LoadingState, NativeSelect, PageHeader, Panel, StatusDot, Toolbar } from "./components/console";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,14 +44,6 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "./components/ui/table";
 
 interface ResourceMetadata { name: string; namespace: string; uid: string; creationTimestamp: string; labels?: Record<string, string>; annotations?: Record<string, string>; }
 type UnknownRecord = Record<string, unknown>;
@@ -95,15 +84,8 @@ const findVmPod = async (namespace: string, name: string) => {
 };
 
 // --- Shared Components ---
-type StatusVariant = "outline" | "success" | "warning" | "danger";
 function StatusBadge({ status }: { status?: string }) {
-  if (!status) return <Badge variant="outline" className="text-muted-foreground">Unknown</Badge>;
-  const lower = status.toLowerCase();
-  let variant: StatusVariant = "outline";
-  if (lower.includes("running") || lower.includes("succeeded") || lower.includes("ready") || lower.includes("true")) variant = "success";
-  else if (lower.includes("error") || lower.includes("fail") || lower.includes("crash") || lower.includes("false")) variant = "danger";
-  else if (lower.includes("start") || lower.includes("progress") || lower.includes("migrat") || lower.includes("import") || lower.includes("pending")) variant = "warning";
-  return <Badge variant={variant}>{status}</Badge>;
+  return <StatusDot status={status} />;
 }
 
 function CopyableText({ text, label }: { text: string, label?: string }) {
@@ -229,99 +211,89 @@ function VmActionDialog({
 }
 
 // --- Main Views ---
+const dvSize = (dv: DV) => dv.spec.storage?.resources?.requests?.storage || dv.spec.pvc?.resources?.requests?.storage || "N/A";
+const dvStorageClass = (dv: DV) => dv.spec.storage?.storageClassName || dv.spec.pvc?.storageClassName || "default";
+const dvSource = (dv: DV) => dv.spec.source ? Object.keys(dv.spec.source)[0] : "blank";
+/** Instances whose volumes reference the DataVolume, keyed by namespace/name. */
+const dvAttachments = (vms: VM[]) => {
+  const index: Record<string, string> = {};
+  vms.forEach((vm) => (vm.spec.template?.spec?.volumes || []).forEach((volume) => {
+    if (volume.dataVolume?.name) index[`${vm.metadata.namespace}/${volume.dataVolume.name}`] = vm.metadata.name;
+  }));
+  return index;
+};
+
 function DVList() {
-  const [dvs, setDvs] = useState<DV[]>([]); const [loading, setLoading] = useState(true); const [searchTerm, setSearchTerm] = useState(""); const [nss, setNss] = useState<string[]>(["all", "default"]); const [namespaceFilter, setNamespaceFilter] = useState("default");
+  const [dvs, setDvs] = useState<DV[]>([]); const [vms, setVms] = useState<VM[]>([]); const [loading, setLoading] = useState(true); const [searchTerm, setSearchTerm] = useState(""); const [nss, setNss] = useState<string[]>(["all"]); const [namespaceFilter, setNamespaceFilter] = useState("all");
   const loadDvs = useCallback(async () => {
     setLoading(true);
     try {
-      const path = namespaceFilter === "all" ? "/apis/cdi.kubevirt.io/v1beta1/datavolumes" : `/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespaceFilter}/datavolumes`;
-      const data = await apiFetch(path).then(r => r.json());
-      setDvs(data.items || []);
+      const scope = namespaceFilter === "all" ? "" : `/namespaces/${namespaceFilter}`;
+      const [dvData, vmData] = await Promise.all([
+        apiFetch(`/apis/cdi.kubevirt.io/v1beta1${scope}/datavolumes`).then(r => r.ok ? r.json() : { items: [] }),
+        apiFetch(`/apis/kubevirt.io/v1${scope}/virtualmachines`).then(r => r.ok ? r.json() : { items: [] }),
+      ]);
+      setDvs(dvData.items || []);
+      setVms(vmData.items || []);
     } finally { setLoading(false); }
   }, [namespaceFilter]);
   useEffect(() => {
-    apiFetch("/api/v1/namespaces-list").then(r => r.json()).then((data) => {
-      const next = Array.from(new Set(["all", ...(data || []).filter(Boolean)]));
-      setNss(next);
-      setNamespaceFilter((current) => current && next.includes(current) ? current : next.includes("default") ? "default" : next.find((ns) => ns !== "all") || "all");
-    });
+    apiFetch("/api/v1/namespaces-list").then(r => r.json()).then((data) => setNss(Array.from(new Set(["all", ...(data || []).filter(Boolean)]))));
   }, []);
   useEffect(() => { loadDvs(); }, [loadDvs]);
-  const filtered = dvs.filter(dv => {
-    const needle = searchTerm.toLowerCase();
-    return dv.metadata.name.toLowerCase().includes(needle) || dv.metadata.namespace.toLowerCase().includes(needle);
-  });
+  const attachedTo = dvAttachments(vms);
+  const needle = searchTerm.toLowerCase();
+  const filtered = dvs.filter(dv => dv.metadata.name.toLowerCase().includes(needle) || dv.metadata.namespace.toLowerCase().includes(needle));
   return (
-    <div className="space-y-4 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold">Disks</h1>
-          <p className="text-sm text-muted-foreground">Persistent disks for instances, backed by CDI DataVolumes</p>
-        </div>
-        <Badge variant="outline">{dvs.length} total</Badge>
-      </div>
-      <div className="flex flex-col gap-3 rounded-lg border bg-card p-2 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" className="gap-2 text-muted-foreground">
-            <span className="size-2 rounded-full bg-muted-foreground/30" />
-            Watch
-          </Button>
-          <Button size="sm" variant="outline" onClick={loadDvs} className="gap-2">
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
-          <select className="h-9 min-w-[150px] rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" value={namespaceFilter} onChange={e => setNamespaceFilter(e.target.value)} aria-label="Filter namespace">
-            {nss.map(ns => <option key={ns} value={ns}>{ns}</option>)}
-          </select>
-        </div>
-        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
-          <div className="relative w-full md:w-[320px]">
+    <div className="space-y-4">
+      <PageHeader
+        title="Disks"
+        badge={!loading && <span className="text-sm text-muted-foreground tabular-nums">{dvs.length}</span>}
+        subtitle="CDI DataVolumes"
+        actions={<ResourceCreateDialog config={dvCreateConfig} onCreated={loadDvs} defaultNamespace={namespaceFilter === "all" ? "default" : namespaceFilter} />}
+      />
+      <Toolbar
+        right={
+          <div className="relative w-full md:w-[280px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search storage..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+            <Input className="pl-9" placeholder="Filter by name or namespace" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
           </div>
-          <ResourceCreateDialog config={dvCreateConfig} onCreated={loadDvs} defaultNamespace={namespaceFilter} />
-        </div>
-      </div>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="max-h-[calc(100dvh-260px)] overflow-auto">
-          <Table className="min-w-[760px]">
-            <TableHeader className="bg-muted">
-              <TableRow>
-                <TableHead className="w-10"><input type="checkbox" className="size-4 rounded border-border accent-primary" aria-label="Select all storage resources" /></TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold">Name</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold">Status</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold">Capacity</TableHead>
-                <TableHead className="h-9 px-3 text-right text-xs font-semibold">Source</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={5}>
-                    <div className="flex items-center justify-center h-32 gap-2">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-                      <span className="text-sm text-muted-foreground">Loading...</span>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className="h-32 text-center text-muted-foreground">No storage resources found</TableCell></TableRow>
-              ) : filtered.map(dv => (
-                <TableRow key={dv.metadata.uid} className="hover:bg-muted/50">
-                  <TableCell className="h-9 px-3 py-1.5"><input type="checkbox" className="size-4 rounded border-border accent-primary" aria-label={`Select ${dv.metadata.name}`} /></TableCell>
-                  <TableCell className="h-9 px-3 py-1.5">
-                    <Link to={`/kubevirt/cdi/data-volumes/${dv.metadata.namespace}/${dv.metadata.name}/overview`} className="font-semibold text-primary hover:underline">{dv.metadata.name}</Link>
-                    <div className="text-xs text-muted-foreground">{dv.metadata.namespace}</div>
-                  </TableCell>
-                  <TableCell className="h-9 px-3 py-1.5"><StatusBadge status={dv.status?.phase} /></TableCell>
-                  <TableCell className="h-9 px-3 py-1.5 font-mono text-sm">{dv.spec.storage?.resources?.requests?.storage || dv.spec.pvc?.resources?.requests?.storage || "N/A"}</TableCell>
-                  <TableCell className="h-9 px-3 py-1.5 text-right text-muted-foreground text-sm">{dv.spec.source ? Object.keys(dv.spec.source)[0] : "manual"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
+        }
+      >
+        <Button size="sm" variant="outline" onClick={loadDvs} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
+        <NativeSelect className="min-w-[160px]" value={namespaceFilter} onChange={e => setNamespaceFilter(e.target.value)} aria-label="Namespace">
+          {nss.map(ns => <option key={ns} value={ns}>{ns === "all" ? "All namespaces" : ns}</option>)}
+        </NativeSelect>
+      </Toolbar>
+      <DataTable
+        loading={loading}
+        rows={filtered}
+        rowKey={(dv) => dv.metadata.uid}
+        empty={<EmptyState title={searchTerm ? "No matching disks" : "No disks"} />}
+        columns={[
+          {
+            header: "Name",
+            cell: (dv) => (
+              <div>
+                <Link to={`/kubevirt/cdi/data-volumes/${dv.metadata.namespace}/${dv.metadata.name}/overview`} className="font-medium hover:text-primary transition-colors">{dv.metadata.name}</Link>
+                <div className="text-xs text-muted-foreground">{dv.metadata.namespace}</div>
+              </div>
+            ),
+          },
+          { header: "Status", cell: (dv) => <StatusDot status={dv.status?.phase} label={dv.status?.phase && dv.status.progress && dv.status.phase !== "Succeeded" ? `${dv.status.phase} ${dv.status.progress}` : undefined} /> },
+          { header: "Size", cell: (dv) => <span className="font-mono text-xs">{dvSize(dv)}</span> },
+          { header: "Storage class", cell: (dv) => <span className="text-sm text-muted-foreground">{dvStorageClass(dv)}</span> },
+          { header: "Source", cell: (dv) => <span className="text-sm text-muted-foreground">{dvSource(dv)}</span> },
+          {
+            header: "Attached to",
+            cell: (dv) => {
+              const vm = attachedTo[`${dv.metadata.namespace}/${dv.metadata.name}`];
+              return vm ? <Link to={`/kubevirt/virtualization/virtual-machines/${dv.metadata.namespace}/${vm}/overview`} className="text-sm hover:text-primary transition-colors">{vm}</Link> : <span className="text-sm text-muted-foreground">-</span>;
+            },
+          },
+          { header: "Age", className: "text-right", cell: (dv) => <span className="text-sm text-muted-foreground tabular-nums" title={dv.metadata.creationTimestamp}>{relativeTime(dv.metadata.creationTimestamp)}</span> },
+        ]}
+      />
     </div>
   );
 }
@@ -390,7 +362,7 @@ function VMDetailContent() {
   ];
 
   return (
-    <div className={cn("space-y-6 animate-in fade-in duration-500", activeTab === "console" || activeTab === "vnc" ? "max-w-full" : "")}>
+    <div className={cn("space-y-6", activeTab === "console" || activeTab === "vnc" ? "max-w-full" : "")}>
       <PageHeader
         breadcrumbs={[{ label: "Instances", to: "/kubevirt/virtualization/virtual-machines" }, { label: vm.metadata.namespace }, { label: vm.metadata.name }]}
         title={vm.metadata.name}
@@ -595,7 +567,7 @@ function VMDetailContent() {
       <div className="mt-4">
         {activeTab === "overview" && (
           <div className="space-y-6">
-            <ShadCard className="gap-0 py-0 shadow-none">
+            <div className="rounded-lg border bg-card">
               <div className="grid divide-y md:grid-cols-3 md:divide-x md:divide-y-0">
                 {[
                   {
@@ -626,9 +598,9 @@ function VMDetailContent() {
                     ],
                   },
                 ].map((group) => (
-                  <div key={group.title} className="space-y-4 p-5">
+                  <div key={group.title} className="space-y-3 px-4 py-3.5">
                     <div className="text-sm font-semibold">{group.title}</div>
-                    <dl className="space-y-3 text-sm">
+                    <dl className="space-y-2 text-sm">
                       {group.items.map((item) => (
                         <div key={item.label} className="flex items-center justify-between gap-4">
                           <dt className="text-muted-foreground">{item.label}</dt>
@@ -639,19 +611,12 @@ function VMDetailContent() {
                   </div>
                 ))}
               </div>
-            </ShadCard>
+            </div>
 
             {/* Metrics charts */}
             {vmi && metrics.length > 0 && (
               <div className="grid gap-4 md:grid-cols-2">
-                <ShadCard>
-                  <CardHeader>
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                      <CardTitle className="text-sm">CPU Usage</CardTitle>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
+                <Panel title="CPU Usage">
                     <div className="h-[160px] w-full">
                       <ResponsiveContainer>
                         <AreaChart data={metrics}>
@@ -669,17 +634,9 @@ function VMDetailContent() {
                         </AreaChart>
                       </ResponsiveContainer>
                     </div>
-                  </CardContent>
-                </ShadCard>
+                  </Panel>
 
-                <ShadCard>
-                  <CardHeader>
-                    <div className="flex items-center gap-2">
-                      <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                      <CardTitle className="text-sm">Memory Usage (MB)</CardTitle>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
+                <Panel title="Memory Usage (MB)">
                     <div className="h-[160px] w-full">
                       <ResponsiveContainer>
                         <AreaChart data={metrics}>
@@ -697,8 +654,7 @@ function VMDetailContent() {
                         </AreaChart>
                       </ResponsiveContainer>
                     </div>
-                  </CardContent>
-                </ShadCard>
+                  </Panel>
               </div>
             )}
 
@@ -712,14 +668,7 @@ function VMDetailContent() {
                 selectors={vmPodSelectors(name!)}
               />
 
-              <ShadCard className="lg:col-span-3">
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Layers className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">Metadata</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
+              <Panel title="Metadata" className="lg:col-span-3">
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <div className="mb-2 text-xs font-medium text-muted-foreground">Labels</div>
@@ -738,17 +687,9 @@ function VMDetailContent() {
                       </div>
                     </div>
                   </div>
-                </CardContent>
-              </ShadCard>
+                </Panel>
 
-              <ShadCard>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">Storage</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
+              <Panel title="Storage">
                   <div className="space-y-2">
                     {associatedDVs.map(d => (
                       <div key={d.metadata.uid} className="flex items-center justify-between text-sm p-2 bg-muted/30 rounded-lg border gap-4">
@@ -758,17 +699,9 @@ function VMDetailContent() {
                     ))}
                     {associatedDVs.length === 0 && <p className="text-sm text-muted-foreground">No storage volumes</p>}
                   </div>
-                </CardContent>
-              </ShadCard>
+                </Panel>
 
-              <ShadCard>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">Disks</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
+              <Panel title="Disks">
                   <div className="space-y-2">
                     {(vm.spec.template?.spec?.domain?.devices?.disks || []).map((disk) => (
                       <div key={disk.name} className="grid gap-1 rounded-lg border bg-muted/30 p-3 text-sm">
@@ -781,17 +714,9 @@ function VMDetailContent() {
                     ))}
                     {((vm.spec.template?.spec?.domain?.devices?.disks || []).length === 0) && <p className="text-sm text-muted-foreground">No disks declared</p>}
                   </div>
-                </CardContent>
-              </ShadCard>
+                </Panel>
 
-              <ShadCard>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Database className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">Volumes</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
+              <Panel title="Volumes">
                   <div className="space-y-2">
                     {(vm.spec.template?.spec?.volumes || []).map((volume) => (
                       <div key={volume.name} className="grid gap-1 rounded-lg border bg-muted/30 p-3 text-sm">
@@ -801,17 +726,9 @@ function VMDetailContent() {
                     ))}
                     {(vm.spec.template?.spec?.volumes || []).length === 0 && <p className="text-sm text-muted-foreground">No volumes declared</p>}
                   </div>
-                </CardContent>
-              </ShadCard>
+                </Panel>
 
-              <ShadCard>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Network className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">Networking</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
+              <Panel title="Networking">
                   <div className="space-y-2">
                     {(vm.spec.template?.spec?.domain?.devices?.interfaces || []).map((i) => (
                       <div key={i.name} className="grid gap-1 text-sm p-3 bg-muted/30 rounded-lg border">
@@ -823,14 +740,9 @@ function VMDetailContent() {
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </ShadCard>
+                </Panel>
 
-              <ShadCard className="lg:col-span-3">
-                <CardHeader>
-                  <CardTitle className="text-sm">Conditions</CardTitle>
-                </CardHeader>
-                <CardContent>
+              <Panel title="Conditions" className="lg:col-span-3">
                   <div className="grid gap-2 md:grid-cols-2">
                     {(vm.status?.conditions || []).map((condition) => (
                       <div key={condition.type} className="rounded-lg border bg-muted/30 p-3">
@@ -843,20 +755,14 @@ function VMDetailContent() {
                     ))}
                     {(vm.status?.conditions || []).length === 0 && <p className="text-sm text-muted-foreground">No conditions reported</p>}
                   </div>
-                </CardContent>
-              </ShadCard>
+                </Panel>
             </div>
           </div>
         )}
 
         {activeTab === "network" && (
           <div className="grid gap-4 lg:grid-cols-2">
-            <ShadCard className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-base">Network interfaces</CardTitle>
-                <CardDescription>Interfaces declared on the instance and their runtime addresses.</CardDescription>
-              </CardHeader>
-              <CardContent>
+            <Panel title="Network interfaces" className="lg:col-span-2">
                 <DataTable
                   minWidth={640}
                   rows={vm.spec.template?.spec?.domain?.devices?.interfaces || []}
@@ -879,87 +785,53 @@ function VMDetailContent() {
                     { header: "MAC", cell: (iface) => <span className="font-mono text-xs text-muted-foreground">{(vmi?.status.interfaces?.find((item) => item.name === iface.name) as { mac?: string } | undefined)?.mac || "-"}</span> },
                   ]}
                 />
-              </CardContent>
-            </ShadCard>
-            <ShadCard>
-              <CardHeader>
-                <CardTitle className="text-base">Placement</CardTitle>
-                <CardDescription>{profile.label}</CardDescription>
-              </CardHeader>
-              <CardContent>
+              </Panel>
+            <Panel title="Placement">
                 <KeyValueGrid items={[
                   { label: "Subnet", value: templateAnnotations[kubeOvnAnnotations.logicalSwitch] || (profile.vpc ? "Namespace default" : "Pod network") },
                   { label: "Fixed IP", value: templateAnnotations[kubeOvnAnnotations.ipAddress] || "Dynamic" },
                   { label: "Port security", value: templateAnnotations[kubeOvnAnnotations.portSecurity] === "true" ? "Enabled" : "Disabled" },
                   { label: "Host", value: vmi?.status.nodeName || "Not running" },
                 ]} />
-              </CardContent>
-            </ShadCard>
-            <ShadCard>
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <CardTitle className="text-base">Security groups</CardTitle>
-                    <CardDescription>{sgProviders.length ? `Enforced by ${sgProviders.map((engine) => engineLabel[engine]).join(" or ")}` : "Not available on this network stack"}</CardDescription>
-                  </div>
-                  {sgProvider && <Button size="sm" variant="outline" onClick={() => setDialog("Security Groups")}>Change</Button>}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {securityGroups.map((group) => (
-                  <Link key={`${group.provider}:${group.name}`} to={sgDetailPath({ ...group, namespace })} className="flex items-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition-colors hover:bg-muted/50 hover:text-primary">
-                    <ShieldCheck className="size-4 text-muted-foreground" />{group.name}
-                    {sgProviders.length > 1 && <Badge variant="outline" className="ml-auto">{engineLabel[group.provider]}</Badge>}
-                  </Link>
-                ))}
-                {sgProvider && securityGroups.length === 0 && <p className="text-sm text-muted-foreground">No security groups attached. Traffic is not filtered by security groups.</p>}
-                {!sgProvider && <p className="text-sm text-muted-foreground">Use <Link to="/networks/kubernetes/network-policies" className="text-primary hover:underline">network policies</Link> to restrict traffic.</p>}
-              </CardContent>
-            </ShadCard>
+              </Panel>
+            <Panel
+              title="Security groups"
+              description={sgProviders.length ? sgProviders.map((engine) => engineLabel[engine]).join(" / ") : "Not available on this network stack"}
+              actions={sgProvider && <Button size="sm" variant="outline" onClick={() => setDialog("Security Groups")}>Change</Button>}
+              bodyClassName="space-y-1.5"
+            >
+              {securityGroups.map((group) => (
+                <Link key={`${group.provider}:${group.name}`} to={sgDetailPath({ ...group, namespace })} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 hover:text-primary">
+                  <ShieldCheck className="size-4 text-muted-foreground" />{group.name}
+                  {sgProviders.length > 1 && <span className="ml-auto text-xs text-muted-foreground">{engineLabel[group.provider]}</span>}
+                </Link>
+              ))}
+              {sgProvider && securityGroups.length === 0 && <p className="text-sm text-muted-foreground">None attached.</p>}
+              {!sgProvider && <p className="text-sm text-muted-foreground">Use <Link to="/networks/kubernetes/network-policies" className="text-primary hover:underline">network policies</Link> instead.</p>}
+            </Panel>
           </div>
         )}
 
         {activeTab === "events" && (
-          <ShadCard className="p-0 gap-0">
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Message</TableHead>
-                    <TableHead className="text-right">Time</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {events.sort((a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime()).map(e => (
-                    <TableRow key={e.metadata.uid} className="hover:bg-muted/50">
-                      <TableCell><Badge variant={e.type === "Normal" ? "outline" : "danger"}>{e.type}</Badge></TableCell>
-                      <TableCell className="font-medium text-sm">{e.reason}</TableCell>
-                      <TableCell className="text-muted-foreground text-sm max-w-md">{e.message}</TableCell>
-                      <TableCell className="text-right text-muted-foreground text-sm tabular-nums">
-                        <span className="flex items-center justify-end gap-1"><Clock className="h-3 w-3" />{e.lastTimestamp || "N/A"}</span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {events.length === 0 && (
-                    <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No events found</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </ShadCard>
+          <DataTable
+            minWidth={680}
+            rows={[...events].sort((a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime())}
+            rowKey={(e) => e.metadata.uid}
+            empty={<EmptyState title="No events" />}
+            columns={[
+              { header: "Type", cell: (e) => <StatusDot status={e.type === "Normal" ? "Ready" : "Error"} label={e.type} /> },
+              { header: "Reason", cell: (e) => <span className="text-sm font-medium">{e.reason}</span> },
+              { header: "Message", cell: (e) => <span className="text-sm text-muted-foreground">{e.message}</span> },
+              { header: "Age", className: "text-right", cell: (e) => <span className="text-sm text-muted-foreground tabular-nums" title={e.lastTimestamp}>{relativeTime(e.lastTimestamp)}</span> },
+            ]}
+          />
         )}
 
         {activeTab === "console" && <SerialConsole namespace={namespace!} name={name!} />}
         {activeTab === "vnc" && <VncConsole namespace={namespace!} name={name!} />}
 
         {activeTab === "manifest" && (
-          <ShadCard>
-            <CardContent className="p-0">
-              <pre className="p-6 text-sm font-mono text-foreground bg-muted/30 rounded-lg overflow-x-auto min-h-[400px] whitespace-pre">{vmYaml || "Fetching..."}</pre>
-            </CardContent>
-          </ShadCard>
+          <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{vmYaml || "Loading..."}</pre>
         )}
       </div>
     </div>
@@ -977,12 +849,7 @@ function DVDetailContent() {
   }, [name, namespace]);
   useEffect(() => { loadDv(); }, [loadDv]);
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64 gap-2">
-      <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-      <span className="text-sm text-muted-foreground">Loading...</span>
-    </div>
-  );
+  if (loading && !dv) return <LoadingState />;
   if (!dv) return (
     <div className="p-12 text-center text-muted-foreground border-2 border-dashed rounded-lg mt-8">
       DataVolume not found
@@ -993,71 +860,64 @@ function DVDetailContent() {
     { id: "overview", name: "Overview", icon: Info },
     { id: "manifest", name: "Manifest", icon: FileCode },
   ];
+  const conditions = dv.status?.conditions || [];
+  const labels = Object.entries(dv.metadata.labels || {});
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-          <ChevronLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{dv.metadata.name}</h1>
-            <StatusBadge status={dv.status?.phase} />
-          </div>
-          <p className="text-sm text-muted-foreground">{dv.metadata.namespace}</p>
-        </div>
-        <VmActionDialog
-          label="Resize"
-          description="Resize the bound PVC for this DataVolume."
-          fields={[{
-            name: "storage",
-            label: "Storage Size",
-            defaultValue: dv.spec.storage?.resources?.requests?.storage || dv.spec.pvc?.resources?.requests?.storage || "10Gi",
-          }]}
-          buildRequest={(values) => ({
-            url: `/api/v1/namespaces/${namespace}/persistentvolumeclaims/${dv.status?.claimName || name}`,
-            options: mergePatch({ spec: { resources: { requests: { storage: stringValue(values.storage, "10Gi") } } } }),
-          })}
-          onDone={loadDv}
-        />
-        <VmActionDialog
-          label="Metadata"
-          description="Patch DataVolume labels and annotations from key=value lines."
-          fields={[
-            { name: "labels", label: "Labels", type: "textarea", defaultValue: keyValueText(dv.metadata.labels) },
-            { name: "annotations", label: "Annotations", type: "textarea", defaultValue: keyValueText(dv.metadata.annotations) },
-          ]}
-          buildRequest={(values) => ({
-            url: `/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`,
-            options: mergePatch({ metadata: { labels: parseKeyValueText(values.labels || ""), annotations: parseKeyValueText(values.annotations || "") } }),
-          })}
-          onDone={loadDv}
-        />
-        <VmActionDialog
-          label="Delete"
-          description="Delete this DataVolume resource."
-          fields={[]}
-          buildRequest={() => ({
-            url: `/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`,
-            options: { method: "DELETE", headers: { Accept: "application/json" } },
-          })}
-          onDone={() => navigate("/kubevirt/cdi/data-volumes")}
-        />
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        breadcrumbs={[{ label: "Disks", to: "/kubevirt/cdi/data-volumes" }, { label: dv.metadata.namespace }, { label: dv.metadata.name }]}
+        title={dv.metadata.name}
+        badge={<StatusDot status={dv.status?.phase} />}
+        subtitle={`${dvSize(dv)} · ${dvStorageClass(dv)}`}
+        actions={
+          <>
+            <VmActionDialog
+              label="Resize"
+              description="Expand the PVC bound to this disk. Shrinking is not supported."
+              fields={[{ name: "storage", label: "New size", defaultValue: dvSize(dv) === "N/A" ? "10Gi" : dvSize(dv) }]}
+              buildRequest={(values) => ({
+                url: `/api/v1/namespaces/${namespace}/persistentvolumeclaims/${dv.status?.claimName || name}`,
+                options: mergePatch({ spec: { resources: { requests: { storage: stringValue(values.storage, "10Gi") } } } }),
+              })}
+              onDone={loadDv}
+            />
+            <VmActionDialog
+              label="Labels"
+              description="One key=value per line."
+              fields={[
+                { name: "labels", label: "Labels", type: "textarea", defaultValue: keyValueText(dv.metadata.labels) },
+                { name: "annotations", label: "Annotations", type: "textarea", defaultValue: keyValueText(dv.metadata.annotations) },
+              ]}
+              buildRequest={(values) => ({
+                url: `/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`,
+                options: mergePatch({ metadata: { labels: parseKeyValueText(values.labels || ""), annotations: parseKeyValueText(values.annotations || "") } }),
+              })}
+              onDone={loadDv}
+            />
+            <VmActionDialog
+              label="Delete"
+              description={`Delete disk ${dv.metadata.namespace}/${dv.metadata.name} and its PVC.`}
+              fields={[]}
+              variant="destructive"
+              buildRequest={() => ({
+                url: `/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`,
+                options: { method: "DELETE", headers: { Accept: "application/json" } },
+              })}
+              onDone={() => navigate("/kubevirt/cdi/data-volumes")}
+            />
+          </>
+        }
+      />
 
-      {/* Tab Navigation */}
       <div className="flex gap-1 border-b">
         {tabs.map(t => (
           <Link
             key={t.id}
             to={`/kubevirt/cdi/data-volumes/${namespace}/${name}/${t.id}`}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-              activeTab === t.id
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+              "-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm transition-colors",
+              activeTab === t.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
             <t.icon className="h-4 w-4" />
@@ -1066,133 +926,51 @@ function DVDetailContent() {
         ))}
       </div>
 
-      {/* Tab Content */}
-      <div className="mt-4">
-        {activeTab === "overview" ? (
-          <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-3">
-              <ShadCard>
-                <CardHeader className="pb-2">
-                  <CardDescription>Capacity</CardDescription>
-                  <CardTitle className="text-2xl font-semibold tabular-nums">
-                    {dv.spec.storage?.resources?.requests?.storage || dv.spec.pvc?.resources?.requests?.storage || "N/A"}
-                  </CardTitle>
-                </CardHeader>
-              </ShadCard>
-              <ShadCard>
-                <CardHeader className="pb-2">
-                  <CardDescription>Transfer Progress</CardDescription>
-                  <CardTitle className="text-2xl font-semibold tabular-nums">{dv.status?.progress || "100%"}</CardTitle>
-                </CardHeader>
-              </ShadCard>
-              <ShadCard>
-                <CardHeader className="pb-2">
-                  <CardDescription>Source</CardDescription>
-                  <CardTitle className="text-sm font-medium">{dv.spec.source ? Object.keys(dv.spec.source)[0] : "manual"}</CardTitle>
-                </CardHeader>
-              </ShadCard>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-3">
-              <ShadCard>
-                <CardHeader>
-                  <CardTitle className="text-sm">Storage Request</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Storage Class</span>
-                    <span className="font-medium">{dv.spec.storage?.storageClassName || dv.spec.pvc?.storageClassName || "default"}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Access Modes</span>
-                    <span className="font-medium">{dv.spec.storage?.accessModes?.join(", ") || dv.spec.pvc?.accessModes?.join(", ") || "N/A"}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Volume Mode</span>
-                    <span className="font-medium">{dv.spec.storage?.volumeMode || dv.spec.pvc?.volumeMode || "N/A"}</span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Claim</span>
-                    <span className="font-medium">{dv.status?.claimName || dv.metadata.name}</span>
-                  </div>
-                </CardContent>
-              </ShadCard>
-
-              <ShadCard>
-                <CardHeader>
-                  <CardTitle className="text-sm">Source</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {Object.entries(dv.spec.source || {}).map(([sourceType, value]) => (
-                      <div key={sourceType} className="rounded-lg border bg-muted/30 p-3">
-                        <div className="text-sm font-medium">{sourceType}</div>
-                        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground">{JSON.stringify(value, null, 2)}</pre>
+      {activeTab === "overview" ? (
+        <div className="space-y-4">
+          <Panel title="Details">
+            <KeyValueGrid items={[
+              { label: "Size", value: <span className="font-mono">{dvSize(dv)}</span> },
+              { label: "Storage class", value: dvStorageClass(dv) },
+              { label: "Access modes", value: dv.spec.storage?.accessModes?.join(", ") || dv.spec.pvc?.accessModes?.join(", ") || "default" },
+              { label: "Volume mode", value: dv.spec.storage?.volumeMode || dv.spec.pvc?.volumeMode || "default" },
+              { label: "PVC", value: <Link to={`/storage/kubernetes/persistent-volume-claims/${dv.metadata.namespace}/${dv.status?.claimName || dv.metadata.name}`} className="hover:text-primary transition-colors">{dv.status?.claimName || dv.metadata.name}</Link> },
+              { label: "Progress", value: dv.status?.progress || "N/A" },
+              { label: "Source", value: dvSource(dv) },
+              { label: "Created", value: relativeTime(dv.metadata.creationTimestamp) },
+            ]} />
+          </Panel>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Panel title="Source">
+              {dv.spec.source ? (
+                <pre className="overflow-x-auto font-mono text-xs text-foreground whitespace-pre-wrap">{JSON.stringify(dv.spec.source, null, 2)}</pre>
+              ) : <p className="text-sm text-muted-foreground">Blank disk</p>}
+            </Panel>
+            <Panel title="Conditions" bodyClassName="p-0">
+              {conditions.length === 0 ? <p className="p-4 text-sm text-muted-foreground">None reported</p> : (
+                <div className="divide-y">
+                  {conditions.map((condition) => (
+                    <div key={condition.type} className="flex items-start justify-between gap-4 px-4 py-2.5">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium">{condition.type}</div>
+                        {(condition.reason || condition.message) && <p className="text-xs text-muted-foreground">{[condition.reason, condition.message].filter(Boolean).join(": ")}</p>}
                       </div>
-                    ))}
-                    {!dv.spec.source && <p className="text-sm text-muted-foreground">No source declared</p>}
-                  </div>
-                </CardContent>
-              </ShadCard>
-
-              <ShadCard>
-                <CardHeader>
-                  <CardTitle className="text-sm">Conditions</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {(dv.status?.conditions || []).map((condition) => (
-                      <div key={condition.type} className="rounded-lg border bg-muted/30 p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="font-medium text-sm">{condition.type}</span>
-                          <StatusBadge status={condition.status} />
-                        </div>
-                        {(condition.reason || condition.message) && <p className="mt-2 text-xs text-muted-foreground">{condition.reason} {condition.message}</p>}
-                      </div>
-                    ))}
-                    {(dv.status?.conditions || []).length === 0 && <p className="text-sm text-muted-foreground">No conditions reported</p>}
-                  </div>
-                </CardContent>
-              </ShadCard>
-            </div>
-
-            <ShadCard>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-muted-foreground" />
-                  <CardTitle className="text-sm">Metadata</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground">Labels</div>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(dv.metadata.labels || {}).map(([k, v]) => (
-                        <span key={k} className="px-2 py-1 bg-muted text-foreground rounded-md text-xs border">{k}: {v}</span>
-                      ))}
+                      <StatusDot status={condition.status} />
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground">Annotations</div>
-                    <div className="grid grid-cols-1 gap-2">
-                      {Object.entries(dv.metadata.annotations || {}).slice(0, 12).map(([k, v]) => (
-                        <CopyableText key={k} label={k} text={String(v)} />
-                      ))}
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              </CardContent>
-            </ShadCard>
+              )}
+            </Panel>
           </div>
-        ) : (
-          <ShadCard>
-            <CardContent className="p-0">
-              <pre className="p-6 text-sm font-mono text-foreground bg-muted/30 rounded-lg overflow-x-auto min-h-[400px] whitespace-pre">{dvYaml || "Loading..."}</pre>
-            </CardContent>
-          </ShadCard>
-        )}
-      </div>
+          {labels.length > 0 && (
+            <Panel title="Labels" bodyClassName="flex flex-wrap gap-1.5">
+              {labels.map(([k, v]) => <span key={k} className="rounded border bg-muted/60 px-1.5 py-0.5 font-mono text-xs">{k}={v}</span>)}
+            </Panel>
+          )}
+        </div>
+      ) : (
+        <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{dvYaml || "Loading..."}</pre>
+      )}
     </div>
   );
 }

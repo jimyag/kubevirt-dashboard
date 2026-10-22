@@ -65,7 +65,7 @@ export function SerialConsole({ namespace, name }: { namespace: string, name: st
     <div className={cn("bg-card shadow-2xl overflow-hidden flex flex-col transition-all duration-300 relative", isTheaterMode ? "fixed inset-0 z-[100] h-screen w-screen rounded-none" : "rounded-lg border h-[calc(100vh-280px)] min-h-[600px] w-full")}>
       <div className="flex items-center justify-between gap-2 bg-muted/50 border-b p-3 px-5">
          <div className="flex items-center gap-3">
-            <div className={cn("w-2.5 h-2.5 rounded-full", connStatus === "connected" ? "bg-primary animate-pulse" : connStatus === "error" ? "bg-destructive" : "bg-muted-foreground")} />
+            <div className={cn("w-2.5 h-2.5 rounded-full", connStatus === "connected" ? "bg-green-600" : connStatus === "error" ? "bg-destructive" : "bg-muted-foreground")} />
             <div className="flex flex-col">
                <span className="text-[10px] font-semibold text-muted-foreground">{connStatus === "connected" ? "Serial console active" : "Offline"}</span>
                {connStatus === "connected" && (

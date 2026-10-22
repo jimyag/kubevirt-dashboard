@@ -1,4 +1,3 @@
-import { Hexagon } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 
 import {
@@ -18,8 +17,8 @@ import { useNetworkProfile } from "@/lib/kube"
 import { findActiveNav, useNavSections } from "@/lib/navigation"
 
 const navButtonClass = [
-  "h-8 font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-  "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[active=true]:[&>svg]:text-sidebar-primary",
+  "h-8 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&>svg]:text-muted-foreground",
+  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[active=true]:[&>svg]:text-sidebar-accent-foreground",
 ].join(" ")
 
 export function AppSidebar() {
@@ -33,15 +32,10 @@ export function AppSidebar() {
       <SidebarHeader className="h-(--header-height) justify-center border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild size="lg" className="h-10 hover:bg-transparent active:bg-transparent">
+            <SidebarMenuButton asChild className="h-9 hover:bg-transparent active:bg-transparent">
               <Link to="/">
-                <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <Hexagon className="size-4" strokeWidth={2.5} />
-                </div>
-                <div className="flex flex-col leading-tight">
-                  <span className="text-sm font-semibold tracking-tight text-sidebar-accent-foreground">Virt Console</span>
-                  <span className="text-xs text-muted-foreground">KubeVirt cloud</span>
-                </div>
+                <div className="flex aspect-square size-7 shrink-0 items-center justify-center rounded-md bg-foreground font-mono text-xs font-semibold text-background">kv</div>
+                <span className="text-sm font-semibold text-sidebar-accent-foreground">virt console</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -51,7 +45,7 @@ export function AppSidebar() {
       <SidebarContent className="gap-0 py-2">
         {sections.map((section) => (
           <SidebarGroup key={section.label} className="py-1">
-            {section.label !== "Home" && <SidebarGroupLabel className="h-7 text-xs font-medium text-muted-foreground">{section.label}</SidebarGroupLabel>}
+            {section.label !== "Home" && <SidebarGroupLabel className="h-7 text-xs text-muted-foreground">{section.label}</SidebarGroupLabel>}
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {section.items.map((item) => (
@@ -72,12 +66,9 @@ export function AppSidebar() {
 
       <SidebarFooter className="border-t border-sidebar-border group-data-[collapsible=icon]:hidden">
         <Link to="/settings" className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-accent">
-          <span className="relative flex size-2.5 shrink-0">
-            <span className={profile.loaded ? "absolute inline-flex size-full animate-ping rounded-full bg-green-500/50" : "hidden"} />
-            <span className={profile.loaded ? "relative inline-flex size-2.5 rounded-full bg-green-500" : "relative inline-flex size-2.5 rounded-full bg-muted-foreground/40"} />
-          </span>
+          <span className={profile.loaded ? "size-2 shrink-0 rounded-full bg-green-600" : "size-2 shrink-0 rounded-full bg-muted-foreground/40"} />
           <div className="min-w-0">
-            <div className="truncate text-xs font-semibold text-sidebar-accent-foreground">{profile.loaded ? profile.label : "Detecting stack..."}</div>
+            <div className="truncate text-xs font-medium text-sidebar-accent-foreground">{profile.loaded ? profile.label : "Detecting..."}</div>
             <div className="truncate text-xs text-muted-foreground">
               ACL {profile.aclEngines.length ? profile.aclEngines.map((engine) => engine === "cilium" ? "Cilium" : "Kube-OVN").join(" / ") : "NetworkPolicy"}
             </div>

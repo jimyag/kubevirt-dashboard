@@ -1,9 +1,8 @@
 import { Link } from "react-router-dom"
-import { Boxes, CheckCircle2, Cpu, HardDrive, Network, Sparkles, XCircle } from "lucide-react"
+import { CheckCircle2, ChevronRight, Network, Sparkles, XCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ChoiceCard, IconBadge, PageHeader } from "@/components/console"
+import { ChoiceCard, PageHeader, Panel } from "@/components/console"
 import {
   networkProfiles,
   useDiscovery,
@@ -30,17 +29,10 @@ export function SettingsPage() {
   const discovery = useDiscovery()
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <PageHeader title="Settings" subtitle="Console behavior for the selected cluster" />
+    <div className="space-y-6">
+      <PageHeader title="Settings" />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Network stack</CardTitle>
-          <CardDescription>
-            Decides how instances join networks and which engine enforces security groups. Auto detection picks the richest stack installed on this cluster.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <Panel title="Network stack" bodyClassName="space-y-4">
           <ChoiceCard
             selected={profile.override === "auto"}
             onClick={() => writeProfileOverride("auto")}
@@ -83,15 +75,9 @@ export function SettingsPage() {
               {profile.aclEngines.length > 1 && <div className="text-xs text-muted-foreground">Choose the engine per security group and per instance.</div>}
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Installed components</CardTitle>
-          <CardDescription>Detected from the API resources served by this cluster.</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <Panel title="Installed components">
           <div className="grid gap-2 md:grid-cols-2">
             {components.map((component) => {
               const [groupVersion, resource] = component.check
@@ -113,37 +99,30 @@ export function SettingsPage() {
               )
             })}
           </div>
-        </CardContent>
-      </Card>
+        </Panel>
     </div>
   )
 }
 
 const catalog = [
-  { to: "/kubevirt", title: "KubeVirt", description: "VMs, VMIs, pools, CDI, instance types, snapshots and migrations.", icon: Cpu, color: "green" as const },
-  { to: "/storage", title: "Storage", description: "StorageClasses, PV/PVC, CSI and volume snapshots.", icon: HardDrive, color: "purple" as const },
-  { to: "/networks", title: "Networks", description: "Services, Gateway API, Multus, Calico, Cilium and Kube-OVN CRDs.", icon: Network, color: "blue" as const },
-  { to: "/kubernetes", title: "Kubernetes", description: "Workloads, config, RBAC, policy, admission and cluster resources.", icon: Boxes, color: "orange" as const },
+  { to: "/kubevirt", title: "KubeVirt", description: "VMs, VMIs, pools, CDI, instance types, snapshots, migrations" },
+  { to: "/storage", title: "Storage", description: "StorageClasses, PV/PVC, CSI, volume snapshots" },
+  { to: "/networks", title: "Networks", description: "Services, Gateway API, Multus, Calico, Cilium, Kube-OVN" },
+  { to: "/kubernetes", title: "Kubernetes", description: "Workloads, config, RBAC, policy, admission, cluster" },
 ]
 
 export function CatalogPage() {
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <PageHeader title="Resource Catalog" subtitle="Every API resource the console manages, grouped by provider. Use it for resources without a dedicated console page." />
-      <div className="grid gap-4 md:grid-cols-2">
+    <div className="space-y-5">
+      <PageHeader title="Resource Catalog" subtitle="Raw API resources, grouped by provider." />
+      <div className="divide-y rounded-lg border bg-card">
         {catalog.map((item) => (
-          <Link key={item.to} to={item.to} className="block">
-            <Card className="h-full transition-colors hover:bg-muted/50">
-              <CardHeader>
-                <div className="flex items-start gap-3">
-                  <IconBadge icon={item.icon} color={item.color} />
-                  <div>
-                    <CardTitle className="text-base">{item.title}</CardTitle>
-                    <CardDescription>{item.description}</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-            </Card>
+          <Link key={item.to} to={item.to} className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-muted/50">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{item.title}</div>
+              <div className="text-xs text-muted-foreground">{item.description}</div>
+            </div>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
           </Link>
         ))}
       </div>

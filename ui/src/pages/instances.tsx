@@ -22,7 +22,6 @@ import {
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -43,6 +42,7 @@ import {
   PageHeader,
   StatusDot,
   Toolbar,
+  Panel,
 } from "@/components/console"
 import {
   asList,
@@ -150,10 +150,9 @@ export function InstanceListPage() {
   }
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-500">
+    <div className="space-y-4">
       <PageHeader
         title="Instances"
-        subtitle="Virtual machines running on KubeVirt"
         actions={
           <Button asChild className="gap-1.5">
             <Link to="/kubevirt/virtualization/virtual-machines/create"><Plus className="size-4" />Create instance</Link>
@@ -224,7 +223,6 @@ export function InstanceListPage() {
                     <EmptyState
                       icon={Cpu}
                       title={data.vms.length === 0 ? "No instances yet" : "No matching instances"}
-                      description={data.vms.length === 0 ? "Create an instance from an image in a few steps." : "Change the filters or search text."}
                       action={data.vms.length === 0 && <Button asChild size="sm"><Link to="/kubevirt/virtualization/virtual-machines/create">Create instance</Link></Button>}
                     />
                   </td>
@@ -365,13 +363,7 @@ const readLocal = (key: string) => {
 
 function StepSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
-      </CardHeader>
-      <CardContent className="space-y-4">{children}</CardContent>
-    </Card>
+    <Panel title={title} description={description} bodyClassName="space-y-4">{children}</Panel>
   )
 }
 
@@ -507,11 +499,10 @@ export function CreateInstancePage() {
   ]
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6">
       <PageHeader
         breadcrumbs={[{ label: "Instances", to: "/kubevirt/virtualization/virtual-machines" }, { label: "Create" }]}
         title="Create instance"
-        subtitle={`Network stack: ${profile.label}`}
       />
 
       <div className="grid gap-6 lg:grid-cols-[220px_1fr_300px]">
@@ -551,9 +542,9 @@ export function CreateInstancePage() {
                   </div>
                 </div>
               </StepSection>
-              <StepSection title="Instance spec" description="Choose a predefined instance type or a custom CPU and memory size.">
+              <StepSection title="Spec">
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <ChoiceCard selected={state.specMode === "custom"} onClick={() => set({ specMode: "custom" })} title="Custom" description="Pick vCPU and memory directly." />
+                  <ChoiceCard selected={state.specMode === "custom"} onClick={() => set({ specMode: "custom" })} title="Custom" description="Set vCPU and memory" />
                   <ChoiceCard selected={state.specMode === "instancetype"} onClick={() => set({ specMode: "instancetype" })} disabled={catalog.instanceTypes.length === 0} title="Instance type" description={catalog.instanceTypes.length ? `${catalog.instanceTypes.length} cluster instance types` : "No cluster instance types found"} />
                 </div>
                 {state.specMode === "custom" ? (
@@ -587,7 +578,7 @@ export function CreateInstancePage() {
 
           {step === "image" && (
             <>
-              <StepSection title="Image" description="The operating system the instance boots from.">
+              <StepSection title="Image">
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   <ChoiceCard selected={state.imageSource === "datasource"} onClick={() => set({ imageSource: "datasource" })} disabled={catalog.dataSources.length === 0} icon={ImageIcon} title="Public image" description={catalog.dataSources.length ? "Images published as DataSources" : "No DataSources found"} />
                   <ChoiceCard selected={state.imageSource === "registry"} onClick={() => set({ imageSource: "registry" })} icon={ImageIcon} title="Registry image" description="Import a containerdisk into a persistent disk" />
@@ -617,7 +608,7 @@ export function CreateInstancePage() {
                   </FieldRow>
                 )}
               </StepSection>
-              <StepSection title="Disks" description="System disk and optional blank data disks.">
+              <StepSection title="Disks">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FieldRow label="System disk size"><Input value={state.rootSize} disabled={state.imageSource === "containerdisk"} onChange={(e) => set({ rootSize: e.target.value })} /></FieldRow>
                   <FieldRow label="Storage class">
@@ -643,7 +634,7 @@ export function CreateInstancePage() {
 
           {step === "network" && (
             <>
-              <StepSection title="Network" description={profile.vpc ? "Place the instance in a Kube-OVN VPC subnet." : "The instance joins the cluster pod network."}>
+              <StepSection title="Network" description={profile.vpc ? "Kube-OVN" : "Pod network"}>
                 {profile.vpc ? (
                   <>
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -680,8 +671,8 @@ export function CreateInstancePage() {
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Interface binding</div>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <ChoiceCard selected={state.binding === "bridge"} onClick={() => set({ binding: "bridge" })} title="Bridge" description="The guest sees the subnet IP directly. Recommended with Kube-OVN." />
-                    <ChoiceCard selected={state.binding === "masquerade"} onClick={() => set({ binding: "masquerade" })} title="Masquerade" description="NAT inside the pod. Works with any CNI and live migration." />
+                    <ChoiceCard selected={state.binding === "bridge"} onClick={() => set({ binding: "bridge" })} title="Bridge" description="Guest owns the subnet IP. No live migration." />
+                    <ChoiceCard selected={state.binding === "masquerade"} onClick={() => set({ binding: "masquerade" })} title="Masquerade" description="NAT in the pod. Supports live migration." />
                   </div>
                 </div>
               </StepSection>
@@ -699,7 +690,7 @@ export function CreateInstancePage() {
                               onClick={() => set({ sgEngine: engine, securityGroups: [] })}
                               icon={ShieldCheck}
                               title={<span className="flex items-center gap-2">{engineLabel[engine]}{engine === defaultEngine && <Badge variant="outline">Default</Badge>}</span>}
-                              description={engine === "cilium" ? "CiliumNetworkPolicy in this namespace. Supports deny rules." : "Kube-OVN SecurityGroup on the OVN port. Enables port security."}
+                              description={engine === "cilium" ? "CiliumNetworkPolicy, per namespace" : "Kube-OVN SecurityGroup, cluster wide"}
                             />
                           ))}
                         </div>
@@ -726,7 +717,7 @@ export function CreateInstancePage() {
           )}
 
           {step === "access" && (
-            <StepSection title="Login credentials" description="Injected with cloud-init on first boot.">
+            <StepSection title="Login" description="Applied by cloud-init on first boot">
               <div className="grid gap-4 sm:grid-cols-2">
                 <FieldRow label="Username"><Input value={state.username} onChange={(e) => set({ username: e.target.value })} /></FieldRow>
                 <FieldRow label="Password" hint="Stored in the VM spec as cloud-init user data."><Input type="password" value={state.password} onChange={(e) => set({ password: e.target.value })} autoComplete="new-password" /></FieldRow>
@@ -754,7 +745,7 @@ export function CreateInstancePage() {
               <StepSection title="Review">
                 <KeyValueGrid items={summary} />
               </StepSection>
-              <StepSection title="Generated manifest" description="Exactly what will be submitted to the cluster.">
+              <StepSection title="Manifest">
                 <pre className="max-h-[480px] overflow-auto rounded-lg bg-muted/30 p-4 font-mono text-xs text-foreground whitespace-pre">{YAML.dump(vm, { noRefs: true, lineWidth: 120 })}</pre>
               </StepSection>
             </>
@@ -775,9 +766,7 @@ export function CreateInstancePage() {
         </div>
 
         <aside className="hidden lg:block">
-          <Card className="sticky top-20">
-            <CardHeader><CardTitle className="text-base">Summary</CardTitle></CardHeader>
-            <CardContent className="space-y-3 text-sm">
+          <Panel title="Summary" className="sticky top-20" bodyClassName="space-y-3 text-sm">
               {summary.slice(0, 8).map((item) => (
                 <div key={item.label} className="flex flex-col gap-0.5">
                   <span className="text-xs text-muted-foreground">{item.label}</span>
@@ -786,8 +775,7 @@ export function CreateInstancePage() {
               ))}
               {firstProblem && <div className="rounded-lg bg-muted/50 p-2 text-xs text-muted-foreground">{problems[firstProblem.id]}</div>}
               <Button className="w-full" onClick={create} disabled={creating}>{creating ? "Creating..." : "Create instance"}</Button>
-            </CardContent>
-          </Card>
+            </Panel>
         </aside>
       </div>
     </div>

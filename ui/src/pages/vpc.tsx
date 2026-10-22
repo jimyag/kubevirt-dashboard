@@ -5,7 +5,6 @@ import { Network, Plus, RefreshCw, Search, Split, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -28,6 +27,7 @@ import {
   StatusDot,
   Toolbar,
   UsageBar,
+  Panel,
 } from "@/components/console"
 import {
   apiFetch,
@@ -68,18 +68,14 @@ const vmSubnet = (vm: KubeObject) =>
 export function KubeOvnMissing() {
   const profile = useNetworkProfile()
   return (
-    <Card>
-      <CardContent>
+    <div className="rounded-lg border bg-card">
         <EmptyState
           icon={Network}
           title="VPC networking is not enabled"
-          description={profile.kubeOvnInstalled
-            ? "Kube-OVN is installed, but the current network stack does not use VPCs. Switch the network stack in Settings."
-            : "VPCs and subnets require Kube-OVN. Install Kube-OVN, or switch the network stack in Settings if detection was wrong."}
+          description={profile.kubeOvnInstalled ? "The selected network stack does not use VPCs." : "Requires Kube-OVN."}
           action={<Button asChild variant="outline" size="sm"><Link to="/settings">Open settings</Link></Button>}
         />
-      </CardContent>
-    </Card>
+    </div>
   )
 }
 
@@ -253,13 +249,12 @@ export function VpcListPage() {
 
   const rows = useMemo(() => data.vpcs.filter((vpc) => vpc.metadata.name.includes(search.trim())), [data.vpcs, search])
 
-  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="VPCs" subtitle="Isolated virtual networks" /><KubeOvnMissing /></div>
+  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="VPCs" /><KubeOvnMissing /></div>
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-500">
+    <div className="space-y-4">
       <PageHeader
         title="VPCs"
-        subtitle="Isolated virtual networks backed by Kube-OVN logical routers"
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create VPC</Button>}
       />
       <Toolbar
@@ -357,7 +352,7 @@ export function VpcDetailPage() {
   const staticRoutes = asList(spec.staticRoutes)
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6">
       <PageHeader
         breadcrumbs={[{ label: "VPCs", to: "/vpc/vpcs" }, { label: name }]}
         title={name}
@@ -369,9 +364,7 @@ export function VpcDetailPage() {
           </>
         }
       />
-      <Card>
-        <CardHeader><CardTitle className="text-base">Basic information</CardTitle></CardHeader>
-        <CardContent>
+      <Panel title="Basic information">
           <KeyValueGrid items={[
             { label: "VPC name", value: name },
             { label: "Router", value: str(asRecord(data.vpc.status).router, `vpc-${name}`) },
@@ -381,8 +374,7 @@ export function VpcDetailPage() {
             { label: "Instances", value: instances.length },
             { label: "Created", value: relativeTime(data.vpc.metadata.creationTimestamp) },
           ]} />
-        </CardContent>
-      </Card>
+        </Panel>
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold">Subnets</h2>
@@ -390,12 +382,7 @@ export function VpcDetailPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">NAT gateways</CardTitle>
-            <CardDescription>Provide SNAT, DNAT and elastic IPs for this VPC.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
+        <Panel title="NAT gateways" bodyClassName="space-y-2">
             {data.natGateways.map((gw) => (
               <div key={gw.metadata.name} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
                 <Link to={`/networks/kube-ovn/vpc-nat-gateways/_cluster/${gw.metadata.name}`} className="font-medium hover:text-primary transition-colors">{gw.metadata.name}</Link>
@@ -403,14 +390,8 @@ export function VpcDetailPage() {
               </div>
             ))}
             {data.natGateways.length === 0 && <p className="text-sm text-muted-foreground">No NAT gateways. <Link to="/networks/kube-ovn/vpc-nat-gateways" className="text-primary hover:underline">Create one</Link> to give instances internet access or elastic IPs.</p>}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Route table</CardTitle>
-            <CardDescription>Static routes on the VPC router.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
+          </Panel>
+        <Panel title="Route table" bodyClassName="space-y-2">
             {staticRoutes.map((route, index) => (
               <div key={index} className="flex items-center justify-between gap-3 rounded-lg border p-3 font-mono text-xs">
                 <span>{str(route.cidr)}</span>
@@ -418,8 +399,7 @@ export function VpcDetailPage() {
               </div>
             ))}
             {staticRoutes.length === 0 && <p className="text-sm text-muted-foreground">No static routes. Subnet routes are managed automatically.</p>}
-          </CardContent>
-        </Card>
+          </Panel>
       </div>
 
       <div className="space-y-3">
@@ -497,13 +477,12 @@ export function SubnetListPage() {
     return (vpcFilter === "all" || vpc === vpcFilter) && (!needle || subnet.metadata.name.includes(needle) || str(asRecord(subnet.spec).cidrBlock).includes(needle))
   })
 
-  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="Subnets" subtitle="Address ranges inside VPCs" /><KubeOvnMissing /></div>
+  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title="Subnets" /><KubeOvnMissing /></div>
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-500">
+    <div className="space-y-4">
       <PageHeader
         title="Subnets"
-        subtitle="Address ranges inside VPCs. Each subnet can carry its own network ACL."
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create subnet</Button>}
       />
       <Toolbar
@@ -596,16 +575,14 @@ export function SubnetDetailPage() {
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6">
       <PageHeader
         breadcrumbs={[{ label: "Subnets", to: "/vpc/subnets" }, { label: name }]}
         title={name}
         badge={<StatusDot status={subnetReady(data.subnet)} />}
         actions={<Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>}
       />
-      <Card>
-        <CardHeader><CardTitle className="text-base">Basic information</CardTitle></CardHeader>
-        <CardContent>
+      <Panel title="Basic information">
           <KeyValueGrid items={[
             { label: "VPC", value: <Link to={`/vpc/vpcs/${str(spec.vpc, "ovn-cluster")}`} className="hover:text-primary transition-colors">{str(spec.vpc, "ovn-cluster")}</Link> },
             { label: "CIDR", value: <span className="font-mono">{str(spec.cidrBlock)}</span> },
@@ -618,16 +595,13 @@ export function SubnetDetailPage() {
             { label: "Reserved IPs", value: (spec.excludeIps as string[] | undefined)?.join(", ") || "None" },
             { label: "Provider", value: str(spec.provider, "ovn") },
           ]} />
-        </CardContent>
-      </Card>
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle className="text-base">Network ACL</CardTitle>
-              <CardDescription>Stateless subnet-level rules evaluated by OVN. Higher priority wins. Use OVN match expressions such as <code className="font-mono">tcp.dst == 443</code>.</CardDescription>
-            </div>
+      <Panel
+        title="Network ACL"
+        description={<>OVN match expressions, e.g. <code className="font-mono">tcp.dst == 443</code>. Higher priority wins.</>}
+        bodyClassName="space-y-3"
+        actions={
             <div className="flex flex-wrap gap-2">
               {editing ? (
                 <>
@@ -638,10 +612,9 @@ export function SubnetDetailPage() {
                 <Button size="sm" variant="outline" onClick={() => setRules(savedRules)}>Edit rules</Button>
               )}
             </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {shownRules.length === 0 && !editing && <p className="text-sm text-muted-foreground">No ACL rules. All traffic allowed by the VPC and security groups passes.</p>}
+        }
+      >
+          {shownRules.length === 0 && !editing && <p className="text-sm text-muted-foreground">No rules.</p>}
           {shownRules.length > 0 && (
             <div className="overflow-x-auto">
               <div className="min-w-[680px] space-y-2">
@@ -682,8 +655,7 @@ export function SubnetDetailPage() {
             </div>
           )}
           {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
-        </CardContent>
-      </Card>
+      </Panel>
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold">Allocated addresses</h2>

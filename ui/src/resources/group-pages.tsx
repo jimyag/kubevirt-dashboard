@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Boxes, Cpu, HardDrive, Network } from "lucide-react";
 
 import type { ResourceConfig } from "@/components/resource-management";
-import { Badge } from "@/components/ui/badge";
-import { Card as ShadCard, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable, EmptyState, PageHeader, Section } from "@/components/console";
 import {
   apiVersionFromListPath,
   expandListPaths as listPathCandidates,
@@ -60,57 +58,72 @@ function useAvailableResources(resources: ResourceConfig[]) {
   return available;
 }
 
-function ResourceConfigCards({ resources }: { resources: ResourceConfig[] }) {
-  const available = useAvailableResources(resources);
-  const visibleResources = useMemo(() => resources.filter((config) => available[config.path] !== false), [available, resources]);
-  const unavailableCount = resources.length - visibleResources.length;
+function ResourceConfigTable({ resources }: { resources: ResourceConfig[] }) {
+  const available = useAvailableResources(resources)
+  const visibleResources = useMemo(() => resources.filter((config) => available[config.path] !== false), [available, resources])
+  const hidden = resources.length - visibleResources.length
+
+  if (Object.keys(available).length > 0 && visibleResources.length === 0) {
+    return <p className="text-sm text-muted-foreground">Not served by this cluster.</p>
+  }
 
   return (
-    <div className="space-y-3">
-      {unavailableCount > 0 && (
-        <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-          {unavailableCount} resource API{unavailableCount > 1 ? "s are" : " is"} not served by this cluster and hidden from this category.
-        </div>
-      )}
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {visibleResources.map((config) => (
-          <Link key={config.path} to={config.path} className="block">
-            <ShadCard className="h-full transition-colors hover:bg-muted/50">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="text-sm">{config.title}</CardTitle>
-                    <CardDescription className="mt-1 line-clamp-2">{config.subtitle}</CardDescription>
-                  </div>
-                  <Badge variant="outline">{config.namespaced ? "Namespaced" : "Cluster"}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-xs text-muted-foreground">{config.kind}</div>
-              </CardContent>
-            </ShadCard>
-          </Link>
-        ))}
-      </div>
+    <div className="space-y-2">
+      <DataTable
+        rows={visibleResources}
+        rowKey={(config) => config.path}
+        minWidth={640}
+        empty={<EmptyState title="Not served by this cluster" />}
+        columns={[
+          { header: "Resource", cell: (config) => <Link to={config.path} className="font-medium hover:text-primary transition-colors">{config.title}</Link> },
+          { header: "Kind", cell: (config) => <span className="font-mono text-xs">{config.kind}</span> },
+          { header: "API", cell: (config) => <span className="font-mono text-xs text-muted-foreground">{apiVersionFromListPath(config.listPath) || "v1"}</span> },
+          { header: "Scope", className: "text-right", cell: (config) => <span className="text-sm text-muted-foreground">{config.namespaced ? "Namespaced" : "Cluster"}</span> },
+        ]}
+      />
+      {hidden > 0 && <p className="text-xs text-muted-foreground">{hidden} not served by this cluster, hidden.</p>}
     </div>
-  );
+  )
 }
 
-type KubeVirtResourceGroup = {
-  slug: string;
-  title: string;
-  description: string;
-  resources: ResourceConfig[];
-};
+type ResourceGroup = {
+  slug: string
+  title: string
+  description: string
+  resources: ResourceConfig[]
+}
 
-type KubernetesResourceGroup = {
-  slug: string;
-  title: string;
-  description: string;
-  resources: ResourceConfig[];
-};
+function GroupIndexPage({ title, base, groups }: { title: string; base: string; groups: ResourceGroup[] }) {
+  return (
+    <div className="space-y-6">
+      <PageHeader breadcrumbs={[{ label: "Resource Catalog", to: "/catalog" }, { label: title }]} title={title} />
+      {groups.map((group) => (
+        <Section key={group.slug} title={<Link to={`${base}/${group.slug}`} className="hover:text-primary transition-colors">{group.title}</Link>}>
+          <ResourceConfigTable resources={group.resources} />
+        </Section>
+      ))}
+    </div>
+  )
+}
 
-const kubernetesResourceGroups: KubernetesResourceGroup[] = [
+function GroupCategoryPage({ title, base, groups }: { title: string; base: string; groups: ResourceGroup[] }) {
+  const { category } = useParams()
+  const group = groups.find((item) => item.slug === category)
+  if (!group) return <EmptyState title={`${title} category not found`} />
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        breadcrumbs={[{ label: "Resource Catalog", to: "/catalog" }, { label: title, to: base }, { label: group.title }]}
+        title={group.title}
+        subtitle={group.description}
+      />
+      <ResourceConfigTable resources={group.resources} />
+    </div>
+  )
+}
+
+
+const kubernetesResourceGroups: ResourceGroup[] = [
   {
     slug: "workloads",
     title: "Workloads And Scaling",
@@ -205,62 +218,9 @@ const kubernetesResourceGroups: KubernetesResourceGroup[] = [
   },
 ];
 
-export function KubernetesManagementPage() {
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">Kubernetes</h1>
-        <p className="text-sm text-muted-foreground">Choose a Kubernetes resource family before managing concrete resources.</p>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {kubernetesResourceGroups.map((group) => (
-          <Link key={group.slug} to={`/kubernetes/${group.slug}`} className="block">
-            <ShadCard className="h-full transition-colors hover:bg-muted/50">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <Boxes className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">{group.title}</CardTitle>
-                  </div>
-                  <Badge variant="outline">{group.resources.length}</Badge>
-                </div>
-                <CardDescription>{group.description}</CardDescription>
-              </CardHeader>
-            </ShadCard>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-export function KubernetesCategoryPage() {
-  const { category } = useParams();
-  const group = kubernetesResourceGroups.find((item) => item.slug === category);
-
-  if (!group) {
-    return <div className="p-20 text-center text-muted-foreground border-2 border-dashed rounded-lg mt-12">Kubernetes category not found</div>;
-  }
-
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Link to="/kubernetes" className="hover:text-primary">Kubernetes</Link>
-          <span>/</span>
-          <span>{group.title}</span>
-        </div>
-        <h1 className="text-2xl font-bold">{group.title}</h1>
-        <p className="text-sm text-muted-foreground">{group.description}</p>
-      </div>
-
-      <ResourceConfigCards resources={group.resources} />
-    </div>
-  );
-}
-
-const kubevirtResourceGroups: KubeVirtResourceGroup[] = [
+const kubevirtResourceGroups: ResourceGroup[] = [
   {
     slug: "virtualization",
     title: "Virtualization",
@@ -319,76 +279,9 @@ const kubevirtResourceGroups: KubeVirtResourceGroup[] = [
   },
 ];
 
-export function KubeVirtManagementPage() {
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">KubeVirt</h1>
-        <p className="text-sm text-muted-foreground">Choose a KubeVirt or CDI resource family before managing concrete CRDs.</p>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {kubevirtResourceGroups.map((group) => (
-          <Link key={group.slug} to={`/kubevirt/${group.slug}`} className="block">
-            <ShadCard className="h-full transition-colors hover:bg-muted/50">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">{group.title}</CardTitle>
-                  </div>
-                  <Badge variant="outline">{group.resources.length}</Badge>
-                </div>
-                <CardDescription>{group.description}</CardDescription>
-              </CardHeader>
-            </ShadCard>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-export function KubeVirtCategoryPage() {
-  const { category } = useParams();
-  const group = kubevirtResourceGroups.find((item) => item.slug === category);
-
-  if (!group) {
-    return <div className="p-20 text-center text-muted-foreground border-2 border-dashed rounded-lg mt-12">KubeVirt category not found</div>;
-  }
-
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Link to="/kubevirt" className="hover:text-primary">KubeVirt</Link>
-          <span>/</span>
-          <span>{group.title}</span>
-        </div>
-        <h1 className="text-2xl font-bold">{group.title}</h1>
-        <p className="text-sm text-muted-foreground">{group.description}</p>
-      </div>
-
-      <ResourceConfigCards resources={group.resources} />
-    </div>
-  );
-}
-
-type NetworkResourceGroup = {
-  slug: string;
-  title: string;
-  description: string;
-  resources: ResourceConfig[];
-};
-
-type StorageResourceGroup = {
-  slug: string;
-  title: string;
-  description: string;
-  resources: ResourceConfig[];
-};
-
-const storageResourceGroups: StorageResourceGroup[] = [
+const storageResourceGroups: ResourceGroup[] = [
   {
     slug: "kubernetes",
     title: "Kubernetes",
@@ -409,64 +302,9 @@ const storageResourceGroups: StorageResourceGroup[] = [
   },
 ];
 
-export function StorageManagementPage() {
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">Storage</h1>
-        <p className="text-sm text-muted-foreground">Choose a Kubernetes storage API group before managing concrete resources.</p>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {storageResourceGroups.map((group) => (
-          <Link key={group.slug} to={`/storage/${group.slug}`} className="block">
-            <ShadCard className="h-full transition-colors hover:bg-muted/50">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">{group.title}</CardTitle>
-                  </div>
-                  <Badge variant="outline">{group.resources.length}</Badge>
-                </div>
-                <CardDescription>{group.description}</CardDescription>
-              </CardHeader>
-            </ShadCard>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-export function StorageCategoryPage() {
-  const { category } = useParams();
-  const group = storageResourceGroups.find((item) => item.slug === category);
-
-  if (!group) {
-    return <div className="p-20 text-center text-muted-foreground border-2 border-dashed rounded-lg mt-12">Storage category not found</div>;
-  }
-
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to="/storage" className="hover:text-primary">Storage</Link>
-            <span>/</span>
-            <span>{group.title}</span>
-          </div>
-          <h1 className="text-2xl font-bold">{group.title}</h1>
-          <p className="text-sm text-muted-foreground">{group.description}</p>
-        </div>
-      </div>
-
-      <ResourceConfigCards resources={group.resources} />
-    </div>
-  );
-}
-
-const networkResourceGroups: NetworkResourceGroup[] = [
+const networkResourceGroups: ResourceGroup[] = [
   {
     slug: "kubernetes",
     title: "Kubernetes",
@@ -582,59 +420,11 @@ const networkResourceGroups: NetworkResourceGroup[] = [
   },
 ];
 
-export function NetworkManagementPage() {
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">Networks</h1>
-        <p className="text-sm text-muted-foreground">Choose a network provider or API group before managing concrete resources.</p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {networkResourceGroups.map((group) => (
-          <Link key={group.slug} to={`/networks/${group.slug}`} className="block">
-            <ShadCard className="h-full transition-colors hover:bg-muted/50">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <Network className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-sm">{group.title}</CardTitle>
-                  </div>
-                  <Badge variant="outline">{group.resources.length}</Badge>
-                </div>
-                <CardDescription>{group.description}</CardDescription>
-              </CardHeader>
-            </ShadCard>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function NetworkCategoryPage() {
-  const { category } = useParams();
-  const group = networkResourceGroups.find((item) => item.slug === category);
-
-  if (!group) {
-    return <div className="p-20 text-center text-muted-foreground border-2 border-dashed rounded-lg mt-12">Network category not found</div>;
-  }
-
-  return (
-    <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to="/networks" className="hover:text-primary">Networks</Link>
-            <span>/</span>
-            <span>{group.title}</span>
-          </div>
-          <h1 className="text-2xl font-bold">{group.title}</h1>
-          <p className="text-sm text-muted-foreground">{group.description}</p>
-        </div>
-      </div>
-
-      <ResourceConfigCards resources={group.resources} />
-    </div>
-  );
-}
+export const KubernetesManagementPage = () => <GroupIndexPage title="Kubernetes" base="/kubernetes" groups={kubernetesResourceGroups} />
+export const KubernetesCategoryPage = () => <GroupCategoryPage title="Kubernetes" base="/kubernetes" groups={kubernetesResourceGroups} />
+export const KubeVirtManagementPage = () => <GroupIndexPage title="KubeVirt" base="/kubevirt" groups={kubevirtResourceGroups} />
+export const KubeVirtCategoryPage = () => <GroupCategoryPage title="KubeVirt" base="/kubevirt" groups={kubevirtResourceGroups} />
+export const StorageManagementPage = () => <GroupIndexPage title="Storage" base="/storage" groups={storageResourceGroups} />
+export const StorageCategoryPage = () => <GroupCategoryPage title="Storage" base="/storage" groups={storageResourceGroups} />
+export const NetworkManagementPage = () => <GroupIndexPage title="Networks" base="/networks" groups={networkResourceGroups} />
+export const NetworkCategoryPage = () => <GroupCategoryPage title="Networks" base="/networks" groups={networkResourceGroups} />

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { ArrowDownToLine, ArrowUpFromLine, Info, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -21,6 +20,7 @@ import {
   ConfirmDialog,
   DataTable,
   EmptyState,
+  ErrorNote,
   FieldRow,
   KeyValueGrid,
   LoadingState,
@@ -28,6 +28,7 @@ import {
   PageHeader,
   StatusDot,
   Toolbar,
+  Panel,
 } from "@/components/console"
 import {
   listItems,
@@ -74,14 +75,13 @@ const engineDescription: Record<SgProvider, string> = {
 
 function ProviderNote({ provider }: { provider: SgProvider }) {
   return (
-    <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-      <Info className="mt-0.5 size-4 shrink-0" />
+    <p className="text-xs text-muted-foreground">
       {provider === "kube-ovn" ? (
-        <span>Enforced by Kube-OVN as OVN port ACLs. Groups are cluster wide; instances attach through the <code className="font-mono">ovn.kubernetes.io/security_groups</code> annotation with port security enabled. Lower priority numbers are evaluated first.</span>
+        <>OVN port ACLs, cluster wide. Attached via <code className="font-mono">ovn.kubernetes.io/security_groups</code>. Lower priority runs first.</>
       ) : (
-        <span>Enforced by Cilium as a <code className="font-mono">CiliumNetworkPolicy</code> per namespace. Instances attach through a <code className="font-mono">sg.kubevirt-dashboard.io/&lt;name&gt;</code> label. Once attached, inbound traffic is denied unless a rule allows it; deny rules take precedence over allow rules.</span>
+        <>CiliumNetworkPolicy per namespace. Attached via label <code className="font-mono">sg.kubevirt-dashboard.io/&lt;name&gt;</code>. Inbound is denied unless allowed; deny wins.</>
       )}
-    </div>
+    </p>
   )
 }
 
@@ -324,9 +324,8 @@ export function SecurityGroupListPage() {
   if (!provider) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Security Groups" subtitle="Stateful firewalls for instances" />
-        <Card>
-          <CardContent>
+        <PageHeader title="Security Groups" />
+        <div className="rounded-lg border bg-card">
             <EmptyState
               icon={ShieldCheck}
               title="Security groups need Kube-OVN or Cilium"
@@ -338,17 +337,15 @@ export function SecurityGroupListPage() {
                 </div>
               }
             />
-          </CardContent>
-        </Card>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-500">
+    <div className="space-y-4">
       <PageHeader
         title="Security Groups"
-        subtitle="Stateful firewalls that control inbound and outbound traffic of instances"
         badge={providers.length === 1 ? <Badge variant="outline">{providerLabel[provider]}</Badge> : undefined}
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />Create security group</Button>}
       />
@@ -392,7 +389,7 @@ export function SecurityGroupListPage() {
         loading={loading}
         rows={rows}
         rowKey={(sg) => `${sg.namespace || ""}/${sg.name}`}
-        empty={<EmptyState icon={ShieldCheck} title="No security groups" description="Create a security group and attach it to instances to control their traffic." action={<Button size="sm" onClick={() => setCreateOpen(true)}>Create security group</Button>} />}
+        empty={<EmptyState icon={ShieldCheck} title="No security groups" action={<Button size="sm" onClick={() => setCreateOpen(true)}>Create security group</Button>} />}
         columns={[
           {
             header: "Name",
@@ -502,7 +499,7 @@ export function SecurityGroupDetailPage() {
   ]
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6">
       <PageHeader
         breadcrumbs={[{ label: "Security Groups", to: provider === "kube-ovn" ? "/vpc/security-groups?engine=kube-ovn" : "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
         title={sg.name}
@@ -515,9 +512,7 @@ export function SecurityGroupDetailPage() {
           </>
         }
       />
-      <Card>
-        <CardHeader><CardTitle className="text-base">Basic information</CardTitle></CardHeader>
-        <CardContent>
+      <Panel title="Basic information">
           <KeyValueGrid items={[
             { label: "Name", value: sg.name },
             { label: "Scope", value: sg.namespace ? `Namespace ${sg.namespace}` : "Cluster wide" },
@@ -526,8 +521,7 @@ export function SecurityGroupDetailPage() {
             { label: "Traffic between members", value: sg.allowSameGroup ? "Allowed" : "Follows rules" },
             { label: "Created", value: relativeTime(sg.raw.metadata.creationTimestamp) },
           ]} />
-        </CardContent>
-      </Card>
+        </Panel>
       <ProviderNote provider={provider} />
       {!editable && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">
@@ -553,14 +547,10 @@ export function SecurityGroupDetailPage() {
       </div>
 
       {tab !== "instances" ? (
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle className="text-base">{tab === "ingress" ? "Inbound rules" : "Outbound rules"}</CardTitle>
-                <CardDescription>{tab === "ingress" ? "Traffic allowed to reach attached instances." : "Traffic attached instances may send."}</CardDescription>
-              </div>
-              {editable && (
+        <Panel
+          title={tab === "ingress" ? "Inbound rules" : "Outbound rules"}
+          bodyClassName="space-y-3"
+          actions={editable && (
                 <div className="flex gap-2">
                   {draft ? (
                     <>
@@ -571,10 +561,8 @@ export function SecurityGroupDetailPage() {
                     <Button size="sm" variant="outline" onClick={() => setDraft({ rules: sg.rules, allowSameGroup: sg.allowSameGroup })}>Edit rules</Button>
                   )}
                 </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
+          )}
+        >
             {draft ? (
               <>
                 <RuleEditor rules={draft.rules} direction={tab} provider={provider} groups={data.peers} onChange={(next) => setDraft({ ...draft, rules: next })} />
@@ -591,9 +579,8 @@ export function SecurityGroupDetailPage() {
             ) : (
               <RuleTable rules={sg.rules} direction={tab} provider={provider} />
             )}
-            {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
-          </CardContent>
-        </Card>
+            {error && <ErrorNote>{error}</ErrorNote>}
+        </Panel>
       ) : (
         <div className="space-y-3">
           {sg.managed && (
@@ -605,7 +592,7 @@ export function SecurityGroupDetailPage() {
             rows={members}
             rowKey={(vm) => `${vm.metadata.namespace}/${vm.metadata.name}`}
             minWidth={560}
-            empty={<EmptyState title="No attached instances" description="Attach instances to apply this group's rules to them." />}
+            empty={<EmptyState title="No attached instances" />}
             columns={[
               { header: "Instance", cell: (vm) => <Link to={`/kubevirt/virtualization/virtual-machines/${vm.metadata.namespace}/${vm.metadata.name}/overview`} className="font-medium hover:text-primary transition-colors">{vm.metadata.name}</Link> },
               { header: "Namespace", cell: (vm) => <span className="text-sm text-muted-foreground">{vm.metadata.namespace}</span> },
