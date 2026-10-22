@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { t } from "@/lib/i18n"
 
 // --- Page structure ---
 
@@ -123,7 +124,7 @@ export function StatusDot({ status, label }: { status?: string; label?: string }
   return (
     <span className={cn("inline-flex shrink-0 items-center gap-1.5 text-sm whitespace-nowrap", textTone[tone])}>
       <span className={cn("size-2 rounded-full", dotTone[tone])} />
-      {label || status || "Unknown"}
+      {label || (status ? t(status) : t("Unknown"))}
     </span>
   )
 }
@@ -218,7 +219,7 @@ export function KeyValueGrid({ items }: { items: Array<{ label: string; value: R
     <dl className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
       {items.map((item) => (
         <div key={item.label} className="flex min-w-0 flex-col gap-1">
-          <dt className="text-xs text-muted-foreground">{item.label}</dt>
+          <dt className="text-xs text-muted-foreground">{t(item.label)}</dt>
           <dd className="min-w-0 break-all text-foreground">{item.value ?? "N/A"}</dd>
         </div>
       ))}
@@ -271,9 +272,9 @@ export function ConfirmDialog({
         {children}
         {error && <ErrorNote>{error}</ErrorNote>}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>{t("Cancel")}</Button>
           <Button variant={destructive ? "destructive" : "default"} onClick={confirm} disabled={busy}>
-            {busy ? "Working..." : confirmLabel}
+            {busy ? t("Working...") : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -354,7 +355,7 @@ function SuggestionList({ items, active, onPick, footer }: { items: Suggestion[]
             className={cn("flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 text-sm", index === active ? "bg-accent text-accent-foreground" : "hover:bg-muted/60")}
           >
             <span className="min-w-0 truncate">{item.label ?? item.value}</span>
-            {item.hint && <span className="shrink-0 text-xs text-muted-foreground">{item.hint}</span>}
+            {item.hint && <span className="shrink-0 text-xs text-muted-foreground">{t(item.hint)}</span>}
           </li>
         ))}
       </ul>
@@ -417,7 +418,7 @@ export function Combobox({
         onKeyDown={suggest.keyHandler(pick)}
       />
       {value && (
-        <button type="button" aria-label="Clear" onMouseDown={(event) => event.preventDefault()} onClick={() => onChange("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
+        <button type="button" aria-label={t("Clear")} onMouseDown={(event) => event.preventDefault()} onClick={() => onChange("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
           <X className="size-3.5" />
         </button>
       )}
@@ -435,7 +436,7 @@ export function FilterInput<T>({
   onChange,
   fields,
   rows,
-  placeholder = "Filter, e.g. web status:running",
+  placeholder,
   className,
 }: {
   value: string
@@ -464,12 +465,12 @@ export function FilterInput<T>({
     items = fieldValues
       .filter((item) => item.toLowerCase().includes(partial))
       .slice(0, 20)
-      .map((item) => ({ value: `${prefix}${field.key}:${tokenValue(item)} `, label: item, hint: field.label }))
+      .map((item) => ({ value: `${prefix}${field.key}:${tokenValue(item)} `, label: item, hint: t(field.label) }))
   } else if (colon <= 0) {
     const lower = bare.toLowerCase()
     items = fields
       .filter((item) => !lower || item.key.startsWith(lower) || item.label.toLowerCase().startsWith(lower) || item.aliases?.some((alias) => alias.startsWith(lower)))
-      .map((item) => ({ value: `${prefix}${item.key}:`, label: <span className="font-mono text-xs">{item.key}:</span>, hint: item.label }))
+      .map((item) => ({ value: `${prefix}${item.key}:`, label: <span className="font-mono text-xs">{item.key}:</span>, hint: t(item.label) }))
   }
 
   const suggest = useSuggestions(items.length)
@@ -486,8 +487,8 @@ export function FilterInput<T>({
       <input
         className={cn(inputClass, "pl-9", value ? "pr-8" : "pr-3")}
         value={value}
-        placeholder={placeholder}
-        aria-label="Filter"
+        placeholder={placeholder ?? t("Filter, e.g. web status:running")}
+        aria-label={t("Filter")}
         role="combobox"
         aria-expanded={suggest.open}
         autoComplete="off"
@@ -501,7 +502,7 @@ export function FilterInput<T>({
         onKeyDown={suggest.keyHandler(pick)}
       />
       {value && (
-        <button type="button" aria-label="Clear filter" onMouseDown={(event) => event.preventDefault()} onClick={() => onChange("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
+        <button type="button" aria-label={t("Clear filter")} onMouseDown={(event) => event.preventDefault()} onClick={() => onChange("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
           <X className="size-3.5" />
         </button>
       )}
@@ -510,7 +511,7 @@ export function FilterInput<T>({
           items={items}
           active={suggest.active}
           onPick={pick}
-          footer={!token && <>Type text, or <span className="font-mono">field:value</span>; prefix <span className="font-mono">-</span> to exclude</>}
+          footer={!token && t("Type text, or field:value; prefix - to exclude")}
         />
       )}
     </div>
@@ -591,10 +592,10 @@ export function Pager({ page, pageCount, pageSize, total, onPage }: Paging) {
   return (
     <div className="flex items-center justify-end gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
       <span className="tabular-nums">{page * pageSize + 1}–{Math.min(total, (page + 1) * pageSize)} of {total}</span>
-      <Button variant="ghost" size="icon" className="size-7" disabled={page === 0} onClick={() => onPage(page - 1)} aria-label="Previous page">
+      <Button variant="ghost" size="icon" className="size-7" disabled={page === 0} onClick={() => onPage(page - 1)} aria-label={t("Previous page")}>
         <ChevronLeft className="size-4" />
       </Button>
-      <Button variant="ghost" size="icon" className="size-7" disabled={page >= pageCount - 1} onClick={() => onPage(page + 1)} aria-label="Next page">
+      <Button variant="ghost" size="icon" className="size-7" disabled={page >= pageCount - 1} onClick={() => onPage(page + 1)} aria-label={t("Next page")}>
         <ChevronRight className="size-4" />
       </Button>
     </div>
@@ -637,7 +638,7 @@ export function DataTable<T>({
               </TableRow>
             ) : rows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={columns.length}>{empty ?? <EmptyState title="No resources found" />}</TableCell>
+                <TableCell colSpan={columns.length}>{empty ?? <EmptyState title={t("No resources found")} />}</TableCell>
               </TableRow>
             ) : rows.map((row) => (
               <TableRow key={rowKey(row)} className="hover:bg-muted/50">

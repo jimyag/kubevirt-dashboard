@@ -13,12 +13,12 @@ export const storageclassesConfig: ResourceConfig = {
     createFields: [
       ...shared.nameOnlyFields("example-storage-class"),
       { name: "provisioner", label: "Provisioner", section: "Provisioner", defaultValue: "kubernetes.io/no-provisioner" },
-      { name: "reclaimPolicy", label: "Reclaim Policy", section: "Policy", type: "select", defaultValue: "Delete", options: [{ label: "Delete", value: "Delete" }, { label: "Retain", value: "Retain" }] },
-      { name: "volumeBindingMode", label: "Volume Binding Mode", section: "Policy", type: "select", defaultValue: "WaitForFirstConsumer", options: [{ label: "Immediate", value: "Immediate" }, { label: "WaitForFirstConsumer", value: "WaitForFirstConsumer" }] },
-      { name: "allowExpansion", label: "Allow Volume Expansion", section: "Policy", type: "checkbox", defaultValue: true },
+      { name: "reclaimPolicy", label: "Reclaim policy", section: "Policy", type: "select", defaultValue: "Delete", options: [{ label: "Delete", value: "Delete" }, { label: "Retain", value: "Retain" }] },
+      { name: "volumeBindingMode", label: "Volume binding mode", section: "Policy", type: "select", defaultValue: "WaitForFirstConsumer", options: [{ label: "Immediate", value: "Immediate" }, { label: "WaitForFirstConsumer", value: "WaitForFirstConsumer" }] },
+      { name: "allowExpansion", label: "Allow volume expansion", section: "Policy", type: "checkbox", defaultValue: true },
       { name: "parameters", label: "Parameters", section: "Provisioner", type: "textarea", defaultValue: "", placeholder: "type=gp3\nfsType=ext4" },
-      { name: "mountOptions", label: "Mount Options", section: "Mount", type: "textarea", defaultValue: "", placeholder: "discard\nnoatime" },
-      { name: "defaultClass", label: "Default Storage Class", section: "Policy", type: "checkbox", defaultValue: false },
+      { name: "mountOptions", label: "Mount options", section: "Mount", type: "textarea", defaultValue: "", placeholder: "discard\nnoatime" },
+      { name: "defaultClass", label: "Default storage class", section: "Policy", type: "checkbox", defaultValue: false },
     ],
     buildCreateResource: (values) => {
       const parameters = shared.parseKeyValueText(shared.stringValue(values.parameters));
@@ -42,7 +42,7 @@ export const storageclassesConfig: ResourceConfig = {
     detailSections: shared.storageClassDetailSections,
     extraColumns: [
       { label: "Provisioner", value: (r) => String(shared.getRecord(r).provisioner || "N/A") },
-      { label: "Binding Mode", value: (r) => String(shared.getRecord(r).volumeBindingMode || "N/A") },
+      { label: "Binding mode", value: (r) => String(shared.getRecord(r).volumeBindingMode || "N/A") },
       { label: "Reclaim", value: (r) => String(shared.getRecord(r).reclaimPolicy || "N/A") },
     ],
     createTemplate: `apiVersion: storage.k8s.io/v1

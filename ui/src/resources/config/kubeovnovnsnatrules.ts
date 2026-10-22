@@ -9,8 +9,8 @@ export const kubeOvnOvnSnatRulesConfig: ResourceConfig = shared.kubeOvnResourceC
     kind: "OvnSnatRule",
     createFields: [
       { name: "ovnEip", label: "OVN EIP", section: "SNAT", defaultValue: "example-ovn-eip" },
-      { name: "vpcSubnet", label: "Subnet Name", section: "SNAT", defaultValue: "", placeholder: "subnet to SNAT" },
-      { name: "ipName", label: "IP Name", section: "SNAT", defaultValue: "", placeholder: "or a single IP object" },
+      { name: "vpcSubnet", label: "Subnet name", section: "SNAT", defaultValue: "", placeholder: "subnet to SNAT" },
+      { name: "ipName", label: "IP name", section: "SNAT", defaultValue: "", placeholder: "or a single IP object" },
     ],
     buildSpec: (values) => ({
       ovnEip: shared.stringValue(values.ovnEip),

@@ -16,6 +16,7 @@ import {
   type PrometheusConfig,
   type Series,
 } from "@/lib/metrics"
+import { t } from "@/lib/i18n"
 
 type ChartSeries = { key: string; label: string; color: string }
 
@@ -41,7 +42,7 @@ export function MetricChart({
   return (
     <Panel title={title} actions={latest && <span className="text-sm font-medium tabular-nums">{latest}</span>} bodyClassName="px-2 pt-3 pb-1">
       {data.length === 0 ? (
-        <p className="px-2 py-10 text-center text-sm text-muted-foreground">No data</p>
+        <p className="px-2 py-10 text-center text-sm text-muted-foreground">{t("No data")}</p>
       ) : (
         <div className="h-44 w-full">
           <ResponsiveContainer>
@@ -148,17 +149,16 @@ function PrometheusCharts({ config, namespace, name }: { config: PrometheusConfi
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono">{config.namespace}/{config.service}:{config.port}</span>
           <Button size="sm" variant="outline" className="gap-2" onClick={() => setTick((current) => current + 1)}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}
           </Button>
         </div>
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
       <div className="grid gap-4 lg:grid-cols-2">
-        <MetricChart title="CPU usage (cores)" data={cpu} series={[{ key: "cpu", label: "CPU", color: "var(--chart-1)" }]} format={cores} rangeSeconds={range.seconds} latest={last("cpu") !== undefined ? cores(last("cpu")!) : undefined} />
-        <MetricChart title="Memory used" data={memory} series={[{ key: "memory", label: "Memory", color: "var(--chart-4)" }]} format={formatBytes} rangeSeconds={range.seconds} latest={last("memory") !== undefined ? formatBytes(last("memory")!) : undefined} />
-        <MetricChart title="Network" data={network} series={[{ key: "rx", label: "Receive", color: "var(--chart-2)" }, { key: "tx", label: "Transmit", color: "var(--chart-1)" }]} format={formatRate} rangeSeconds={range.seconds} />
-        <MetricChart title="Disk" data={disk} series={[{ key: "read", label: "Read", color: "var(--chart-2)" }, { key: "write", label: "Write", color: "var(--chart-3)" }]} format={formatRate} rangeSeconds={range.seconds} />
+        <MetricChart title={t("CPU usage (cores)")} data={cpu} series={[{ key: "cpu", label: t("CPU"), color: "var(--chart-1)" }]} format={cores} rangeSeconds={range.seconds} latest={last("cpu") !== undefined ? cores(last("cpu")!) : undefined} />
+        <MetricChart title={t("Memory used")} data={memory} series={[{ key: "memory", label: t("Memory"), color: "var(--chart-4)" }]} format={formatBytes} rangeSeconds={range.seconds} latest={last("memory") !== undefined ? formatBytes(last("memory")!) : undefined} />
+        <MetricChart title={t("Network")} data={network} series={[{ key: "rx", label: t("Receive"), color: "var(--chart-2)" }, { key: "tx", label: t("Transmit"), color: "var(--chart-1)" }]} format={formatRate} rangeSeconds={range.seconds} />
+        <MetricChart title={t("Disk")} data={disk} series={[{ key: "read", label: t("Read"), color: "var(--chart-2)" }, { key: "write", label: t("Write"), color: "var(--chart-3)" }]} format={formatRate} rangeSeconds={range.seconds} />
       </div>
     </div>
   )
@@ -189,13 +189,13 @@ function LiveCharts({ namespace, name }: { namespace: string; name: string }) {
   }, [namespace, name])
 
   if (available === false) {
-    return <EmptyState icon={Activity} title="No metrics source" description="Install metrics-server for live usage, or configure Prometheus in Settings for history." />
+    return <EmptyState icon={Activity} title={t("No metrics source")} description={t("Install metrics-server for live usage, or configure Prometheus in Settings for history.")} />
   }
   const latest = samples.length ? samples[samples.length - 1] : undefined
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <MetricChart title="CPU usage (cores, live)" data={samples} series={[{ key: "cpu", label: "CPU", color: "var(--chart-1)" }]} format={cores} rangeSeconds={600} latest={latest ? cores(latest.cpu) : undefined} />
-      <MetricChart title="Memory (virt-launcher pod, live)" data={samples} series={[{ key: "memory", label: "Memory", color: "var(--chart-4)" }]} format={formatBytes} rangeSeconds={600} latest={latest ? formatBytes(latest.memory) : undefined} />
+      <MetricChart title={t("CPU usage (cores, live)")} data={samples} series={[{ key: "cpu", label: t("CPU"), color: "var(--chart-1)" }]} format={cores} rangeSeconds={600} latest={latest ? cores(latest.cpu) : undefined} />
+      <MetricChart title={t("Memory (virt-launcher pod, live)")} data={samples} series={[{ key: "memory", label: t("Memory"), color: "var(--chart-4)" }]} format={formatBytes} rangeSeconds={600} latest={latest ? formatBytes(latest.memory) : undefined} />
     </div>
   )
 }
@@ -205,10 +205,9 @@ export function VmMonitoring({ namespace, name, running }: { namespace: string; 
   if (config) return <PrometheusCharts config={config} namespace={namespace} name={name} />
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Live samples from metrics-server, kept while this page is open. <Link to="/settings" className="text-primary hover:underline">Configure Prometheus</Link> for history, network and disk charts.
+      <p className="text-xs text-muted-foreground">{t("Live samples from metrics-server, kept while this page is open.")} <Link to="/settings" className="text-primary hover:underline">{t("Configure Prometheus")}</Link> {t("for history, network and disk charts.")}
       </p>
-      {running ? <LiveCharts namespace={namespace} name={name} /> : <EmptyState icon={Activity} title="Instance is not running" />}
+      {running ? <LiveCharts namespace={namespace} name={name} /> : <EmptyState icon={Activity} title={t("Instance is not running")} />}
     </div>
   )
 }

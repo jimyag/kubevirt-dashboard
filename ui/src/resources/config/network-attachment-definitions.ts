@@ -12,8 +12,8 @@ export const networkAttachmentDefinitionsConfig: ResourceConfig = {
     kind: "NetworkAttachmentDefinition",
     createFields: [
       ...shared.namespaceNameFields("bridge-network"),
-      { name: "type", label: "CNI Type", type: "select", defaultValue: "bridge", options: [{ label: "Bridge", value: "bridge" }, { label: "Macvlan", value: "macvlan" }] },
-      { name: "bridge", label: "Bridge / Master", defaultValue: "br0" },
+      { name: "type", label: "CNI type", type: "select", defaultValue: "bridge", options: [{ label: "Bridge", value: "bridge" }, { label: "Macvlan", value: "macvlan" }] },
+      { name: "bridge", label: "Bridge / master", defaultValue: "br0" },
       { name: "vlan", label: "VLAN", defaultValue: "", placeholder: "optional" },
     ],
     buildCreateResource: (values) => {

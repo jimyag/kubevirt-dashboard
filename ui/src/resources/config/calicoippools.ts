@@ -14,7 +14,7 @@ export const calicoIPPoolsConfig: ResourceConfig = {
       ...shared.nameOnlyFields("example-pool"),
       { name: "cidr", label: "CIDR", section: "Pool", defaultValue: "10.244.0.0/16" },
       { name: "encapsulation", label: "Encapsulation", section: "Pool", type: "select", defaultValue: "VXLAN", options: [{ label: "VXLAN", value: "VXLAN" }, { label: "IPIP", value: "IPIP" }, { label: "None", value: "None" }] },
-      { name: "natOutgoing", label: "NAT Outgoing", section: "Pool", type: "checkbox", defaultValue: true },
+      { name: "natOutgoing", label: "NAT outgoing", section: "Pool", type: "checkbox", defaultValue: true },
       { name: "disabled", label: "Disabled", section: "Pool", type: "checkbox", defaultValue: false },
     ],
     buildCreateResource: (values) => ({

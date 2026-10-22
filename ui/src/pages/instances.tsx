@@ -66,6 +66,7 @@ import { engineLabel, listSecurityGroups, useSgProvider, vmSecurityGroupRefs, ty
 import { fetchInstanceUsage, formatBytes, useMetricsPoll } from "@/lib/metrics"
 import { cidrContains, ipv4Cidr, isDnsLabel, isQuantity } from "@/lib/validate"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
+import { t } from "@/lib/i18n"
 
 const VM_API = "/apis/kubevirt.io/v1"
 const SUB_API = "/apis/subresources.kubevirt.io/v1"
@@ -192,7 +193,7 @@ export function InstanceListPage() {
     try {
       const results = await Promise.allSettled(selectedVms.map((vm) => vmAction(vm, action)))
       const failed = results.flatMap((result, index) => result.status === "rejected" ? [`${selectedVms[index].metadata.name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`] : [])
-      if (failed.length) toast.error(`${action} failed for ${failed.length} of ${selectedVms.length}`, { description: failed.slice(0, 5).join("\n") })
+      if (failed.length) toast.error(t("{action} failed for {failed} of {total}", { action: t(action.charAt(0).toUpperCase() + action.slice(1)), failed: failed.length, total: selectedVms.length }), { description: failed.slice(0, 5).join("\n") })
       setSelected({})
       reload()
     } finally {
@@ -203,10 +204,10 @@ export function InstanceListPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Instances"
+        title={t("Instances")}
         actions={
           <Button asChild className="gap-1.5">
-            <Link to="/kubevirt/virtualization/virtual-machines/create"><Plus className="size-4" />Create instance</Link>
+            <Link to="/kubevirt/virtualization/virtual-machines/create"><Plus className="size-4" />{t("Create instance")}</Link>
           </Button>
         }
       />
@@ -222,24 +223,24 @@ export function InstanceListPage() {
               statusTab === tab.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            {tab.label}
+            {t(tab.label)}
             <span className="rounded-md bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{counts[tab.id]}</span>
           </button>
         ))}
       </div>
 
       <Toolbar
-        right={<FilterInput value={search} onChange={setSearch} fields={instanceFields} rows={tabRows} placeholder="Filter, e.g. web ip:10.0 host:node-1" />}
+        right={<FilterInput value={search} onChange={setSearch} fields={instanceFields} rows={tabRows} placeholder={t("Filter, e.g. web ip:10.0 host:node-1")} />}
       >
-        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />Refresh</Button>
-        <Combobox value={namespace} onChange={setNamespace} options={namespaces} placeholder="All namespaces" aria-label="Namespace" />
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
+        <Combobox value={namespace} onChange={setNamespace} options={namespaces} placeholder={t("All namespaces")} aria-label={t("Namespace")} />
         {selectedVms.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-2 py-1">
             <span className="text-sm text-muted-foreground">{selectedVms.length} selected</span>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("start")} className="gap-1.5"><Play className="size-3.5" />Start</Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("stop")} className="gap-1.5"><Square className="size-3.5" />Stop</Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("restart")} className="gap-1.5"><RotateCcw className="size-3.5" />Restart</Button>
-            <Button size="sm" variant="destructive" disabled={busy} onClick={() => setDeleting(selectedVms)} className="gap-1.5"><Trash2 className="size-3.5" />Delete</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("start")} className="gap-1.5"><Play className="size-3.5" />{t("Start")}</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("stop")} className="gap-1.5"><Square className="size-3.5" />{t("Stop")}</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => runBatch("restart")} className="gap-1.5"><RotateCcw className="size-3.5" />{t("Restart")}</Button>
+            <Button size="sm" variant="destructive" disabled={busy} onClick={() => setDeleting(selectedVms)} className="gap-1.5"><Trash2 className="size-3.5" />{t("Delete")}</Button>
           </div>
         )}
       </Toolbar>
@@ -250,10 +251,10 @@ export function InstanceListPage() {
             <thead className="bg-muted/50">
               <tr className="border-b">
                 <th className="h-9 w-10 px-3 text-left">
-                  <input type="checkbox" className="size-4 accent-primary" aria-label="Select all instances" checked={allSelected} onChange={(e) => setSelected(e.target.checked ? Object.fromEntries(rows.map((row) => [row.key, true])) : {})} />
+                  <input type="checkbox" className="size-4 accent-primary" aria-label={t("Select all instances")} checked={allSelected} onChange={(e) => setSelected(e.target.checked ? Object.fromEntries(rows.map((row) => [row.key, true])) : {})} />
                 </th>
                 {["Name", "Status", "IP address", "Spec", usage ? "Usage" : null, "Network", provider ? "Security groups" : null, "Host", "Created", ""].filter((header) => header !== null).map((header, index) => (
-                  <th key={index} className={cn("h-10 px-3 text-left text-xs font-medium text-muted-foreground", header === "Created" && "text-right")}>{header}</th>
+                  <th key={index} className={cn("h-10 px-3 text-left text-xs font-medium text-muted-foreground", header === "Created" && "text-right")}>{header && t(header)}</th>
                 ))}
               </tr>
             </thead>
@@ -265,8 +266,8 @@ export function InstanceListPage() {
                   <td colSpan={11}>
                     <EmptyState
                       icon={Cpu}
-                      title={allRows.length === 0 && !namespace ? "No instances yet" : "No matching instances"}
-                      action={allRows.length === 0 && !namespace && <Button asChild size="sm"><Link to="/kubevirt/virtualization/virtual-machines/create">Create instance</Link></Button>}
+                      title={allRows.length === 0 && !namespace ? t("No instances yet") : t("No matching instances")}
+                      action={allRows.length === 0 && !namespace && <Button asChild size="sm"><Link to="/kubevirt/virtualization/virtual-machines/create">{t("Create instance")}</Link></Button>}
                     />
                   </td>
                 </tr>
@@ -274,7 +275,7 @@ export function InstanceListPage() {
                 return (
                   <tr key={key(vm)} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                     <td className="px-3 py-2">
-                      <input type="checkbox" className="size-4 accent-primary" aria-label={`Select ${vm.metadata.name}`} checked={Boolean(selected[key(vm)])} onChange={(e) => setSelected((current) => ({ ...current, [key(vm)]: e.target.checked }))} />
+                      <input type="checkbox" className="size-4 accent-primary" aria-label={t("Select {v0}", { v0: vm.metadata.name })} checked={Boolean(selected[key(vm)])} onChange={(e) => setSelected((current) => ({ ...current, [key(vm)]: e.target.checked }))} />
                     </td>
                     <td className="px-3 py-2">
                       <Link to={vmDetailPath(vm)} className="font-medium hover:text-primary transition-colors">{vm.metadata.name}</Link>
@@ -290,7 +291,7 @@ export function InstanceListPage() {
                       <td className="px-3 py-2 text-xs tabular-nums">
                         {usage[key(vm)] ? (
                           <>
-                            <div>{usage[key(vm)].cpuCores.toFixed(2)} cores</div>
+                            <div>{t("{n} cores", { n: usage[key(vm)].cpuCores.toFixed(2) })}</div>
                             <div className="text-muted-foreground">{formatBytes(usage[key(vm)].memoryBytes)}</div>
                           </>
                         ) : <span className="text-muted-foreground">-</span>}
@@ -302,7 +303,7 @@ export function InstanceListPage() {
                       ) : (
                         <span className={cn("text-sm", network.kind === "pod" && "text-muted-foreground")}>{network.label}</span>
                       )}
-                      {profile.vpc && network.kind === "subnet" && <div className="text-xs text-muted-foreground">Kube-OVN subnet</div>}
+                      {profile.vpc && network.kind === "subnet" && <div className="text-xs text-muted-foreground">{t("Kube-OVN subnet")}</div>}
                     </td>
                     {provider && (
                       <td className="px-3 py-2">
@@ -332,10 +333,10 @@ export function InstanceListPage() {
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
-        title={deleting && deleting.length > 1 ? `Delete ${deleting.length} instances?` : `Delete instance ${deleting?.[0]?.metadata.name}?`}
-        description="The instance and the disks created with it are deleted. This cannot be undone."
+        title={deleting && deleting.length > 1 ? t("Delete {count} instances?", { count: deleting.length }) : t("Delete instance {name}?", { name: deleting?.[0]?.metadata.name })}
+        description={t("The instance and the disks created with it are deleted. This cannot be undone.")}
         destructive
-        confirmLabel="Delete"
+        confirmLabel={t("Delete")}
         onConfirm={async () => {
           const results = await Promise.allSettled((deleting || []).map(vmDelete))
           setSelected({})
@@ -357,23 +358,23 @@ export function InstanceListPage() {
 function InstanceRowMenu({ vm, running, onChanged, onDelete }: { vm: KubeObject; running: boolean; onChanged: () => void; onDelete: () => void }) {
   const navigate = useNavigate()
   const run = (action: "start" | "stop" | "restart") => vmAction(vm, action)
-    .catch((err) => toast.error(`${action} ${vm.metadata.name} failed`, { description: err instanceof Error ? err.message : String(err) }))
+    .catch((err) => toast.error(t("{action} {name} failed", { action: t(action.charAt(0).toUpperCase() + action.slice(1)), name: vm.metadata.name }), { description: err instanceof Error ? err.message : String(err) }))
     .then(onChanged)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon" variant="ghost" aria-label={`Actions for ${vm.metadata.name}`}><MoreHorizontal className="size-4" /></Button>
+        <Button size="icon" variant="ghost" aria-label={t("Actions for {v0}", { v0: vm.metadata.name })}><MoreHorizontal className="size-4" /></Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem disabled={running} onClick={() => run("start")}><Play />Start</DropdownMenuItem>
-        <DropdownMenuItem disabled={!running} onClick={() => run("stop")}><Square />Stop</DropdownMenuItem>
-        <DropdownMenuItem disabled={!running} onClick={() => run("restart")}><RotateCcw />Restart</DropdownMenuItem>
+        <DropdownMenuItem disabled={running} onClick={() => run("start")}><Play />{t("Start")}</DropdownMenuItem>
+        <DropdownMenuItem disabled={!running} onClick={() => run("stop")}><Square />{t("Stop")}</DropdownMenuItem>
+        <DropdownMenuItem disabled={!running} onClick={() => run("restart")}><RotateCcw />{t("Restart")}</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={!running} onClick={() => navigate(vmDetailPath(vm, "console"))}>Serial console</DropdownMenuItem>
-        <DropdownMenuItem disabled={!running} onClick={() => navigate(vmDetailPath(vm, "vnc"))}>VNC</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(vmDetailPath(vm, "manifest"))}>View YAML</DropdownMenuItem>
+        <DropdownMenuItem disabled={!running} onClick={() => navigate(vmDetailPath(vm, "console"))}>{t("Serial console")}</DropdownMenuItem>
+        <DropdownMenuItem disabled={!running} onClick={() => navigate(vmDetailPath(vm, "vnc"))}>{t("VNC")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate(vmDetailPath(vm, "manifest"))}>{t("View YAML")}</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onDelete}><Trash2 />Delete</DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onClick={onDelete}><Trash2 />{t("Delete")}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -500,23 +501,23 @@ export function CreateInstancePage() {
   const vm = useMemo(() => buildVirtualMachine({ ...state, sgEngine: aclProvider }, profile.vpc), [state, aclProvider, profile.vpc])
 
   const problems: Partial<Record<StepId, string>> = {}
-  if (!isDnsLabel(state.name)) problems.basics = "Name must be at most 63 lowercase letters, digits and dashes, starting and ending with a letter or digit."
-  else if (!state.namespace) problems.basics = "Choose a namespace."
-  else if (state.specMode === "instancetype" && !state.instanceType) problems.basics = "Choose an instance type."
-  else if (state.specMode === "custom" && (!Number.isInteger(state.cpu) || state.cpu < 1)) problems.basics = "vCPU must be a whole number of at least 1."
-  else if (state.specMode === "custom" && !isQuantity(state.memory)) problems.basics = "Memory must be a quantity such as 4Gi."
-  if (state.imageSource === "datasource" && !state.dataSource) problems.image = "Choose an image."
-  if (state.imageSource === "registry" && !state.registryUrl.trim()) problems.image = "Enter a registry image."
-  if (state.imageSource === "http" && !/^https?:\/\//.test(state.httpUrl)) problems.image = "Enter an http(s) URL."
-  if (state.imageSource === "containerdisk" && !state.containerDisk.trim()) problems.image = "Enter a container disk image."
-  if (state.imageSource === "pvc" && !state.pvcName) problems.image = "Choose a volume to clone."
-  if (!problems.image && state.imageSource !== "containerdisk" && !isQuantity(state.rootSize)) problems.image = "System disk size must be a quantity such as 20Gi."
-  if (!problems.image && state.dataDisks.some((size) => !isQuantity(size))) problems.image = "Data disk sizes must be quantities such as 50Gi."
-  if (profile.vpc && !state.subnet) problems.network = "Choose a subnet."
-  else if (profile.vpc && catalog.vpcs.length > 0 && !usableVpcs.some((vpc) => vpc.metadata.name === state.vpc)) problems.network = `VPC ${state.vpc} does not allow namespace ${state.namespace}.`
-  else if (profile.vpc && state.fixedIp.trim() && subnetCidr && !cidrContains(subnetCidr, state.fixedIp)) problems.network = `${state.fixedIp.trim()} is not inside ${subnetCidr}.`
-  else if (profile.vpc && state.fixedIp.trim() && state.fixedIp.trim() === str(asRecord(selectedSubnet?.spec).gateway)) problems.network = "The private IP cannot be the subnet gateway."
-  if (!state.password && !state.sshKey.trim()) problems.access = "Set a password or an SSH key so you can log in."
+  if (!isDnsLabel(state.name)) problems.basics = t("Name must be at most 63 lowercase letters, digits and dashes, starting and ending with a letter or digit.")
+  else if (!state.namespace) problems.basics = t("Choose a namespace.")
+  else if (state.specMode === "instancetype" && !state.instanceType) problems.basics = t("Choose an instance type.")
+  else if (state.specMode === "custom" && (!Number.isInteger(state.cpu) || state.cpu < 1)) problems.basics = t("vCPU must be a whole number of at least 1.")
+  else if (state.specMode === "custom" && !isQuantity(state.memory)) problems.basics = t("Memory must be a quantity such as 4Gi.")
+  if (state.imageSource === "datasource" && !state.dataSource) problems.image = t("Choose an image.")
+  if (state.imageSource === "registry" && !state.registryUrl.trim()) problems.image = t("Enter a registry image.")
+  if (state.imageSource === "http" && !/^https?:\/\//.test(state.httpUrl)) problems.image = t("Enter an http(s) URL.")
+  if (state.imageSource === "containerdisk" && !state.containerDisk.trim()) problems.image = t("Enter a container disk image.")
+  if (state.imageSource === "pvc" && !state.pvcName) problems.image = t("Choose a volume to clone.")
+  if (!problems.image && state.imageSource !== "containerdisk" && !isQuantity(state.rootSize)) problems.image = t("System disk size must be a quantity such as 20Gi.")
+  if (!problems.image && state.dataDisks.some((size) => !isQuantity(size))) problems.image = t("Data disk sizes must be quantities such as 50Gi.")
+  if (profile.vpc && !state.subnet) problems.network = t("Choose a subnet.")
+  else if (profile.vpc && catalog.vpcs.length > 0 && !usableVpcs.some((vpc) => vpc.metadata.name === state.vpc)) problems.network = t("VPC {vpc} does not allow namespace {namespace}.", { vpc: state.vpc, namespace: state.namespace })
+  else if (profile.vpc && state.fixedIp.trim() && subnetCidr && !cidrContains(subnetCidr, state.fixedIp)) problems.network = t("{ip} is not inside {cidr}.", { ip: state.fixedIp.trim(), cidr: subnetCidr })
+  else if (profile.vpc && state.fixedIp.trim() && state.fixedIp.trim() === str(asRecord(selectedSubnet?.spec).gateway)) problems.network = t("The private IP cannot be the subnet gateway.")
+  if (!state.password && !state.sshKey.trim()) problems.access = t("Set a password or an SSH key so you can log in.")
 
   const stepIndex = steps.findIndex((item) => item.id === step)
   const firstProblem = steps.find((item) => problems[item.id])
@@ -540,31 +541,31 @@ export function CreateInstancePage() {
 
   const selectedType = catalog.instanceTypes.find((type) => type.metadata.name === state.instanceType)
   const summary = [
-    { label: "Name", value: `${state.namespace}/${state.name}` },
+    { label: t("Name"), value: `${state.namespace}/${state.name}` },
     {
-      label: "Spec",
+      label: t("Spec"),
       value: state.specMode === "instancetype"
         ? `${state.instanceType || "N/A"}${selectedType ? ` (${str(asRecord(asRecord(selectedType.spec).cpu).guest)} vCPU / ${str(asRecord(asRecord(selectedType.spec).memory).guest)})` : ""}`
         : `${state.cpu} vCPU / ${state.memory}`,
     },
     {
-      label: "Image",
-      value: state.imageSource === "datasource" ? state.dataSource : state.imageSource === "registry" ? state.registryUrl : state.imageSource === "http" ? state.httpUrl : state.imageSource === "pvc" ? `Clone of ${state.pvcName}` : `${state.containerDisk} (ephemeral)`,
+      label: t("Image"),
+      value: state.imageSource === "datasource" ? state.dataSource : state.imageSource === "registry" ? state.registryUrl : state.imageSource === "http" ? state.httpUrl : state.imageSource === "pvc" ? t("Clone of {name}", { name: state.pvcName }) : `${state.containerDisk} (${t("ephemeral")})`,
     },
-    { label: "System disk", value: state.imageSource === "containerdisk" ? "Ephemeral" : `${state.rootSize} on ${state.storageClass || defaultStorageClass || "default class"}` },
-    { label: "Data disks", value: state.dataDisks.length ? state.dataDisks.join(", ") : "None" },
-    { label: "Network", value: profile.vpc ? `${state.vpc} / ${state.subnet || "N/A"}${state.fixedIp ? ` (${state.fixedIp})` : ""}` : "Pod network" },
-    { label: "Interface binding", value: state.binding },
-    { label: "Security groups", value: aclProvider ? `${state.securityGroups.join(", ") || "None"}${engines.length > 1 ? ` (${engineLabel[aclProvider]})` : ""}` : "Not available" },
-    { label: "Login", value: `${state.username || "default user"}${state.password ? " / password" : ""}${state.sshKey.trim() ? " / SSH key" : ""}` },
-    { label: "Power on", value: state.startAfterCreate ? "After creation" : "Stay stopped" },
+    { label: t("System disk"), value: state.imageSource === "containerdisk" ? "Ephemeral" : t("{size} on {storageClass}", { size: state.rootSize, storageClass: state.storageClass || defaultStorageClass || t("default class") }) },
+    { label: t("Data disks"), value: state.dataDisks.length ? state.dataDisks.join(", ") : "None" },
+    { label: t("Network"), value: profile.vpc ? `${state.vpc} / ${state.subnet || "N/A"}${state.fixedIp ? ` (${state.fixedIp})` : ""}` : "Pod network" },
+    { label: t("Interface binding"), value: state.binding },
+    { label: t("Security groups"), value: aclProvider ? `${state.securityGroups.join(", ") || t("None")}${engines.length > 1 ? ` (${engineLabel[aclProvider]})` : ""}` : t("Not available") },
+    { label: t("Login"), value: `${state.username || t("default user")}${state.password ? ` / ${t("password")}` : ""}${state.sshKey.trim() ? ` / ${t("SSH key")}` : ""}` },
+    { label: t("Power on"), value: state.startAfterCreate ? "After creation" : "Stay stopped" },
   ]
 
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: "Instances", to: "/kubevirt/virtualization/virtual-machines" }, { label: "Create" }]}
-        title="Create instance"
+        breadcrumbs={[{ label: t("Instances"), to: "/kubevirt/virtualization/virtual-machines" }, { label: t("Create") }]}
+        title={t("Create instance")}
       />
 
       <div className="grid gap-6 lg:grid-cols-[220px_1fr_300px]">
@@ -582,7 +583,7 @@ export function CreateInstancePage() {
               <span className={cn("flex size-6 items-center justify-center rounded-full border text-xs tabular-nums", step === item.id ? "border-primary" : index < stepIndex && !problems[item.id] ? "border-green-500 text-green-600 dark:text-green-400" : "")}>
                 {index < stepIndex && !problems[item.id] ? <Check className="size-3.5" /> : index + 1}
               </span>
-              {item.label}
+              {t(item.label)}
               {problems[item.id] && index < stepIndex && <span className="size-2 rounded-full bg-red-500" />}
             </button>
           ))}
@@ -591,34 +592,34 @@ export function CreateInstancePage() {
         <div className="min-w-0 space-y-4">
           {step === "basics" && (
             <>
-              <StepSection title="Instance details">
+              <StepSection title={t("Instance details")}>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <FieldRow label="Name" hint="Lowercase letters, digits and dashes."><Input value={state.name} onChange={(e) => set({ name: e.target.value.toLowerCase() })} /></FieldRow>
-                  <FieldRow label="Namespace (project)">
+                  <FieldRow label={t("Name")} hint={t("Lowercase letters, digits and dashes.")}><Input value={state.name} onChange={(e) => set({ name: e.target.value.toLowerCase() })} /></FieldRow>
+                  <FieldRow label={t("Namespace (project)")}>
                     <NativeSelect value={state.namespace} onChange={(e) => set({ namespace: e.target.value, securityGroups: [], pvcName: "" })}>
                       {Array.from(new Set([state.namespace, ...namespaces])).map((ns) => <option key={ns} value={ns}>{ns}</option>)}
                     </NativeSelect>
                   </FieldRow>
                   <div className="sm:col-span-2">
-                    <FieldRow label="Description"><Input value={state.description} onChange={(e) => set({ description: e.target.value })} placeholder="Optional" /></FieldRow>
+                    <FieldRow label={t("Description")}><Input value={state.description} onChange={(e) => set({ description: e.target.value })} placeholder={t("Optional")} /></FieldRow>
                   </div>
                 </div>
               </StepSection>
-              <StepSection title="Spec">
+              <StepSection title={t("Spec")}>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <ChoiceCard selected={state.specMode === "custom"} onClick={() => set({ specMode: "custom" })} title="Custom" description="Set vCPU and memory" />
-                  <ChoiceCard selected={state.specMode === "instancetype"} onClick={() => set({ specMode: "instancetype" })} disabled={catalog.instanceTypes.length === 0} title="Instance type" description={catalog.instanceTypes.length ? `${catalog.instanceTypes.length} cluster instance types` : "No cluster instance types found"} />
+                  <ChoiceCard selected={state.specMode === "custom"} onClick={() => set({ specMode: "custom" })} title={t("Custom")} description={t("Set vCPU and memory")} />
+                  <ChoiceCard selected={state.specMode === "instancetype"} onClick={() => set({ specMode: "instancetype" })} disabled={catalog.instanceTypes.length === 0} title={t("Instance type")} description={catalog.instanceTypes.length ? t("{count} cluster instance types", { count: catalog.instanceTypes.length }) : t("No cluster instance types found")} />
                 </div>
                 {state.specMode === "custom" ? (
                   <>
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {shapePresets.map((preset) => (
-                        <ChoiceCard key={preset.label} selected={state.cpu === preset.cpu && state.memory === preset.memory} onClick={() => set({ cpu: preset.cpu, memory: preset.memory })} title={preset.label} description={preset.hint} />
+                        <ChoiceCard key={preset.label} selected={state.cpu === preset.cpu && state.memory === preset.memory} onClick={() => set({ cpu: preset.cpu, memory: preset.memory })} title={t(preset.label)} description={t(preset.hint)} />
                       ))}
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <FieldRow label="vCPU"><Input type="number" min={1} value={state.cpu} onChange={(e) => set({ cpu: Math.max(1, Number(e.target.value) || 1) })} /></FieldRow>
-                      <FieldRow label="Memory"><Input value={state.memory} onChange={(e) => set({ memory: e.target.value })} placeholder="4Gi" /></FieldRow>
+                      <FieldRow label={t("vCPU")}><Input type="number" min={1} value={state.cpu} onChange={(e) => set({ cpu: Math.max(1, Number(e.target.value) || 1) })} /></FieldRow>
+                      <FieldRow label={t("Memory")}><Input value={state.memory} onChange={(e) => set({ memory: e.target.value })} placeholder={t("4Gi")} /></FieldRow>
                     </div>
                   </>
                 ) : (
@@ -629,7 +630,7 @@ export function CreateInstancePage() {
                         selected={state.instanceType === type.metadata.name}
                         onClick={() => set({ instanceType: type.metadata.name })}
                         title={type.metadata.name}
-                        description={`${str(asRecord(asRecord(type.spec).cpu).guest, "?")} vCPU / ${str(asRecord(asRecord(type.spec).memory).guest, "?")}`}
+                        description={t("{v0} vCPU / {v1}", { v0: str(asRecord(asRecord(type.spec).cpu).guest, "?"), v1: str(asRecord(asRecord(type.spec).memory).guest, "?") })}
                       />
                     ))}
                   </div>
@@ -640,16 +641,16 @@ export function CreateInstancePage() {
 
           {step === "image" && (
             <>
-              <StepSection title="Image">
+              <StepSection title={t("Image")}>
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                  <ChoiceCard selected={state.imageSource === "datasource"} onClick={() => set({ imageSource: "datasource" })} disabled={catalog.dataSources.length === 0} icon={ImageIcon} title="Public image" description={catalog.dataSources.length ? "Images published as DataSources" : "No DataSources found"} />
-                  <ChoiceCard selected={state.imageSource === "registry"} onClick={() => set({ imageSource: "registry" })} icon={ImageIcon} title="Registry image" description="Import a containerdisk into a persistent disk" />
-                  <ChoiceCard selected={state.imageSource === "http"} onClick={() => set({ imageSource: "http" })} icon={ImageIcon} title="Image URL" description="Import a qcow2/raw image over HTTP" />
-                  <ChoiceCard selected={state.imageSource === "pvc"} onClick={() => set({ imageSource: "pvc" })} icon={HardDrive} title="Clone a volume" description="Copy an existing disk in this namespace" />
-                  <ChoiceCard selected={state.imageSource === "containerdisk"} onClick={() => set({ imageSource: "containerdisk" })} icon={ImageIcon} title="Ephemeral" description="Boot a containerdisk; changes are lost on stop" />
+                  <ChoiceCard selected={state.imageSource === "datasource"} onClick={() => set({ imageSource: "datasource" })} disabled={catalog.dataSources.length === 0} icon={ImageIcon} title={t("Public image")} description={catalog.dataSources.length ? t("Images published as DataSources") : t("No DataSources found")} />
+                  <ChoiceCard selected={state.imageSource === "registry"} onClick={() => set({ imageSource: "registry" })} icon={ImageIcon} title={t("Registry image")} description={t("Import a containerdisk into a persistent disk")} />
+                  <ChoiceCard selected={state.imageSource === "http"} onClick={() => set({ imageSource: "http" })} icon={ImageIcon} title={t("Image URL")} description={t("Import a qcow2/raw image over HTTP")} />
+                  <ChoiceCard selected={state.imageSource === "pvc"} onClick={() => set({ imageSource: "pvc" })} icon={HardDrive} title={t("Clone a volume")} description={t("Copy an existing disk in this namespace")} />
+                  <ChoiceCard selected={state.imageSource === "containerdisk"} onClick={() => set({ imageSource: "containerdisk" })} icon={ImageIcon} title={t("Ephemeral")} description={t("Boot a containerdisk; changes are lost on stop")} />
                 </div>
                 {state.imageSource === "datasource" && (
-                  <FieldRow label="Image">
+                  <FieldRow label={t("Image")}>
                     <NativeSelect value={state.dataSource} onChange={(e) => set({ dataSource: e.target.value })}>
                       {catalog.dataSources.map((ds) => {
                         const value = `${ds.metadata.namespace}/${ds.metadata.name}`
@@ -658,24 +659,24 @@ export function CreateInstancePage() {
                     </NativeSelect>
                   </FieldRow>
                 )}
-                {state.imageSource === "registry" && <FieldRow label="Registry image" hint="For example quay.io/containerdisks/ubuntu:24.04"><Input value={state.registryUrl} onChange={(e) => set({ registryUrl: e.target.value })} /></FieldRow>}
-                {state.imageSource === "http" && <FieldRow label="Image URL"><Input value={state.httpUrl} onChange={(e) => set({ httpUrl: e.target.value })} placeholder="https://cloud-images.ubuntu.com/.../ubuntu.img" /></FieldRow>}
-                {state.imageSource === "containerdisk" && <FieldRow label="Container disk"><Input value={state.containerDisk} onChange={(e) => set({ containerDisk: e.target.value })} /></FieldRow>}
+                {state.imageSource === "registry" && <FieldRow label={t("Registry image")} hint={t("For example quay.io/containerdisks/ubuntu:24.04")}><Input value={state.registryUrl} onChange={(e) => set({ registryUrl: e.target.value })} /></FieldRow>}
+                {state.imageSource === "http" && <FieldRow label={t("Image URL")}><Input value={state.httpUrl} onChange={(e) => set({ httpUrl: e.target.value })} placeholder={t("https://cloud-images.ubuntu.com/.../ubuntu.img")} /></FieldRow>}
+                {state.imageSource === "containerdisk" && <FieldRow label={t("Container disk")}><Input value={state.containerDisk} onChange={(e) => set({ containerDisk: e.target.value })} /></FieldRow>}
                 {state.imageSource === "pvc" && (
-                  <FieldRow label="Source volume">
+                  <FieldRow label={t("Source volume")}>
                     <NativeSelect value={state.pvcName} onChange={(e) => set({ pvcName: e.target.value })}>
-                      <option value="">Select a volume</option>
+                      <option value="">{t("Select a volume")}</option>
                       {catalog.pvcs.map((pvc) => <option key={pvc.metadata.name} value={pvc.metadata.name}>{pvc.metadata.name} ({str(asRecord(asRecord(asRecord(pvc.spec).resources).requests).storage)})</option>)}
                     </NativeSelect>
                   </FieldRow>
                 )}
               </StepSection>
-              <StepSection title="Disks">
+              <StepSection title={t("Disks")}>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <FieldRow label="System disk size"><Input value={state.rootSize} disabled={state.imageSource === "containerdisk"} onChange={(e) => set({ rootSize: e.target.value })} /></FieldRow>
-                  <FieldRow label="Storage class">
+                  <FieldRow label={t("System disk size")}><Input value={state.rootSize} disabled={state.imageSource === "containerdisk"} onChange={(e) => set({ rootSize: e.target.value })} /></FieldRow>
+                  <FieldRow label={t("Storage class")}>
                     <NativeSelect value={state.storageClass} onChange={(e) => set({ storageClass: e.target.value })}>
-                      <option value="">Default{defaultStorageClass ? ` (${defaultStorageClass})` : ""}</option>
+                      <option value="">{t("Default")}{defaultStorageClass ? ` (${defaultStorageClass})` : ""}</option>
                       {catalog.storageClasses.map((sc) => <option key={sc.metadata.name} value={sc.metadata.name}>{sc.metadata.name}</option>)}
                     </NativeSelect>
                   </FieldRow>
@@ -683,12 +684,12 @@ export function CreateInstancePage() {
                 <div className="space-y-2">
                   {state.dataDisks.map((size, index) => (
                     <div key={index} className="flex items-center gap-2">
-                      <span className="w-24 text-sm text-muted-foreground">Data disk {index + 1}</span>
+                      <span className="w-24 text-sm text-muted-foreground">{t("Data disk")} {index + 1}</span>
                       <Input className="max-w-[160px]" value={size} onChange={(e) => set({ dataDisks: state.dataDisks.map((item, i) => i === index ? e.target.value : item) })} />
-                      <Button size="icon" variant="ghost" aria-label="Remove data disk" onClick={() => set({ dataDisks: state.dataDisks.filter((_, i) => i !== index) })}><Trash2 className="size-4 text-muted-foreground" /></Button>
+                      <Button size="icon" variant="ghost" aria-label={t("Remove data disk")} onClick={() => set({ dataDisks: state.dataDisks.filter((_, i) => i !== index) })}><Trash2 className="size-4 text-muted-foreground" /></Button>
                     </div>
                   ))}
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => set({ dataDisks: [...state.dataDisks, "50Gi"] })}><Plus className="size-4" />Add data disk</Button>
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => set({ dataDisks: [...state.dataDisks, "50Gi"] })}><Plus className="size-4" />{t("Add data disk")}</Button>
                 </div>
               </StepSection>
             </>
@@ -696,24 +697,24 @@ export function CreateInstancePage() {
 
           {step === "network" && (
             <>
-              <StepSection title="Network" description={profile.vpc ? "Kube-OVN" : "Pod network"}>
+              <StepSection title={t("Network")} description={profile.vpc ? t("Kube-OVN") : t("Pod network")}>
                 {profile.vpc ? (
                   <>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <FieldRow label="VPC">
+                      <FieldRow label={t("VPC")}>
                         <NativeSelect value={state.vpc} onChange={(e) => set({ vpc: e.target.value, subnet: "", fixedIp: "" })}>
                           {catalog.vpcs.map((vpc) => (
                             <option key={vpc.metadata.name} value={vpc.metadata.name} disabled={!vpcAllowsNamespace(vpc)}>
-                              {vpc.metadata.name}{vpcAllowsNamespace(vpc) ? "" : ` (not open to ${state.namespace})`}
+                              {vpc.metadata.name}{vpcAllowsNamespace(vpc) ? "" : t(" (not open to {namespace})", { namespace: state.namespace })}
                             </option>
                           ))}
                         </NativeSelect>
                       </FieldRow>
-                      <FieldRow label="Private IP" hint={subnetCidr ? `Inside ${subnetCidr}. Leave empty to allocate automatically.` : "Leave empty to allocate automatically."}><Input value={state.fixedIp} onChange={(e) => set({ fixedIp: e.target.value })} placeholder="Auto" /></FieldRow>
+                      <FieldRow label={t("Private IP")} hint={subnetCidr ? t("Inside {cidr}. Leave empty to allocate automatically.", { cidr: subnetCidr }) : t("Leave empty to allocate automatically.")}><Input value={state.fixedIp} onChange={(e) => set({ fixedIp: e.target.value })} placeholder={t("Auto")} /></FieldRow>
                     </div>
                     <div className="space-y-2">
-                      <div className="text-sm font-medium">Subnet</div>
-                      {vpcSubnets.length === 0 && <p className="text-sm text-muted-foreground">No subnets in this VPC. <Link to="/vpc/subnets" className="text-primary hover:underline">Create a subnet</Link> first.</p>}
+                      <div className="text-sm font-medium">{t("Subnet")}</div>
+                      {vpcSubnets.length === 0 && <p className="text-sm text-muted-foreground">{t("No subnets in this VPC.")} <Link to="/vpc/subnets" className="text-primary hover:underline">{t("Create a subnet")}</Link> {t("first.")}</p>}
                       <div className="grid gap-2 sm:grid-cols-2">
                         {vpcSubnets.map((subnet) => {
                           const usage = subnetUsage(subnet)
@@ -724,7 +725,7 @@ export function CreateInstancePage() {
                               selected={state.subnet === subnet.metadata.name}
                               onClick={() => set({ subnet: subnet.metadata.name, fixedIp: subnet.metadata.name === state.subnet ? state.fixedIp : "" })}
                               title={<span className="flex items-center gap-2">{subnet.metadata.name}<span className="font-mono text-xs font-normal text-muted-foreground">{str(asRecord(subnet.spec).cidrBlock)}</span></span>}
-                              description={`${Math.max(0, usage.total - usage.used)} IPs available${namespacesBound.length ? ` / bound to ${namespacesBound.join(", ")}` : ""}`}
+                              description={t("{v0} IPs available{v1}", { v0: Math.max(0, usage.total - usage.used), v1: namespacesBound.length ? t(" / bound to {namespaces}", { namespaces: namespacesBound.join(", ") }) : "" })}
                             />
                           )
                         })}
@@ -732,22 +733,22 @@ export function CreateInstancePage() {
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">The instance gets an address from the pod CIDR. {profile.kubeOvnInstalled ? "Kube-OVN is installed: switch the network stack in Settings to choose VPCs and subnets." : "Install Kube-OVN to place instances in VPCs and subnets."}</div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">{t("The instance gets an address from the pod CIDR.")} {profile.kubeOvnInstalled ? t("Kube-OVN is installed: switch the network stack in Settings to choose VPCs and subnets.") : t("Install Kube-OVN to place instances in VPCs and subnets.")}</div>
                 )}
                 <div className="space-y-2">
-                  <div className="text-sm font-medium">Interface binding</div>
+                  <div className="text-sm font-medium">{t("Interface binding")}</div>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <ChoiceCard selected={state.binding === "bridge"} onClick={() => set({ binding: "bridge" })} title="Bridge" description="Guest owns the subnet IP. No live migration." />
-                    <ChoiceCard selected={state.binding === "masquerade"} onClick={() => set({ binding: "masquerade" })} title="Masquerade" description="NAT in the pod. Supports live migration." />
+                    <ChoiceCard selected={state.binding === "bridge"} onClick={() => set({ binding: "bridge" })} title={t("Bridge")} description={t("Guest owns the subnet IP. No live migration.")} />
+                    <ChoiceCard selected={state.binding === "masquerade"} onClick={() => set({ binding: "masquerade" })} title={t("Masquerade")} description={t("NAT in the pod. Supports live migration.")} />
                   </div>
                 </div>
               </StepSection>
-              <StepSection title="Security groups" description={aclProvider === "kube-ovn" ? "Enforced by Kube-OVN port ACLs." : aclProvider === "cilium" ? `Enforced by Cilium. Groups from namespace ${state.namespace}.` : "Security groups require Kube-OVN or Cilium."}>
+              <StepSection title={t("Security groups")} description={aclProvider === "kube-ovn" ? t("Enforced by Kube-OVN port ACLs.") : aclProvider === "cilium" ? t("Enforced by Cilium. Groups from namespace {namespace}.", { namespace: state.namespace }) : t("Security groups require Kube-OVN or Cilium.")}>
                 {aclProvider ? (
                   <>
                     {engines.length > 1 && (
                       <div className="space-y-2">
-                        <div className="text-sm font-medium">Enforcement engine</div>
+                        <div className="text-sm font-medium">{t("Enforcement engine")}</div>
                         <div className="grid gap-2 sm:grid-cols-2">
                           {engines.map((engine) => (
                             <ChoiceCard
@@ -755,14 +756,14 @@ export function CreateInstancePage() {
                               selected={aclProvider === engine}
                               onClick={() => set({ sgEngine: engine, securityGroups: [] })}
                               icon={ShieldCheck}
-                              title={<span className="flex items-center gap-2">{engineLabel[engine]}{engine === defaultEngine && <Badge variant="outline">Default</Badge>}</span>}
-                              description={engine === "cilium" ? "CiliumNetworkPolicy, per namespace" : "Kube-OVN SecurityGroup, cluster wide"}
+                              title={<span className="flex items-center gap-2">{engineLabel[engine]}{engine === defaultEngine && <Badge variant="outline">{t("Default")}</Badge>}</span>}
+                              description={engine === "cilium" ? t("CiliumNetworkPolicy, per namespace") : t("Kube-OVN SecurityGroup, cluster wide")}
                             />
                           ))}
                         </div>
                       </div>
                     )}
-                    {securityGroups.length === 0 && <p className="text-sm text-muted-foreground">No security groups yet. <Link to="/vpc/security-groups" className="text-primary hover:underline">Create one</Link>, or continue without.</p>}
+                    {securityGroups.length === 0 && <p className="text-sm text-muted-foreground">{t("No security groups yet.")} <Link to="/vpc/security-groups" className="text-primary hover:underline">{t("Create one")}</Link>{t(", or continue without.")}</p>}
                     <div className="grid gap-2 sm:grid-cols-2">
                       {securityGroups.map((sg) => (
                         <ChoiceCard
@@ -770,36 +771,36 @@ export function CreateInstancePage() {
                           selected={state.securityGroups.includes(sg.name)}
                           onClick={() => set({ securityGroups: state.securityGroups.includes(sg.name) ? state.securityGroups.filter((item) => item !== sg.name) : [...state.securityGroups, sg.name] })}
                           title={sg.name}
-                          description={sg.description || `${sg.rules.filter((rule) => rule.direction === "ingress").length} inbound / ${sg.rules.filter((rule) => rule.direction === "egress").length} outbound rules`}
+                          description={sg.description || t("{inbound} inbound / {outbound} outbound rules", { inbound: sg.rules.filter((rule) => rule.direction === "ingress").length, outbound: sg.rules.filter((rule) => rule.direction === "egress").length })}
                         />
                       ))}
                     </div>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Use <Link to="/networks/kubernetes/network-policies" className="text-primary hover:underline">network policies</Link> to restrict traffic on this stack.</p>
+                  <p className="text-sm text-muted-foreground">{t("Use")} <Link to="/networks/kubernetes/network-policies" className="text-primary hover:underline">{t("network policies")}</Link> {t("to restrict traffic on this stack.")}</p>
                 )}
               </StepSection>
             </>
           )}
 
           {step === "access" && (
-            <StepSection title="Login" description="Applied by cloud-init on first boot">
+            <StepSection title={t("Login")} description={t("Applied by cloud-init on first boot")}>
               <div className="grid gap-4 sm:grid-cols-2">
-                <FieldRow label="Username"><Input value={state.username} onChange={(e) => set({ username: e.target.value })} /></FieldRow>
-                <FieldRow label="Password" hint="Stored in the VM spec as cloud-init user data."><Input type="password" value={state.password} onChange={(e) => set({ password: e.target.value })} autoComplete="new-password" /></FieldRow>
+                <FieldRow label={t("Username")}><Input value={state.username} onChange={(e) => set({ username: e.target.value })} /></FieldRow>
+                <FieldRow label={t("Password")} hint={t("Stored in the VM spec as cloud-init user data.")}><Input type="password" value={state.password} onChange={(e) => set({ password: e.target.value })} autoComplete="new-password" /></FieldRow>
               </div>
-              <FieldRow label="SSH public keys" hint="One key per line.">
+              <FieldRow label={t("SSH public keys")} hint={t("One key per line.")}>
                 <textarea
                   value={state.sshKey}
                   onChange={(e) => set({ sshKey: e.target.value })}
-                  placeholder="ssh-ed25519 AAAA... user@host"
+                  placeholder={t("ssh-ed25519 AAAA... user@host")}
                   className="min-h-28 rounded-lg border bg-background px-3 py-2 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </FieldRow>
               <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
                 <div>
-                  <div className="text-sm font-medium">Start after creation</div>
-                  <div className="text-xs text-muted-foreground">Power on as soon as disks are ready.</div>
+                  <div className="text-sm font-medium">{t("Start after creation")}</div>
+                  <div className="text-xs text-muted-foreground">{t("Power on as soon as disks are ready.")}</div>
                 </div>
                 <Switch checked={state.startAfterCreate} onCheckedChange={(checked) => set({ startAfterCreate: checked })} />
               </label>
@@ -808,10 +809,10 @@ export function CreateInstancePage() {
 
           {step === "review" && (
             <>
-              <StepSection title="Review">
+              <StepSection title={t("Review")}>
                 <KeyValueGrid items={summary} />
               </StepSection>
-              <StepSection title="Manifest">
+              <StepSection title={t("Manifest")}>
                 <pre className="max-h-[480px] overflow-auto rounded-lg bg-muted/30 p-4 font-mono text-xs text-foreground whitespace-pre">{YAML.dump(vm, { noRefs: true, lineWidth: 120 })}</pre>
               </StepSection>
             </>
@@ -822,25 +823,25 @@ export function CreateInstancePage() {
           )}
 
           <div className="flex items-center justify-between gap-2">
-            <Button variant="outline" onClick={() => stepIndex > 0 ? setStep(steps[stepIndex - 1].id) : navigate(-1)}>{stepIndex > 0 ? "Previous" : "Cancel"}</Button>
+            <Button variant="outline" onClick={() => stepIndex > 0 ? setStep(steps[stepIndex - 1].id) : navigate(-1)}>{stepIndex > 0 ? t("Previous") : t("Cancel")}</Button>
             {step !== "review" ? (
-              <Button onClick={() => setStep(steps[stepIndex + 1].id)}>Next: {steps[stepIndex + 1].label}</Button>
+              <Button onClick={() => setStep(steps[stepIndex + 1].id)}>{t("Next: {step}", { step: t(steps[stepIndex + 1].label) })}</Button>
             ) : (
-              <Button onClick={create} disabled={creating}>{creating ? "Creating..." : "Create instance"}</Button>
+              <Button onClick={create} disabled={creating}>{creating ? t("Creating...") : t("Create instance")}</Button>
             )}
           </div>
         </div>
 
         <aside className="hidden lg:block">
-          <Panel title="Summary" className="sticky top-20" bodyClassName="space-y-3 text-sm">
+          <Panel title={t("Summary")} className="sticky top-20" bodyClassName="space-y-3 text-sm">
               {summary.slice(0, 8).map((item) => (
                 <div key={item.label} className="flex flex-col gap-0.5">
-                  <span className="text-xs text-muted-foreground">{item.label}</span>
+                  <span className="text-xs text-muted-foreground">{t(item.label)}</span>
                   <span className="break-all font-medium">{item.value}</span>
                 </div>
               ))}
               {firstProblem && <div className="rounded-lg bg-muted/50 p-2 text-xs text-muted-foreground">{problems[firstProblem.id]}</div>}
-              <Button className="w-full" onClick={create} disabled={creating}>{creating ? "Creating..." : "Create instance"}</Button>
+              <Button className="w-full" onClick={create} disabled={creating}>{creating ? t("Creating...") : t("Create instance")}</Button>
             </Panel>
         </aside>
       </div>

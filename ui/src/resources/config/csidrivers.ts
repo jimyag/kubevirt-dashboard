@@ -14,12 +14,12 @@ export const csidriversConfig: ResourceConfig = {
     kind: "CSIDriver",
     createFields: [
       ...shared.nameOnlyFields("example.csi.io"),
-      { name: "attachRequired", label: "Attach Required", section: "Capabilities", type: "checkbox", defaultValue: true },
-      { name: "podInfoOnMount", label: "Pod Info On Mount", section: "Capabilities", type: "checkbox", defaultValue: false },
-      { name: "storageCapacity", label: "Storage Capacity", section: "Capabilities", type: "checkbox", defaultValue: false },
-      { name: "requiresRepublish", label: "Requires Republish", section: "Capabilities", type: "checkbox", defaultValue: false },
-      { name: "fsGroupPolicy", label: "FS Group Policy", section: "Policy", type: "select", defaultValue: "ReadWriteOnceWithFSType", options: [{ label: "ReadWriteOnceWithFSType", value: "ReadWriteOnceWithFSType" }, { label: "File", value: "File" }, { label: "None", value: "None" }] },
-      { name: "volumeLifecycleModes", label: "Volume Lifecycle Modes", section: "Capabilities", defaultValue: "Persistent", placeholder: "Persistent,Ephemeral" },
+      { name: "attachRequired", label: "Attach required", section: "Capabilities", type: "checkbox", defaultValue: true },
+      { name: "podInfoOnMount", label: "Pod info on mount", section: "Capabilities", type: "checkbox", defaultValue: false },
+      { name: "storageCapacity", label: "Storage capacity", section: "Capabilities", type: "checkbox", defaultValue: false },
+      { name: "requiresRepublish", label: "Requires republish", section: "Capabilities", type: "checkbox", defaultValue: false },
+      { name: "fsGroupPolicy", label: "FS group policy", section: "Policy", type: "select", defaultValue: "ReadWriteOnceWithFSType", options: [{ label: "ReadWriteOnceWithFSType", value: "ReadWriteOnceWithFSType" }, { label: "File", value: "File" }, { label: "None", value: "None" }] },
+      { name: "volumeLifecycleModes", label: "Volume lifecycle modes", section: "Capabilities", defaultValue: "Persistent", placeholder: "Persistent,Ephemeral" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "storage.k8s.io/v1",
@@ -39,7 +39,7 @@ export const csidriversConfig: ResourceConfig = {
     extraColumns: [
       { label: "Attach", value: (r) => String(shared.getRecord(r.spec).attachRequired ?? "N/A") },
       { label: "Capacity", value: (r) => String(shared.getRecord(r.spec).storageCapacity ?? "N/A") },
-      { label: "FS Group", value: (r) => String(shared.getRecord(r.spec).fsGroupPolicy || "N/A") },
+      { label: "FS group", value: (r) => String(shared.getRecord(r.spec).fsGroupPolicy || "N/A") },
     ],
     createTemplate: `apiVersion: storage.k8s.io/v1
 kind: CSIDriver

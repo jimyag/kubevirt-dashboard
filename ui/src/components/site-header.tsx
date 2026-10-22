@@ -14,7 +14,9 @@ import {
 import { getContext, setContext } from "@/lib/kube"
 import { findActiveNav, toneClasses } from "@/lib/navigation"
 import { CommandPalette } from "./command-palette"
+import { LanguageToggle } from "./language-toggle"
 import { ModeToggle } from "./mode-toggle"
+import { t } from "@/lib/i18n"
 
 function ClusterSwitcher() {
   const [contexts, setContexts] = useState<string[]>([])
@@ -41,9 +43,9 @@ function ClusterSwitcher() {
 
   return (
     <Select value={current} onValueChange={change} disabled={contexts.length === 0}>
-      <SelectTrigger size="sm" className="h-8 max-w-[220px] gap-2 bg-background text-xs font-medium shadow-none" aria-label="Cluster">
+      <SelectTrigger size="sm" className="h-8 max-w-[220px] gap-2 bg-background text-xs font-medium shadow-none" aria-label={t("Cluster")}>
         <Server className="h-3.5 w-3.5 text-muted-foreground" />
-        <SelectValue placeholder="Cluster" />
+        <SelectValue placeholder={t("Cluster")} />
       </SelectTrigger>
       <SelectContent align="start" className="max-h-72">
         {contexts.map((c) => (
@@ -58,7 +60,7 @@ function Breadcrumbs() {
   const location = useLocation()
   const active = findActiveNav(location.pathname)
   if (!active) return null
-  const crumbs = active.section.label === "Home" ? [active.item.name] : [active.section.label, active.item.name]
+  const crumbs = active.section.label === "Home" ? [t(active.item.name)] : [t(active.section.label), t(active.item.name)]
   return (
     <nav className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
       {crumbs.map((crumb, index) => (
@@ -86,6 +88,7 @@ export function SiteHeader() {
         <div className="ml-auto flex items-center gap-2">
           <CommandPalette />
           <ClusterSwitcher />
+          <LanguageToggle />
           <ModeToggle />
         </div>
       </div>

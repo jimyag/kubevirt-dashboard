@@ -49,6 +49,7 @@ import {
 import { RelatedPodsCard, type PodSummary } from "@/components/pod-access"
 import { EventList } from "@/components/events"
 import { eventsUrl } from "@/lib/events"
+import { t } from "@/lib/i18n"
 
 type KubeResource = {
   apiVersion?: string
@@ -240,20 +241,51 @@ const asRecordList = (value: unknown) => Array.isArray(value) ? value.filter(isR
 const joinList = (value: unknown) => Array.isArray(value) ? value.map(compactValue).join(", ") : compactValue(value)
 const objectLabels = (value: unknown) => Object.entries(asRecord(value)).map(([key, next]) => `${key}=${compactValue(next)}`)
 const resourceKeys = (value: Record<string, unknown>) => Object.keys(value).filter((key) => key !== "name" && hasRenderableValue(value[key]))
-const hasRenderableValue = (value: unknown) => !(value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0))
+/** False for empty values, including objects and lists that only hold empty values (e.g. status.loadBalancer: {}). */
+const hasRenderableValue = (value: unknown): boolean => {
+  if (value === undefined || value === null || value === "") return false
+  if (Array.isArray(value)) return value.some(hasRenderableValue)
+  if (isRecordValue(value)) return Object.values(value).some(hasRenderableValue)
+  return true
+}
+
+const keyAcronyms: Record<string, string> = Object.fromEntries(
+  ["IP", "IPs", "VPC", "CIDR", "NAT", "EIP", "FIP", "QoS", "MAC", "DNS", "ID", "URL", "API", "CPU", "LAN", "TLS", "UID", "VLAN", "BGP", "ASN", "MTU", "OVN", "ACL", "ACLs", "PVC", "VM", "VMI"].map((word) => [word.toLowerCase(), word]),
+)
+
+/** "targetPort" -> "Target port", "podIPs" -> "Pod IPs", "lanIp" -> "LAN IP". */
+const humanizeKey = (key: string) => {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+  return words.map((word, index) => {
+    const acronym = keyAcronyms[word.toLowerCase()]
+    if (acronym) return acronym
+    if (/[A-Z].*[A-Z]|^[A-Z]{2,}/.test(word)) return word
+    return index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word.toLowerCase()
+  }).join(" ")
+}
+
+const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
+
+/** Annotations that only repeat the manifest; shown in the Manifest tab instead. */
+const hiddenAnnotations = new Set(["kubectl.kubernetes.io/last-applied-configuration"])
 
 function CompactKvTable({ rows }: { rows: Array<{ label: string; value: unknown }> }) {
   const visible = rows.filter((row) => hasRenderableValue(row.value))
-  if (visible.length === 0) return <span className="text-sm text-muted-foreground">None</span>
+  if (visible.length === 0) return <span className="text-sm text-muted-foreground">{t("None")}</span>
   return (
     <div className="overflow-hidden rounded-lg border">
       <Table>
         <TableBody>
           {visible.map((row) => (
             <TableRow key={row.label} className="hover:bg-muted/50">
-              <TableCell className="w-44 py-2 text-xs font-medium text-muted-foreground">{row.label}</TableCell>
-              <TableCell className="min-w-0 py-2 text-sm text-foreground">
-                {isPrimitiveDetailValue(row.value) ? compactValue(row.value) : <DetailValue value={row.value} depth={2} />}
+              <TableCell className="w-40 py-2 align-top text-xs text-muted-foreground">{/^[a-z][a-z0-9]*[A-Z]/.test(row.label) ? humanizeKey(row.label) : row.label}</TableCell>
+              <TableCell className="min-w-0 py-2 text-sm whitespace-normal text-foreground">
+                <DetailValue value={row.value} depth={2} />
               </TableCell>
             </TableRow>
           ))}
@@ -264,11 +296,11 @@ function CompactKvTable({ rows }: { rows: Array<{ label: string; value: unknown 
 }
 
 function ChipList({ values }: { values: unknown[] }) {
-  if (values.length === 0) return <span className="text-sm text-muted-foreground">None</span>
+  if (values.length === 0) return <span className="text-sm text-muted-foreground">-</span>
   return (
     <div className="flex min-w-0 flex-wrap gap-1.5">
       {values.slice(0, 20).map((item, index) => (
-        <span key={`${compactValue(item)}-${index}`} className="min-w-0 max-w-full break-words rounded-md border bg-muted px-2 py-1 text-xs text-foreground">
+        <span key={`${compactValue(item)}-${index}`} className="min-w-0 max-w-full break-all rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-xs text-foreground">
           {compactValue(item)}
         </span>
       ))}
@@ -278,19 +310,19 @@ function ChipList({ values }: { values: unknown[] }) {
 }
 
 function DetailContainerTable({ containers, statuses }: { containers: Record<string, unknown>[]; statuses?: Record<string, unknown>[] }) {
-  if (containers.length === 0) return <span className="text-sm text-muted-foreground">No containers</span>
+  if (containers.length === 0) return <span className="text-sm text-muted-foreground">{t("No containers")}</span>
   return (
     <div className="overflow-x-auto rounded-lg border">
       <Table className="min-w-[880px]">
         <TableHeader className="bg-muted/60">
           <TableRow>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Name</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Image</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Ready</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Restarts</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Ports</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Resources</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Args</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Image")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Ready")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Restarts")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Ports")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Resources")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Args")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -307,13 +339,13 @@ function DetailContainerTable({ containers, statuses }: { containers: Record<str
                 <TableCell><Badge variant={status.ready ? "success" : "outline"}>{compactValue(status.ready)}</Badge></TableCell>
                 <TableCell className="tabular-nums">{compactValue(status.restartCount ?? 0)}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">
-                  {ports.length ? ports.map((port) => `${compactValue(port.containerPort || port.port)}/${compactValue(port.protocol || "TCP")}`).join(", ") : "None"}
+                  {ports.length ? ports.map((port) => `${compactValue(port.containerPort || port.port)}/${compactValue(port.protocol || "TCP")}`).join(", ") : t("None")}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
-                  {[Object.keys(requests).length ? `req ${objectLabels(requests).join(", ")}` : "", Object.keys(limits).length ? `lim ${objectLabels(limits).join(", ")}` : ""].filter(Boolean).join(" / ") || "None"}
+                  {[Object.keys(requests).length ? `req ${objectLabels(requests).join(", ")}` : "", Object.keys(limits).length ? `lim ${objectLabels(limits).join(", ")}` : ""].filter(Boolean).join(" / ") || t("None")}
                 </TableCell>
                 <TableCell className="max-w-[280px] text-xs text-muted-foreground">
-                  <div className="line-clamp-3 break-words">{joinList(container.args) || joinList(container.command) || "None"}</div>
+                  <div className="line-clamp-3 break-words">{joinList(container.args) || joinList(container.command) || t("None")}</div>
                 </TableCell>
               </TableRow>
             )
@@ -325,15 +357,15 @@ function DetailContainerTable({ containers, statuses }: { containers: Record<str
 }
 
 function DetailVolumeTable({ volumes }: { volumes: Record<string, unknown>[] }) {
-  if (volumes.length === 0) return <span className="text-sm text-muted-foreground">No volumes</span>
+  if (volumes.length === 0) return <span className="text-sm text-muted-foreground">{t("No volumes")}</span>
   return (
     <div className="overflow-x-auto rounded-lg border">
       <Table className="min-w-[720px]">
         <TableHeader className="bg-muted/60">
           <TableRow>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Name</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Type</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">Source</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Type")}</TableHead>
+            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Source")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -360,15 +392,15 @@ function DetailSimpleObjectTable({ rows }: { rows: Record<string, unknown>[] }) 
   const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row).filter((key) => isPrimitiveDetailValue(row[key]))))).slice(0, 6)
   if (keys.length === 0) return <ChipList values={rows.map((row, index) => detailObjectTitle(row, `Item ${index + 1}`))} />
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <Table className="min-w-[640px]">
-        <TableHeader className="bg-muted/60">
-          <TableRow>{keys.map((key) => <TableHead key={key} className="text-xs">{key}</TableHead>)}</TableRow>
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader className="bg-muted/50">
+          <TableRow>{keys.map((key) => <TableHead key={key} className="h-8 text-xs font-medium text-muted-foreground">{humanizeKey(key)}</TableHead>)}</TableRow>
         </TableHeader>
         <TableBody>
           {rows.slice(0, 12).map((row, index) => (
-            <TableRow key={index} className="hover:bg-muted/50">
-              {keys.map((key) => <TableCell key={key} className="max-w-[220px] break-words text-xs">{compactValue(row[key])}</TableCell>)}
+            <TableRow key={index} className="hover:bg-muted/40">
+              {keys.map((key) => <TableCell key={key} className="max-w-[260px] py-1.5 text-xs whitespace-normal break-words">{hasRenderableValue(row[key]) ? compactValue(row[key]) : <span className="text-muted-foreground">-</span>}</TableCell>)}
             </TableRow>
           ))}
         </TableBody>
@@ -379,8 +411,10 @@ function DetailSimpleObjectTable({ rows }: { rows: Record<string, unknown>[] }) 
 }
 
 function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  if (!hasRenderableValue(value)) return <span className="text-muted-foreground">-</span>
   if (isPrimitiveDetailValue(value)) {
-    return <span>{compactValue(value)}</span>
+    if (typeof value === "string" && isoTimestamp.test(value)) return <span title={value}>{relativeTime(value)}</span>
+    return <span className="break-words">{compactValue(value)}</span>
   }
 
   if (depth > 4) {
@@ -392,7 +426,7 @@ function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   }
 
   if (Array.isArray(value)) {
-    if (value.length === 0) return <span>None</span>
+    if (value.length === 0) return <span>{t("None")}</span>
 
     const conditionLike = value.every((item) => isRecordValue(item) && "type" in item)
     if (conditionLike) {
@@ -439,20 +473,11 @@ function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
             const record = item as Record<string, unknown>
             const entries = Object.entries(record)
             return (
-              <div key={index} className="min-w-0 max-w-full rounded-lg border bg-muted/30 px-3 py-2">
-                <div className="mb-2 min-w-0 break-words text-xs font-semibold text-foreground">
+              <div key={index} className="min-w-0 max-w-full rounded-md border px-3 py-2">
+                <div className="mb-1.5 min-w-0 break-words text-sm font-medium text-foreground">
                   {detailObjectTitle(record, `Item ${index + 1}`)}
                 </div>
-                <div className="grid min-w-0 gap-1.5">
-                  {entries.map(([key, nextValue]) => (
-                    <div key={key} className="grid min-w-0 gap-1 rounded-md border bg-background/40 px-2 py-1.5">
-                      <span className="min-w-0 break-all text-xs text-muted-foreground">{key}</span>
-                      <div className="min-w-0 break-words text-xs text-foreground">
-                        <DetailValue value={nextValue} depth={depth + 1} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <DetailValue value={Object.fromEntries(entries.filter(([key]) => key !== "name"))} depth={depth + 1} />
               </div>
             )
           })}
@@ -473,29 +498,32 @@ function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
     )
   }
 
-  const entries = Object.entries(value as Record<string, unknown>)
-  if (entries.length === 0) return <span>None</span>
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, nextValue]) => hasRenderableValue(nextValue))
+  // Flat objects read best as key=value chips (selectors, labels, resource lists).
+  if (entries.every(([, nextValue]) => isPrimitiveDetailValue(nextValue))) {
+    return <ChipList values={entries.map(([key, nextValue]) => `${key}=${compactValue(nextValue)}`)} />
+  }
 
   return (
-    <div className="grid min-w-0 max-w-full gap-1.5">
+    <dl className="grid min-w-0 max-w-full gap-x-4 gap-y-1.5 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
       {entries.map(([key, nextValue]) => (
-        <div key={key} className="grid min-w-0 max-w-full gap-1 rounded-md border bg-muted/30 px-2 py-1.5">
-          <span className="min-w-0 break-all text-xs text-muted-foreground">{key}</span>
-          <div className="min-w-0 break-words text-xs text-foreground">
+        <div key={key} className="contents">
+          <dt className="min-w-0 break-words text-xs text-muted-foreground">{humanizeKey(key)}</dt>
+          <dd className="min-w-0 break-words text-xs text-foreground">
             <DetailValue value={nextValue} depth={depth + 1} />
-          </div>
+          </dd>
         </div>
       ))}
-    </div>
+    </dl>
   )
 }
 
 function DetailTabs({ config, namespace, name, active }: { config: ResourceConfig; namespace?: string; name?: string; active: "overview" | "events" | "manifest" }) {
   const scopedNamespace = namespace || "_cluster"
   const tabs = [
-    { id: "overview", label: "Overview", to: `${config.path}/${scopedNamespace}/${name}` },
-    { id: "events", label: "Events", to: `${config.path}/${scopedNamespace}/${name}/events` },
-    { id: "manifest", label: "Manifest", to: `${config.path}/${scopedNamespace}/${name}/manifest` },
+    { id: "overview", label: t("Overview"), to: `${config.path}/${scopedNamespace}/${name}` },
+    { id: "events", label: t("Events"), to: `${config.path}/${scopedNamespace}/${name}/events` },
+    { id: "manifest", label: t("Manifest"), to: `${config.path}/${scopedNamespace}/${name}/manifest` },
   ] as const
 
   return (
@@ -520,16 +548,16 @@ function DetailTabs({ config, namespace, name, active }: { config: ResourceConfi
 
 const defaultDetailSections = (resource: KubeResource): DetailSection[] => [
   {
-    title: "Metadata",
+    title: t("Metadata"),
     items: [
-      { label: "Name", value: resource.metadata.name },
-      { label: "Namespace", value: resource.metadata.namespace || "cluster scoped" },
-      { label: "Created", value: resource.metadata.creationTimestamp },
-      { label: "UID", value: resource.metadata.uid },
+      { label: t("Name"), value: resource.metadata.name },
+      { label: t("Namespace"), value: resource.metadata.namespace || "cluster scoped" },
+      { label: t("Created"), value: resource.metadata.creationTimestamp },
+      { label: t("UID"), value: resource.metadata.uid },
     ],
   },
   {
-    title: "Status",
+    title: t("Status"),
     items: Object.entries(resource.status || {})
       .filter(([, value]) => isPrimitiveDetailValue(value) || (Array.isArray(value) && value.every((item) => item && typeof item === "object" && "type" in (item as Record<string, unknown>))))
       .slice(0, 8)
@@ -566,22 +594,22 @@ const relatedPodsForResource = (resource: KubeResource) => {
   const name = resource.metadata.name
 
   if (kind === "Pod") {
-    return { namespace, podName: name, pods: [podLikeResource(resource)], title: "Pod Access" }
+    return { namespace, podName: name, pods: [podLikeResource(resource)], title: t("Pod Access") }
   }
 
   const selector = selectorFromMatchLabels(getValue(resource, ["spec", "selector", "matchLabels"]))
   if (selector && ["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job"].includes(kind)) {
-    return { namespace, selector, title: "Managed Pods" }
+    return { namespace, selector, title: t("Managed Pods") }
   }
 
   const serviceSelector = selectorFromMatchLabels((spec as Record<string, unknown>).selector)
   if (kind === "Service" && serviceSelector) {
-    return { namespace, selector: serviceSelector, title: "Service Pods" }
+    return { namespace, selector: serviceSelector, title: t("Service Pods") }
   }
 
   const podSelector = selectorFromMatchLabels(getValue(resource, ["spec", "podSelector", "matchLabels"]))
   if (kind === "NetworkPolicy" && podSelector) {
-    return { namespace, selector: podSelector, title: "Selected Pods" }
+    return { namespace, selector: podSelector, title: t("Selected Pods") }
   }
 
   if (["VirtualMachine", "VirtualMachineInstance"].includes(kind)) {
@@ -594,13 +622,13 @@ const relatedPodsForResource = (resource: KubeResource) => {
     return {
       namespace,
       selectors,
-      title: "Virtual Machine Pods",
+      title: t("Virtual Machine Pods"),
     }
   }
 
   const templateLabels = selectorFromMatchLabels(getValue(resource, ["spec", "template", "metadata", "labels"]))
   if (templateLabels && ["VirtualMachinePool", "VirtualMachineInstanceReplicaSet"].includes(kind)) {
-    return { namespace, selector: templateLabels, title: "Managed Pods" }
+    return { namespace, selector: templateLabels, title: t("Managed Pods") }
   }
 
   return undefined
@@ -622,11 +650,11 @@ const fieldKey = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "
 
 /** Filterable fields of a generic resource list: the columns shown plus labels. */
 const resourceFilterFields = (config: ResourceConfig): FilterField<KubeResource>[] => [
-  { key: "name", label: "Name", value: (r) => r.metadata.name },
-  ...(config.namespaced ? [{ key: "namespace", label: "Namespace", aliases: ["ns"], value: (r: KubeResource) => r.metadata.namespace }] : []),
-  { key: "status", label: "Status", value: (r) => resourceStatusText(r, config) },
+  { key: "name", label: t("Name"), value: (r) => r.metadata.name },
+  ...(config.namespaced ? [{ key: "namespace", label: t("Namespace"), aliases: ["ns"], value: (r: KubeResource) => r.metadata.namespace }] : []),
+  { key: "status", label: t("Status"), value: (r) => resourceStatusText(r, config) },
   ...(config.extraColumns || []).map((column) => ({ key: fieldKey(column.label), label: column.label, value: (r: KubeResource) => column.value(r) })),
-  { key: "label", label: "Labels", value: (r) => Object.entries(r.metadata.labels || {}).map(([key, value]) => `${key}=${value}`) },
+  { key: "label", label: t("Labels"), value: (r) => Object.entries(r.metadata.labels || {}).map(([key, value]) => `${key}=${value}`) },
 ]
 
 function PodDetailOverview({ resource }: { resource: KubeResource }) {
@@ -644,19 +672,19 @@ function PodDetailOverview({ resource }: { resource: KubeResource }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Phase" value={status.phase} variant={String(status.phase || "")} />
-        <SummaryCard label="Pod IP" value={status.podIP} />
-        <SummaryCard label="Node" value={spec.nodeName} />
-        <SummaryCard label="QoS" value={status.qosClass} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Phase")} value={status.phase} variant={String(status.phase || "")} />
+        <SummaryCard label={t("Pod IP")} value={status.podIP} />
+        <SummaryCard label={t("Node")} value={spec.nodeName} />
+        <SummaryCard label={t("QoS")} value={status.qosClass} />
+      </SummaryRow>
 
-      <SectionCard title="Containers">
+      <SectionCard title={t("Containers")}>
 <div className="space-y-4">
           <DetailContainerTable containers={containers} statuses={containerStatuses} />
           {initContainers.length > 0 && (
             <div className="space-y-2">
-              <div className="text-xs font-medium text-muted-foreground">Init Containers</div>
+              <div className="text-xs font-medium text-muted-foreground">{t("Init Containers")}</div>
               <DetailContainerTable containers={initContainers} statuses={initContainerStatuses} />
             </div>
           )}
@@ -664,58 +692,62 @@ function PodDetailOverview({ resource }: { resource: KubeResource }) {
 </SectionCard>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Scheduling">
-            <CompactKvTable rows={[
-              { label: "Service Account", value: spec.serviceAccountName },
-              { label: "Restart Policy", value: spec.restartPolicy },
-              { label: "Priority Class", value: spec.priorityClassName },
-              { label: "Priority", value: spec.priority },
-              { label: "Runtime Class", value: spec.runtimeClassName },
-              { label: "Node Selector", value: nodeSelector },
-              { label: "Tolerations", value: tolerations },
-              { label: "Start Time", value: status.startTime },
+        <KvSection title={t("Scheduling")} rows={[
+              { label: t("Service account"), value: spec.serviceAccountName },
+              { label: t("Restart policy"), value: spec.restartPolicy },
+              { label: t("Priority class"), value: spec.priorityClassName },
+              { label: t("Priority"), value: spec.priority },
+              { label: t("Runtime class"), value: spec.runtimeClassName },
+              { label: t("Node selector"), value: nodeSelector },
+              { label: t("Tolerations"), value: tolerations },
+              { label: t("Start time"), value: status.startTime },
             ]} />
-          </SectionCard>
 
-        <SectionCard title="Networking">
-            <CompactKvTable rows={[
-              { label: "Host IP", value: status.hostIP },
-              { label: "Pod IPs", value: podIPs },
-              { label: "DNS Policy", value: spec.dnsPolicy },
-              { label: "Host Network", value: spec.hostNetwork },
-              { label: "Host PID", value: spec.hostPID },
-              { label: "Host IPC", value: spec.hostIPC },
+        <KvSection title={t("Networking")} rows={[
+              { label: t("Host IP"), value: status.hostIP },
+              { label: t("Pod IPs"), value: podIPs },
+              { label: t("DNS policy"), value: spec.dnsPolicy },
+              { label: t("Host network"), value: spec.hostNetwork },
+              { label: t("Host PID"), value: spec.hostPID },
+              { label: t("Host IPC"), value: spec.hostIPC },
             ]} />
-          </SectionCard>
       </div>
 
-      <SectionCard title="Volumes">
+      <SectionCard title={t("Volumes")}>
           <DetailVolumeTable volumes={volumes} />
         </SectionCard>
 
-      <SectionCard title="Conditions">
-          <DetailValue value={conditions} />
-        </SectionCard>
+      <ValueSection title={t("Conditions")} value={conditions} />
     </div>
   )
 }
 
+/** One fact in a SummaryRow; empty facts are skipped since the full spec is one tab away. */
 function SummaryCard({ label, value, variant }: { label: string; value: unknown; variant?: string }) {
-  // Empty facts are noise in a summary row; the full spec is one tab away.
-  if (!variant && compactValue(value) === "N/A") return null
+  if (!variant && (!hasRenderableValue(value) || compactValue(value) === "N/A")) return null
   return (
-    <div className="min-w-0 rounded-md border bg-card px-3 py-2.5">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 break-words text-sm font-medium">
-        {variant ? <StatusDot status={variant} label={compactValue(value)} /> : compactValue(value)}
-      </div>
+    <div className="min-w-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 min-w-0 break-words text-sm font-medium">
+        {variant ? <StatusDot status={variant} label={compactValue(value)} /> : <DetailValue value={value} />}
+      </dd>
     </div>
+  )
+}
+
+/** Key facts of a resource in one card, instead of a row of small cards. */
+function SummaryRow({ children }: { children: ReactNode }) {
+  return (
+    <dl className="grid gap-x-8 gap-y-4 rounded-lg border bg-card px-4 py-3.5 sm:grid-cols-2 xl:grid-cols-4">
+      {children}
+    </dl>
   )
 }
 
 function SectionCard({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <section className="min-w-0 rounded-lg border bg-card">
+    // In a two-column grid, a section left alone on its row takes the full width.
+    <section className="min-w-0 rounded-lg border bg-card xl:last:odd:col-span-2">
       <header className="border-b px-4 py-2.5">
         <h2 className="text-sm font-semibold">{title}</h2>
         {description && <p className="text-xs text-muted-foreground">{description}</p>}
@@ -723,6 +755,18 @@ function SectionCard({ title, description, children }: { title: string; descript
       <div className="p-4">{children}</div>
     </section>
   )
+}
+
+/** Section with key/value rows; hidden when every row is empty. */
+function KvSection({ title, description, rows }: { title: string; description?: string; rows: Array<{ label: string; value: unknown }> }) {
+  if (!rows.some((row) => hasRenderableValue(row.value))) return null
+  return <SectionCard title={title} description={description}><CompactKvTable rows={rows} /></SectionCard>
+}
+
+/** Section showing one structured value; hidden when the value is empty. */
+function ValueSection({ title, description, value }: { title: string; description?: string; value: unknown }) {
+  if (!hasRenderableValue(value)) return null
+  return <SectionCard title={title} description={description}><DetailValue value={value} /></SectionCard>
 }
 
 function WorkloadDetailOverview({ resource }: { resource: KubeResource }) {
@@ -736,41 +780,93 @@ function WorkloadDetailOverview({ resource }: { resource: KubeResource }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <SummaryCard label="Replicas" value={status.replicas ?? spec.replicas} />
-        <SummaryCard label="Ready" value={status.readyReplicas} />
-        <SummaryCard label="Available" value={status.availableReplicas} />
-        <SummaryCard label="Updated" value={status.updatedReplicas} />
-        <SummaryCard label="Unavailable" value={status.unavailableReplicas} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Replicas")} value={status.replicas ?? spec.replicas} />
+        <SummaryCard label={t("Ready")} value={status.readyReplicas} />
+        <SummaryCard label={t("Available")} value={status.availableReplicas} />
+        <SummaryCard label={t("Updated")} value={status.updatedReplicas} />
+        <SummaryCard label={t("Unavailable")} value={status.unavailableReplicas} />
+      </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Rollout">
-          <CompactKvTable rows={[
-            { label: "Selector", value: objectLabels(selector) },
-            { label: "Strategy", value: spec.strategy || spec.updateStrategy },
-            { label: "Min Ready Seconds", value: spec.minReadySeconds },
-            { label: "Revision History", value: spec.revisionHistoryLimit },
-            { label: "Observed Generation", value: status.observedGeneration },
+        <KvSection title={t("Rollout")} rows={[
+            { label: t("Selector"), value: objectLabels(selector) },
+            { label: t("Strategy"), value: spec.strategy || spec.updateStrategy },
+            { label: t("Min ready seconds"), value: spec.minReadySeconds },
+            { label: t("Revision history"), value: spec.revisionHistoryLimit },
+            { label: t("Observed generation"), value: status.observedGeneration },
           ]} />
-        </SectionCard>
-        <SectionCard title="Pod Template">
-          <CompactKvTable rows={[
-            { label: "Service Account", value: templateSpec.serviceAccountName },
-            { label: "Restart Policy", value: templateSpec.restartPolicy },
-            { label: "Labels", value: objectLabels(asRecord(template.metadata).labels) },
-            { label: "Annotations", value: objectLabels(asRecord(template.metadata).annotations) },
+        <KvSection title={t("Pod template")} rows={[
+            { label: t("Service account"), value: templateSpec.serviceAccountName },
+            { label: t("Restart policy"), value: templateSpec.restartPolicy },
+            { label: t("Labels"), value: objectLabels(asRecord(template.metadata).labels) },
+            { label: t("Annotations"), value: objectLabels(asRecord(template.metadata).annotations) },
           ]} />
-        </SectionCard>
       </div>
-      <SectionCard title="Template Containers">
+      <SectionCard title={t("Template containers")}>
         <DetailContainerTable containers={containers} />
       </SectionCard>
-      <SectionCard title="Template Volumes">
+      <SectionCard title={t("Template volumes")}>
         <DetailVolumeTable volumes={volumes} />
       </SectionCard>
-      <SectionCard title="Conditions">
-        <DetailValue value={status.conditions} />
-      </SectionCard>
+      <ValueSection title={t("Conditions")} value={status.conditions} />
+    </div>
+  )
+}
+
+function PortsTable({ ports }: { ports: Record<string, unknown>[] }) {
+  const showNodePort = ports.some((port) => port.nodePort)
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader className="bg-muted/50">
+          <TableRow>
+            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
+            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Protocol")}</TableHead>
+            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Port")}</TableHead>
+            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Target port")}</TableHead>
+            {showNodePort && <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Node port")}</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {ports.map((port, index) => (
+            <TableRow key={`${compactValue(port.name)}-${index}`} className="hover:bg-muted/40">
+              <TableCell className="py-1.5 text-sm">{hasRenderableValue(port.name) ? compactValue(port.name) : <span className="text-muted-foreground">-</span>}</TableCell>
+              <TableCell className="py-1.5 text-sm">{compactValue(port.protocol || "TCP")}</TableCell>
+              <TableCell className="py-1.5 font-mono text-xs">{compactValue(port.port)}</TableCell>
+              <TableCell className="py-1.5 font-mono text-xs">{compactValue(port.targetPort ?? port.port)}</TableCell>
+              {showNodePort && <TableCell className="py-1.5 font-mono text-xs">{hasRenderableValue(port.nodePort) ? compactValue(port.nodePort) : "-"}</TableCell>}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+function ServiceDetailOverview({ resource }: { resource: KubeResource }) {
+  const spec = asRecord(resource.spec)
+  const status = asRecord(resource.status)
+  const ports = asRecordList(spec.ports)
+  const ingress = asRecordList(asRecord(status.loadBalancer).ingress).map((item) => item.ip || item.hostname).filter(Boolean)
+  const clusterIPs = Array.isArray(spec.clusterIPs) && spec.clusterIPs.length ? spec.clusterIPs : [spec.clusterIP]
+  return (
+    <div className="space-y-4">
+      <SummaryRow>
+        <SummaryCard label={t("Type")} value={spec.type || "ClusterIP"} />
+        <SummaryCard label={t("Cluster IP")} value={clusterIPs.filter((ip) => ip && ip !== "None").join(", ") || (spec.clusterIP === "None" ? "None (headless)" : "")} />
+        <SummaryCard label={t("External address")} value={[...ingress, ...(Array.isArray(spec.externalIPs) ? spec.externalIPs : []), spec.externalName].filter(Boolean)} />
+        <SummaryCard label={t("Selector")} value={asRecord(spec.selector)} />
+      </SummaryRow>
+      {ports.length > 0 && <SectionCard title={t("Ports")}><PortsTable ports={ports} /></SectionCard>}
+      <KvSection title={t("Traffic")} rows={[
+        { label: t("Session affinity"), value: spec.sessionAffinity === "None" ? "" : spec.sessionAffinity },
+        { label: t("External traffic policy"), value: spec.externalTrafficPolicy },
+        { label: t("Internal traffic policy"), value: spec.internalTrafficPolicy },
+        { label: t("IP families"), value: spec.ipFamilies },
+        { label: t("IP family policy"), value: spec.ipFamilyPolicy },
+        { label: t("Load balancer class"), value: spec.loadBalancerClass },
+      ]} />
+      <ValueSection title={t("Conditions")} value={status.conditions} />
     </div>
   )
 }
@@ -778,39 +874,33 @@ function WorkloadDetailOverview({ resource }: { resource: KubeResource }) {
 function NetworkDetailOverview({ resource }: { resource: KubeResource }) {
   const spec = asRecord(resource.spec)
   const status = asRecord(resource.status)
+  if (resource.kind === "Service") return <ServiceDetailOverview resource={resource} />
+  const selector = spec.selector || asRecord(spec.podSelector).matchLabels || spec.podSelector
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Type" value={spec.type || resource.kind} />
-        <SummaryCard label="Class" value={spec.ingressClassName || spec.gatewayClassName || spec.controllerName || spec.provider} />
-        <SummaryCard label="Selector" value={objectLabels(spec.selector || asRecord(spec.podSelector).matchLabels).length || "N/A"} />
-        <SummaryCard label="Address" value={spec.clusterIP || spec.cidrBlock || spec.cidr || spec.vpc || compactValue(asRecord(status).addresses)} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Type")} value={spec.type} />
+        <SummaryCard label={t("Class")} value={spec.ingressClassName || spec.gatewayClassName || spec.controllerName || spec.provider} />
+        <SummaryCard label={t("Selector")} value={selector} />
+        <SummaryCard label={t("Address")} value={spec.cidrBlock || spec.cidr || spec.vpc || asRecord(status).addresses} />
+      </SummaryRow>
+      {asRecordList(spec.ports).length > 0 && <SectionCard title={t("Ports")}><PortsTable ports={asRecordList(spec.ports)} /></SectionCard>}
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Routing And Selectors">
-          <CompactKvTable rows={[
-            { label: "Selector", value: objectLabels(spec.selector || asRecord(spec.podSelector).matchLabels) },
-            { label: "Policy Types", value: spec.policyTypes },
-            { label: "Ports", value: spec.ports },
-            { label: "Rules", value: spec.rules || spec.ingress || spec.egress },
-            { label: "Hostnames", value: spec.hostnames },
-            { label: "Parent Refs", value: spec.parentRefs },
+        <KvSection title={t("Routing and selectors")} rows={[
+            { label: t("Policy types"), value: spec.policyTypes },
+            { label: t("Rules"), value: spec.rules || spec.ingress || spec.egress },
+            { label: t("Hostnames"), value: spec.hostnames },
+            { label: t("Parent refs"), value: spec.parentRefs },
           ]} />
-        </SectionCard>
-        <SectionCard title="Addresses">
-          <CompactKvTable rows={[
-            { label: "Cluster IP", value: spec.clusterIP },
-            { label: "Cluster IPs", value: spec.clusterIPs },
-            { label: "External IPs", value: spec.externalIPs },
-            { label: "Load Balancer", value: status.loadBalancer },
-            { label: "CIDR", value: spec.cidrBlock || spec.cidr },
-            { label: "Gateway", value: spec.gateway || spec.gatewayNode },
+        <KvSection title={t("Addresses")} rows={[
+            { label: t("Cluster IP"), value: spec.clusterIP },
+            { label: t("External IPs"), value: spec.externalIPs },
+            { label: t("Load balancer"), value: status.loadBalancer },
+            { label: t("CIDR"), value: spec.cidrBlock || spec.cidr },
+            { label: t("Gateway"), value: spec.gateway || spec.gatewayNode },
           ]} />
-        </SectionCard>
       </div>
-      <SectionCard title="Status">
-        <DetailValue value={status.conditions || status} />
-      </SectionCard>
+      <ValueSection title={t("Status")} value={status.conditions || status} />
     </div>
   )
 }
@@ -820,32 +910,28 @@ function StorageDetailOverview({ resource }: { resource: KubeResource }) {
   const status = asRecord(resource.status)
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Phase" value={status.phase || status.status || resource.kind} variant={String(status.phase || status.status || "")} />
-        <SummaryCard label="Capacity" value={asRecord(status.capacity).storage || asRecord(spec.resources).requests} />
-        <SummaryCard label="Storage Class" value={spec.storageClassName || resource.storageClassName || resource.provisioner} />
-        <SummaryCard label="Access Modes" value={spec.accessModes || resource.reclaimPolicy} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Phase")} value={status.phase || status.status || resource.kind} variant={String(status.phase || status.status || "")} />
+        <SummaryCard label={t("Capacity")} value={asRecord(status.capacity).storage || asRecord(spec.resources).requests} />
+        <SummaryCard label={t("Storage class")} value={spec.storageClassName || resource.storageClassName || resource.provisioner} />
+        <SummaryCard label={t("Access modes")} value={spec.accessModes || resource.reclaimPolicy} />
+      </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Storage">
-          <CompactKvTable rows={[
-            { label: "Provisioner", value: resource.provisioner },
-            { label: "Volume Name", value: spec.volumeName },
-            { label: "Volume Mode", value: spec.volumeMode },
-            { label: "Reclaim Policy", value: resource.reclaimPolicy || spec.persistentVolumeReclaimPolicy },
-            { label: "Binding Mode", value: resource.volumeBindingMode },
-            { label: "Expansion", value: resource.allowVolumeExpansion },
+        <KvSection title={t("Storage")} rows={[
+            { label: t("Provisioner"), value: resource.provisioner },
+            { label: t("Volume name"), value: spec.volumeName },
+            { label: t("Volume mode"), value: spec.volumeMode },
+            { label: t("Reclaim policy"), value: resource.reclaimPolicy || spec.persistentVolumeReclaimPolicy },
+            { label: t("Binding mode"), value: resource.volumeBindingMode },
+            { label: t("Expansion"), value: resource.allowVolumeExpansion },
           ]} />
-        </SectionCard>
-        <SectionCard title="Source And Parameters">
-          <CompactKvTable rows={[
-            { label: "Parameters", value: resource.parameters },
-            { label: "Source", value: spec.source || spec.csi || spec.hostPath || spec.nfs },
-            { label: "Claim Ref", value: spec.claimRef },
-            { label: "Node Affinity", value: spec.nodeAffinity },
-            { label: "Conditions", value: status.conditions },
+        <KvSection title={t("Source and parameters")} rows={[
+            { label: t("Parameters"), value: resource.parameters },
+            { label: t("Source"), value: spec.source || spec.csi || spec.hostPath || spec.nfs },
+            { label: t("Claim ref"), value: spec.claimRef },
+            { label: t("Node affinity"), value: spec.nodeAffinity },
+            { label: t("Conditions"), value: status.conditions },
           ]} />
-        </SectionCard>
       </div>
     </div>
   )
@@ -860,40 +946,34 @@ function VirtualizationDetailOverview({ resource }: { resource: KubeResource }) 
   const devices = asRecord(domain.devices)
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Printable Status" value={status.printableStatus || status.phase || status.conditions} variant={String(status.printableStatus || status.phase || "")} />
-        <SummaryCard label="Run Strategy" value={spec.runStrategy || spec.running} />
-        <SummaryCard label="Node" value={status.nodeName} />
-        <SummaryCard label="IP" value={asRecordList(status.interfaces).map((item) => item.ipAddress).filter(Boolean)} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Printable status")} value={status.printableStatus || status.phase || status.conditions} variant={String(status.printableStatus || status.phase || "")} />
+        <SummaryCard label={t("Run strategy")} value={spec.runStrategy || spec.running} />
+        <SummaryCard label={t("Node")} value={status.nodeName} />
+        <SummaryCard label={t("IP")} value={asRecordList(status.interfaces).map((item) => item.ipAddress).filter(Boolean)} />
+      </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Compute">
-          <CompactKvTable rows={[
-            { label: "CPU", value: domain.cpu },
-            { label: "Memory", value: asRecord(domain.resources).requests || spec.memory },
-            { label: "Machine", value: asRecord(domain.machine).type },
-            { label: "Firmware", value: domain.firmware },
-            { label: "Features", value: domain.features },
+        <KvSection title={t("Compute")} rows={[
+            { label: t("CPU"), value: domain.cpu },
+            { label: t("Memory"), value: asRecord(domain.resources).requests || spec.memory },
+            { label: t("Machine"), value: asRecord(domain.machine).type },
+            { label: t("Firmware"), value: domain.firmware },
+            { label: t("Features"), value: domain.features },
           ]} />
-        </SectionCard>
-        <SectionCard title="Runtime">
-          <CompactKvTable rows={[
-            { label: "Phase", value: status.phase },
-            { label: "Conditions", value: status.conditions },
-            { label: "Guest OS", value: status.guestOSInfo },
-            { label: "Migration", value: status.migrationState },
+        <KvSection title={t("Runtime")} rows={[
+            { label: t("Phase"), value: status.phase },
+            { label: t("Conditions"), value: status.conditions },
+            { label: t("Guest OS"), value: status.guestOSInfo },
+            { label: t("Migration"), value: status.migrationState },
           ]} />
-        </SectionCard>
       </div>
-      <SectionCard title="Disks And Volumes">
+      <SectionCard title={t("Disks and volumes")}>
         <div className="grid gap-4 xl:grid-cols-2">
           <DetailValue value={devices.disks || spec.disks} />
           <DetailVolumeTable volumes={asRecordList(templateSpec.volumes || spec.volumes)} />
         </div>
       </SectionCard>
-      <SectionCard title="Networks">
-        <DetailValue value={templateSpec.networks || devices.interfaces || spec.networks || spec.interfaces} />
-      </SectionCard>
+      <ValueSection title={t("Networks")} value={templateSpec.networks || devices.interfaces || spec.networks || spec.interfaces} />
     </div>
   )
 }
@@ -903,18 +983,18 @@ function NodeDetailOverview({ resource }: { resource: KubeResource }) {
   const status = asRecord(resource.status)
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Status" value={asRecordList(status.conditions).find((item) => item.status === "True")?.type || "Unknown"} />
-        <SummaryCard label="Kubelet" value={asRecord(status.nodeInfo).kubeletVersion} />
-        <SummaryCard label="OS" value={asRecord(status.nodeInfo).osImage} />
-        <SummaryCard label="Unschedulable" value={spec.unschedulable || false} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Status")} value={asRecordList(status.conditions).find((item) => item.status === "True")?.type || "Unknown"} />
+        <SummaryCard label={t("Kubelet")} value={asRecord(status.nodeInfo).kubeletVersion} />
+        <SummaryCard label={t("OS")} value={asRecord(status.nodeInfo).osImage} />
+        <SummaryCard label={t("Unschedulable")} value={spec.unschedulable || false} />
+      </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Capacity"><CompactKvTable rows={Object.entries(asRecord(status.capacity)).map(([label, value]) => ({ label, value }))} /></SectionCard>
-        <SectionCard title="Allocatable"><CompactKvTable rows={Object.entries(asRecord(status.allocatable)).map(([label, value]) => ({ label, value }))} /></SectionCard>
+        <KvSection title={t("Capacity")} rows={Object.entries(asRecord(status.capacity)).map(([label, value]) => ({ label, value }))} />
+        <KvSection title={t("Allocatable")} rows={Object.entries(asRecord(status.allocatable)).map(([label, value]) => ({ label, value }))} />
       </div>
-      <SectionCard title="Conditions"><DetailValue value={status.conditions} /></SectionCard>
-      <SectionCard title="Addresses"><DetailValue value={status.addresses} /></SectionCard>
+      <ValueSection title={t("Conditions")} value={status.conditions} />
+      <ValueSection title={t("Addresses")} value={status.addresses} />
     </div>
   )
 }
@@ -948,22 +1028,22 @@ function AdmissionDetailOverview({ resource }: { resource: KubeResource }) {
   if (webhooks.length > 0) {
     return (
       <div className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="Webhooks" value={webhooks.length} />
-          <SummaryCard label="Failure Policies" value={[...new Set(webhooks.map((item) => compactValue(item.failurePolicy || "Fail")))]} />
-          <SummaryCard label="Side Effects" value={[...new Set(webhooks.map((item) => compactValue(item.sideEffects)))]} />
-          <SummaryCard label="Admission Review" value={[...new Set(webhooks.flatMap((item) => Array.isArray(item.admissionReviewVersions) ? item.admissionReviewVersions.map(compactValue) : []))]} />
-        </div>
-        <SectionCard title="Webhooks" description="Client endpoints, matching rules, selector scope, and admission behavior.">
+        <SummaryRow>
+          <SummaryCard label={t("Webhooks")} value={webhooks.length} />
+          <SummaryCard label={t("Failure policies")} value={[...new Set(webhooks.map((item) => compactValue(item.failurePolicy || "Fail")))]} />
+          <SummaryCard label={t("Side effects")} value={[...new Set(webhooks.map((item) => compactValue(item.sideEffects)))]} />
+          <SummaryCard label={t("Admission review")} value={[...new Set(webhooks.flatMap((item) => Array.isArray(item.admissionReviewVersions) ? item.admissionReviewVersions.map(compactValue) : []))]} />
+        </SummaryRow>
+        <SectionCard title={t("Webhooks")} description={t("Client endpoints, matching rules, selector scope, and admission behavior.")}>
           <div className="overflow-x-auto rounded-lg border">
             <Table className="min-w-[1040px]">
               <TableHeader className="bg-muted/60">
                 <TableRow>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Name</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Client</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Rules</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Selectors</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Policy</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Client")}</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Rules")}</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Selectors")}</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Policy")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -983,11 +1063,11 @@ function AdmissionDetailOverview({ resource }: { resource: KubeResource }) {
                     </TableCell>
                     <TableCell className="max-w-[220px] text-xs text-muted-foreground">
                       <CompactKvTable rows={[
-                        { label: "Failure", value: webhook.failurePolicy || "Fail" },
-                        { label: "Match", value: webhook.matchPolicy },
-                        { label: "Side Effects", value: webhook.sideEffects },
-                        { label: "Timeout", value: webhook.timeoutSeconds },
-                        { label: "Reinvocation", value: webhook.reinvocationPolicy },
+                        { label: t("Failure"), value: webhook.failurePolicy || "Fail" },
+                        { label: t("Match"), value: webhook.matchPolicy },
+                        { label: t("Side effects"), value: webhook.sideEffects },
+                        { label: t("Timeout"), value: webhook.timeoutSeconds },
+                        { label: t("Reinvocation"), value: webhook.reinvocationPolicy },
                       ]} />
                     </TableCell>
                   </TableRow>
@@ -1002,43 +1082,33 @@ function AdmissionDetailOverview({ resource }: { resource: KubeResource }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Policy" value={spec.policyName || resource.metadata.name} />
-        <SummaryCard label="Failure Policy" value={spec.failurePolicy} />
-        <SummaryCard label="Actions" value={spec.validationActions} />
-        <SummaryCard label="Conditions" value={asRecordList(status.conditions).length || "N/A"} />
+      <SummaryRow>
+        <SummaryCard label={t("Policy")} value={spec.policyName || resource.metadata.name} />
+        <SummaryCard label={t("Failure policy")} value={spec.failurePolicy} />
+        <SummaryCard label={t("Actions")} value={spec.validationActions} />
+        <SummaryCard label={t("Conditions")} value={asRecordList(status.conditions).length || "N/A"} />
+      </SummaryRow>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <KvSection title={t("Policy")} rows={[
+            { label: t("Policy name"), value: spec.policyName },
+            { label: t("Failure policy"), value: spec.failurePolicy },
+            { label: t("Validation actions"), value: spec.validationActions },
+            { label: t("Param kind"), value: spec.paramKind },
+            { label: t("Param ref"), value: spec.paramRef },
+          ]} />
+        <KvSection title={t("Match constraints")} rows={[
+            { label: t("Resource rules"), value: matchConstraints.resourceRules },
+            { label: t("Exclude rules"), value: matchConstraints.excludeResourceRules },
+            { label: t("Namespace selector"), value: matchConstraints.namespaceSelector },
+            { label: t("Object selector"), value: matchConstraints.objectSelector },
+            { label: t("Match conditions"), value: matchConstraints.matchConditions },
+          ]} />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Policy">
-          <CompactKvTable rows={[
-            { label: "Policy Name", value: spec.policyName },
-            { label: "Failure Policy", value: spec.failurePolicy },
-            { label: "Validation Actions", value: spec.validationActions },
-            { label: "Param Kind", value: spec.paramKind },
-            { label: "Param Ref", value: spec.paramRef },
-          ]} />
-        </SectionCard>
-        <SectionCard title="Match Constraints">
-          <CompactKvTable rows={[
-            { label: "Resource Rules", value: matchConstraints.resourceRules },
-            { label: "Exclude Rules", value: matchConstraints.excludeResourceRules },
-            { label: "Namespace Selector", value: matchConstraints.namespaceSelector },
-            { label: "Object Selector", value: matchConstraints.objectSelector },
-            { label: "Match Conditions", value: matchConstraints.matchConditions },
-          ]} />
-        </SectionCard>
+        <ValueSection title={t("Validations")} value={validations} />
+        <ValueSection title={t("Variables and audit")} value={{ variables, auditAnnotations }} />
       </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Validations">
-          <DetailValue value={validations} />
-        </SectionCard>
-        <SectionCard title="Variables And Audit">
-          <DetailValue value={{ variables, auditAnnotations }} />
-        </SectionCard>
-      </div>
-      <SectionCard title="Status">
-        <DetailValue value={status.conditions || status} />
-      </SectionCard>
+      <ValueSection title={t("Status")} value={status.conditions || status} />
     </div>
   )
 }
@@ -1052,22 +1122,22 @@ function RbacDetailOverview({ resource }: { resource: KubeResource }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Rules" value={rules.length || "N/A"} />
-        <SummaryCard label="Subjects" value={subjects.length || "N/A"} />
-        <SummaryCard label="Role Ref" value={[roleRef.kind, roleRef.name].filter(Boolean).map(compactValue).join("/")} />
-        <SummaryCard label="Automount Token" value={resource.automountServiceAccountToken} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Rules")} value={rules.length || "N/A"} />
+        <SummaryCard label={t("Subjects")} value={subjects.length || "N/A"} />
+        <SummaryCard label={t("Role ref")} value={[roleRef.kind, roleRef.name].filter(Boolean).map(compactValue).join("/")} />
+        <SummaryCard label={t("Automount token")} value={resource.automountServiceAccountToken} />
+      </SummaryRow>
       {rules.length > 0 && (
-        <SectionCard title="Rules">
+        <SectionCard title={t("Rules")}>
           <div className="overflow-x-auto rounded-lg border">
             <Table className="min-w-[900px]">
               <TableHeader className="bg-muted/60">
                 <TableRow>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">API Groups</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Resources</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Resource Names</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">Verbs</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("API groups")}</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Resources")}</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Resource names")}</TableHead>
+                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Verbs")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1085,16 +1155,12 @@ function RbacDetailOverview({ resource }: { resource: KubeResource }) {
         </SectionCard>
       )}
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Subjects">
-          <DetailValue value={subjects} />
-        </SectionCard>
-        <SectionCard title="Service Account">
-          <CompactKvTable rows={[
-            { label: "Secrets", value: secrets },
-            { label: "Image Pull Secrets", value: imagePullSecrets },
-            { label: "Automount Token", value: resource.automountServiceAccountToken },
+        <ValueSection title={t("Subjects")} value={subjects} />
+        <KvSection title={t("Service account")} rows={[
+            { label: t("Secrets"), value: secrets },
+            { label: t("Image pull secrets"), value: imagePullSecrets },
+            { label: t("Automount token"), value: resource.automountServiceAccountToken },
           ]} />
-        </SectionCard>
       </div>
     </div>
   )
@@ -1108,15 +1174,15 @@ function ConfigDetailOverview({ resource }: { resource: KubeResource }) {
   const binaryKeys = Object.keys(binaryData)
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Type" value={type} />
-        <SummaryCard label="Data Keys" value={keys.length} />
-        <SummaryCard label="Binary Keys" value={binaryKeys.length || "N/A"} />
-        <SummaryCard label="Immutable" value={resource.immutable} />
-      </div>
-      <SectionCard title="Data">
+      <SummaryRow>
+        <SummaryCard label={t("Type")} value={type} />
+        <SummaryCard label={t("Data keys")} value={keys.length} />
+        <SummaryCard label={t("Binary keys")} value={binaryKeys.length || "N/A"} />
+        <SummaryCard label={t("Immutable")} value={resource.immutable} />
+      </SummaryRow>
+      <SectionCard title={t("Data")}>
         <div className="grid gap-3 xl:grid-cols-2">
-          {keys.length === 0 && <span className="text-sm text-muted-foreground">No data</span>}
+          {keys.length === 0 && <span className="text-sm text-muted-foreground">{t("No data")}</span>}
           {keys.map((key) => (
             <div key={key} className="min-w-0 rounded-lg border bg-muted/30 p-3">
               <div className="mb-2 break-all text-xs font-semibold text-foreground">{key}</div>
@@ -1126,7 +1192,7 @@ function ConfigDetailOverview({ resource }: { resource: KubeResource }) {
         </div>
       </SectionCard>
       {binaryKeys.length > 0 && (
-        <SectionCard title="Binary Data">
+        <SectionCard title={t("Binary data")}>
           <ChipList values={binaryKeys} />
         </SectionCard>
       )}
@@ -1143,31 +1209,27 @@ function PolicyDetailOverview({ resource }: { resource: KubeResource }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Type" value={resource.kind} />
-        <SummaryCard label="Scopes" value={spec.scopes || spec.scopeSelector} />
-        <SummaryCard label="Limits" value={limits.length || "N/A"} />
-        <SummaryCard label="Disruptions" value={`${compactValue(status.currentHealthy)} / ${compactValue(status.desiredHealthy)}`} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Type")} value={resource.kind} />
+        <SummaryCard label={t("Scopes")} value={spec.scopes || spec.scopeSelector} />
+        <SummaryCard label={t("Limits")} value={limits.length || "N/A"} />
+        <SummaryCard label={t("Disruptions")} value={`${compactValue(status.currentHealthy)} / ${compactValue(status.desiredHealthy)}`} />
+      </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Spec">
-          <CompactKvTable rows={[
-            { label: "Min Available", value: spec.minAvailable },
-            { label: "Max Unavailable", value: spec.maxUnavailable },
-            { label: "Selector", value: asRecord(spec.selector).matchLabels || spec.selector },
-            { label: "Hard", value: hard },
-            { label: "Limits", value: limits },
+        <KvSection title={t("Spec")} rows={[
+            { label: t("Min available"), value: spec.minAvailable },
+            { label: t("Max unavailable"), value: spec.maxUnavailable },
+            { label: t("Selector"), value: asRecord(spec.selector).matchLabels || spec.selector },
+            { label: t("Hard"), value: hard },
+            { label: t("Limits"), value: limits },
           ]} />
-        </SectionCard>
-        <SectionCard title="Status">
-          <CompactKvTable rows={[
-            { label: "Used", value: used },
-            { label: "Current Healthy", value: status.currentHealthy },
-            { label: "Desired Healthy", value: status.desiredHealthy },
-            { label: "Expected Pods", value: status.expectedPods },
-            { label: "Disruptions Allowed", value: status.disruptionsAllowed },
+        <KvSection title={t("Status")} rows={[
+            { label: t("Used"), value: used },
+            { label: t("Current healthy"), value: status.currentHealthy },
+            { label: t("Desired healthy"), value: status.desiredHealthy },
+            { label: t("Expected pods"), value: status.expectedPods },
+            { label: t("Disruptions allowed"), value: status.disruptionsAllowed },
           ]} />
-        </SectionCard>
       </div>
     </div>
   )
@@ -1178,48 +1240,39 @@ function ClusterControlDetailOverview({ resource }: { resource: KubeResource }) 
   const status = asRecord(resource.status)
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Kind" value={resource.kind} />
-        <SummaryCard label="Version" value={resource.apiVersion || spec.version} />
-        <SummaryCard label="Available" value={status.available ?? status.phase ?? asRecordList(status.conditions).find((item) => item.status === "True")?.type} />
-        <SummaryCard label="Created" value={resource.metadata.creationTimestamp} />
-      </div>
+      <SummaryRow>
+        <SummaryCard label={t("Kind")} value={resource.kind} />
+        <SummaryCard label={t("Version")} value={resource.apiVersion || spec.version} />
+        <SummaryCard label={t("Available")} value={status.available ?? status.phase ?? asRecordList(status.conditions).find((item) => item.status === "True")?.type} />
+        <SummaryCard label={t("Created")} value={resource.metadata.creationTimestamp} />
+      </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Spec">
-          <CompactKvTable rows={Object.entries(spec).map(([label, value]) => ({ label, value }))} />
-        </SectionCard>
-        <SectionCard title="Status">
-          <CompactKvTable rows={Object.entries(status).map(([label, value]) => ({ label, value }))} />
-        </SectionCard>
+        <KvSection title={t("Spec")} rows={Object.entries(spec).map(([label, value]) => ({ label, value }))} />
+        <KvSection title={t("Status")} rows={Object.entries(status).map(([label, value]) => ({ label, value }))} />
       </div>
-      <SectionCard title="Conditions">
-        <DetailValue value={status.conditions} />
-      </SectionCard>
+      <ValueSection title={t("Conditions")} value={status.conditions} />
     </div>
   )
 }
 
+/** Spec and status as readable key/value sections; used for CRDs without a dedicated layout. */
 function StructuredResourceOverview({ resource, sections }: { resource: KubeResource; sections: DetailSection[] }) {
   const spec = asRecord(resource.spec)
   const status = asRecord(resource.status)
-  const topSpec = Object.entries(spec).filter(([, value]) => hasRenderableValue(value)).slice(0, 12).map(([label, value]) => ({ label, value }))
-  const topStatus = Object.entries(status).filter(([, value]) => hasRenderableValue(value)).slice(0, 12).map(([label, value]) => ({ label, value }))
+  const rows = (record: Record<string, unknown>, skip: string[] = []) =>
+    Object.entries(record).filter(([key, value]) => !skip.includes(key) && hasRenderableValue(value)).map(([key, value]) => ({ label: t(humanizeKey(key)), value }))
+  // Kinds without spec/status (e.g. NetworkAttachmentDefinition config) still show their top-level fields.
+  const topLevel = Object.fromEntries(Object.entries(resource).filter(([key]) => !["apiVersion", "kind", "metadata", "spec", "status"].includes(key)))
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Kind" value={resource.kind} />
-        <SummaryCard label="API Version" value={resource.apiVersion} />
-        <SummaryCard label="Status" value={getValue(resource, ["status", "phase"]) ?? getValue(resource, ["status", "conditions", "0", "type"]) ?? "Active"} />
-        <SummaryCard label="Created" value={resource.metadata.creationTimestamp} />
-      </div>
       <div className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="Spec"><CompactKvTable rows={topSpec} /></SectionCard>
-        <SectionCard title="Status"><CompactKvTable rows={topStatus} /></SectionCard>
+        <KvSection title={t("Spec")} rows={rows(spec)} />
+        <KvSection title={t("Status")} rows={rows(status, ["conditions"])} />
       </div>
-      {sections.filter((section) => !["Metadata", "Status"].includes(section.title)).map((section) => (
-        <SectionCard key={section.title} title={section.title} description={section.description}>
-          <CompactKvTable rows={section.items.map((item) => ({ label: item.label, value: item.value }))} />
-        </SectionCard>
+      <KvSection title={t("Details")} rows={rows(topLevel)} />
+      <ValueSection title={t("Conditions")} value={status.conditions} />
+      {sections.filter((section) => !["Metadata", "Status", "Spec"].some((title) => title === section.title || t(title) === section.title)).map((section) => (
+        <KvSection key={section.title} title={t(section.title)} description={section.description && t(section.description)} rows={section.items.map((item) => ({ label: t(item.label), value: item.value }))} />
       ))}
     </div>
   )
@@ -1236,7 +1289,7 @@ function ResourceSpecificOverview({ resource, config, sections }: { resource: Ku
   if (["ConfigMap", "Secret"].includes(kind)) return <ConfigDetailOverview resource={resource} />
   if (["LimitRange", "ResourceQuota", "PodDisruptionBudget"].includes(kind)) return <PolicyDetailOverview resource={resource} />
   if (["APIService", "CustomResourceDefinition", "ComponentStatus", "Namespace", "Lease", "CertificateSigningRequest", "FlowSchema", "PriorityLevelConfiguration", "RuntimeClass", "PriorityClass", "Event"].includes(kind)) return <ClusterControlDetailOverview resource={resource} />
-  if (["Service", "Ingress", "IngressClass", "NetworkPolicy", "EndpointSlice", "Endpoints", "NetworkAttachmentDefinition", "Gateway", "GatewayClass", "HTTPRoute"].includes(kind) || ["network", "route", "gateway", "cilium", "calico", "kubeovn", "metallb"].some((item) => scope.includes(item))) return <NetworkDetailOverview resource={resource} />
+  if (["Service", "Ingress", "IngressClass", "NetworkPolicy", "EndpointSlice", "Endpoints", "Gateway", "GatewayClass", "HTTPRoute"].includes(kind)) return <NetworkDetailOverview resource={resource} />
   if (["PersistentVolume", "PersistentVolumeClaim", "StorageClass", "CSIDriver", "CSINode", "CSIStorageCapacity", "VolumeAttachment", "VolumeSnapshot", "VolumeSnapshotClass", "VolumeSnapshotContent", "DataVolume", "DataSource", "StorageProfile"].includes(kind) || ["volume", "storage", "snapshot"].some((item) => scope.includes(item))) return <StorageDetailOverview resource={resource} />
   if (kind.includes("VirtualMachine") || kind === "KubeVirt" || kind.startsWith("CDI") || ["ObjectTransfer", "DataImportCron", "VolumeImportSource", "VolumeUploadSource", "VolumeCloneSource"].includes(kind)) return <VirtualizationDetailOverview resource={resource} />
   return <StructuredResourceOverview resource={resource} sections={sections} />
@@ -1300,12 +1353,12 @@ const numberFromValue = (value: string | boolean | undefined, fallback: number) 
 }
 
 const createNamespaceNameFields = (name: string): CreateFormField[] => [
-  { name: "name", label: "Name", section: "Identity", defaultValue: name, required: true },
-  { name: "namespace", label: "Namespace", section: "Identity", defaultValue: "default", required: true },
+  { name: "name", label: t("Name"), section: "Identity", defaultValue: name, required: true },
+  { name: "namespace", label: t("Namespace"), section: "Identity", defaultValue: "default", required: true },
 ]
 
 const createNameOnlyFields = (name: string): CreateFormField[] => [
-  { name: "name", label: "Name", section: "Identity", defaultValue: name, required: true },
+  { name: "name", label: t("Name"), section: "Identity", defaultValue: name, required: true },
 ]
 
 const identityCreateFields = (config: ResourceConfig) =>
@@ -1362,60 +1415,60 @@ const effectiveCreateFields = (config: ResourceConfig): CreateFormField[] => {
     case "FlowSchema":
       return [
         ...identity,
-        { name: "priorityLevel", label: "Priority Level", section: "Matching", defaultValue: "workload-low" },
-        { name: "matchingPrecedence", label: "Matching Precedence", section: "Matching", type: "number", defaultValue: "1000" },
-        { name: "distinguisherMethod", label: "Distinguisher Method", section: "Matching", type: "select", defaultValue: "ByUser", options: [{ label: "By User", value: "ByUser" }, { label: "By Namespace", value: "ByNamespace" }] },
-        { name: "subjects", label: "Subjects", section: "Rules", type: "textarea", defaultValue: "Group|system:authenticated", placeholder: "Kind|Name per line" },
-        { name: "verbs", label: "Verbs", section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
-        { name: "apiGroups", label: "API Groups", section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
-        { name: "resources", label: "Resources", section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
+        { name: "priorityLevel", label: t("Priority level"), section: "Matching", defaultValue: "workload-low" },
+        { name: "matchingPrecedence", label: t("Matching precedence"), section: "Matching", type: "number", defaultValue: "1000" },
+        { name: "distinguisherMethod", label: t("Distinguisher method"), section: "Matching", type: "select", defaultValue: "ByUser", options: [{ label: t("By user"), value: "ByUser" }, { label: t("By namespace"), value: "ByNamespace" }] },
+        { name: "subjects", label: t("Subjects"), section: "Rules", type: "textarea", defaultValue: "Group|system:authenticated", placeholder: t("Kind|Name per line") },
+        { name: "verbs", label: t("Verbs"), section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
+        { name: "apiGroups", label: t("API groups"), section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
+        { name: "resources", label: t("Resources"), section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
       ]
     case "PriorityLevelConfiguration":
       return [
         ...identity,
-        { name: "type", label: "Type", section: "Priority", type: "select", defaultValue: "Limited", options: [{ label: "Limited", value: "Limited" }, { label: "Exempt", value: "Exempt" }] },
-        { name: "assuredConcurrencyShares", label: "Assured Concurrency Shares", section: "Limited", type: "number", defaultValue: "30" },
-        { name: "queues", label: "Queues", section: "Limited", type: "number", defaultValue: "64" },
-        { name: "handSize", label: "Hand Size", section: "Limited", type: "number", defaultValue: "8" },
-        { name: "queueLengthLimit", label: "Queue Length Limit", section: "Limited", type: "number", defaultValue: "50" },
+        { name: "type", label: t("Type"), section: "Priority", type: "select", defaultValue: "Limited", options: [{ label: t("Limited"), value: "Limited" }, { label: t("Exempt"), value: "Exempt" }] },
+        { name: "assuredConcurrencyShares", label: t("Assured concurrency shares"), section: "Limited", type: "number", defaultValue: "30" },
+        { name: "queues", label: t("Queues"), section: "Limited", type: "number", defaultValue: "64" },
+        { name: "handSize", label: t("Hand size"), section: "Limited", type: "number", defaultValue: "8" },
+        { name: "queueLengthLimit", label: t("Queue length limit"), section: "Limited", type: "number", defaultValue: "50" },
       ]
     case "APIService":
       return [
         ...identity,
-        { name: "group", label: "API Group", section: "API", defaultValue: "example.com" },
-        { name: "version", label: "API Version", section: "API", defaultValue: "v1" },
-        { name: "serviceNamespace", label: "Service Namespace", section: "Service", defaultValue: "default" },
-        { name: "serviceName", label: "Service Name", section: "Service", defaultValue: "example-apiserver" },
-        { name: "insecureSkipTLSVerify", label: "Skip TLS Verify", section: "TLS", type: "checkbox", defaultValue: true },
-        { name: "groupPriorityMinimum", label: "Group Priority", section: "Priority", type: "number", defaultValue: "1000" },
-        { name: "versionPriority", label: "Version Priority", section: "Priority", type: "number", defaultValue: "15" },
+        { name: "group", label: t("API group"), section: "API", defaultValue: "example.com" },
+        { name: "version", label: t("API version"), section: "API", defaultValue: "v1" },
+        { name: "serviceNamespace", label: t("Service namespace"), section: "Service", defaultValue: "default" },
+        { name: "serviceName", label: t("Service name"), section: "Service", defaultValue: "example-apiserver" },
+        { name: "insecureSkipTLSVerify", label: t("Skip TLS verify"), section: "TLS", type: "checkbox", defaultValue: true },
+        { name: "groupPriorityMinimum", label: t("Group priority"), section: "Priority", type: "number", defaultValue: "1000" },
+        { name: "versionPriority", label: t("Version priority"), section: "Priority", type: "number", defaultValue: "15" },
       ]
     case "CustomResourceDefinition":
       return [
         ...identity,
-        { name: "group", label: "Group", section: "Names", defaultValue: "example.com" },
-        { name: "plural", label: "Plural", section: "Names", defaultValue: "examples" },
-        { name: "singular", label: "Singular", section: "Names", defaultValue: "example" },
-        { name: "kind", label: "Kind", section: "Names", defaultValue: "Example" },
-        { name: "scope", label: "Scope", section: "Schema", type: "select", defaultValue: "Namespaced", options: [{ label: "Namespaced", value: "Namespaced" }, { label: "Cluster", value: "Cluster" }] },
-        { name: "version", label: "Version", section: "Schema", defaultValue: "v1" },
+        { name: "group", label: t("Group"), section: "Names", defaultValue: "example.com" },
+        { name: "plural", label: t("Plural"), section: "Names", defaultValue: "examples" },
+        { name: "singular", label: t("Singular"), section: "Names", defaultValue: "example" },
+        { name: "kind", label: t("Kind"), section: "Names", defaultValue: "Example" },
+        { name: "scope", label: t("Scope"), section: "Schema", type: "select", defaultValue: "Namespaced", options: [{ label: t("Namespaced"), value: "Namespaced" }, { label: t("Cluster"), value: "Cluster" }] },
+        { name: "version", label: t("Version"), section: "Schema", defaultValue: "v1" },
       ]
     case "CertificateSigningRequest":
-      return [...identity, { name: "request", label: "CSR Request PEM/Base64", section: "Request", type: "textarea", defaultValue: "", placeholder: "Paste CSR request bytes or base64" }, { name: "signerName", label: "Signer Name", section: "Request", defaultValue: "kubernetes.io/kube-apiserver-client" }, { name: "usages", label: "Usages", section: "Request", defaultValue: "client auth", placeholder: "comma-separated" }]
+      return [...identity, { name: "request", label: t("CSR request PEM/Base64"), section: "Request", type: "textarea", defaultValue: "", placeholder: t("Paste CSR request bytes or base64") }, { name: "signerName", label: t("Signer name"), section: "Request", defaultValue: "kubernetes.io/kube-apiserver-client" }, { name: "usages", label: t("Usages"), section: "Request", defaultValue: "client auth", placeholder: "comma-separated" }]
     case "Node":
-      return [...identity, { name: "labels", label: "Labels", section: "Metadata", type: "textarea", defaultValue: "kubernetes.io/os=linux", placeholder: "key=value per line" }, { name: "podCIDR", label: "Pod CIDR", section: "Spec", defaultValue: "", placeholder: "optional" }, { name: "providerID", label: "Provider ID", section: "Spec", defaultValue: "", placeholder: "optional" }]
+      return [...identity, { name: "labels", label: t("Labels"), section: "Metadata", type: "textarea", defaultValue: "kubernetes.io/os=linux", placeholder: "key=value per line" }, { name: "podCIDR", label: t("Pod CIDR"), section: "Spec", defaultValue: "", placeholder: "optional" }, { name: "providerID", label: t("Provider ID"), section: "Spec", defaultValue: "", placeholder: "optional" }]
     case "Endpoints":
-      return [...identity, { name: "addresses", label: "Addresses", section: "Endpoint", defaultValue: "10.0.0.1", placeholder: "comma-separated IPs" }, { name: "port", label: "Port", section: "Endpoint", type: "number", defaultValue: "80" }, { name: "protocol", label: "Protocol", section: "Endpoint", type: "select", defaultValue: "TCP", options: [{ label: "TCP", value: "TCP" }, { label: "UDP", value: "UDP" }, { label: "SCTP", value: "SCTP" }] }]
+      return [...identity, { name: "addresses", label: t("Addresses"), section: "Endpoint", defaultValue: "10.0.0.1", placeholder: "comma-separated IPs" }, { name: "port", label: t("Port"), section: "Endpoint", type: "number", defaultValue: "80" }, { name: "protocol", label: t("Protocol"), section: "Endpoint", type: "select", defaultValue: "TCP", options: [{ label: t("TCP"), value: "TCP" }, { label: t("UDP"), value: "UDP" }, { label: t("SCTP"), value: "SCTP" }] }]
     case "EndpointSlice":
-      return [...identity, { name: "serviceName", label: "Service Name", section: "Discovery", defaultValue: "example-service" }, { name: "addressType", label: "Address Type", section: "Discovery", type: "select", defaultValue: "IPv4", options: [{ label: "IPv4", value: "IPv4" }, { label: "IPv6", value: "IPv6" }, { label: "FQDN", value: "FQDN" }] }, { name: "addresses", label: "Addresses", section: "Discovery", defaultValue: "10.0.0.1", placeholder: "comma-separated" }, { name: "port", label: "Port", section: "Ports", type: "number", defaultValue: "80" }]
+      return [...identity, { name: "serviceName", label: t("Service name"), section: "Discovery", defaultValue: "example-service" }, { name: "addressType", label: t("Address type"), section: "Discovery", type: "select", defaultValue: "IPv4", options: [{ label: t("IPv4"), value: "IPv4" }, { label: t("IPv6"), value: "IPv6" }, { label: t("FQDN"), value: "FQDN" }] }, { name: "addresses", label: t("Addresses"), section: "Discovery", defaultValue: "10.0.0.1", placeholder: "comma-separated" }, { name: "port", label: t("Port"), section: "Ports", type: "number", defaultValue: "80" }]
     case "Event":
-      return [...identity, { name: "involvedKind", label: "Involved Kind", section: "Event", defaultValue: "Pod" }, { name: "involvedName", label: "Involved Name", section: "Event", defaultValue: "example-pod" }, { name: "reason", label: "Reason", section: "Event", defaultValue: "ManualEvent" }, { name: "message", label: "Message", section: "Event", defaultValue: "Created from dashboard" }, { name: "type", label: "Type", section: "Event", type: "select", defaultValue: "Normal", options: [{ label: "Normal", value: "Normal" }, { label: "Warning", value: "Warning" }] }]
+      return [...identity, { name: "involvedKind", label: t("Involved kind"), section: "Event", defaultValue: "Pod" }, { name: "involvedName", label: t("Involved name"), section: "Event", defaultValue: "example-pod" }, { name: "reason", label: t("Reason"), section: "Event", defaultValue: "ManualEvent" }, { name: "message", label: t("Message"), section: "Event", defaultValue: "Created from dashboard" }, { name: "type", label: t("Type"), section: "Event", type: "select", defaultValue: "Normal", options: [{ label: t("Normal"), value: "Normal" }, { label: t("Warning"), value: "Warning" }] }]
     case "ReplicaSet":
     case "ControllerRevision":
-      return [...identity, { name: "labels", label: "Labels", section: "Metadata", type: "textarea", defaultValue: "app=example", placeholder: "key=value per line" }, { name: "replicas", label: "Replicas", section: "Spec", type: "number", defaultValue: "1" }, { name: "image", label: "Container Image", section: "Template", defaultValue: "nginx:latest" }]
+      return [...identity, { name: "labels", label: t("Labels"), section: "Metadata", type: "textarea", defaultValue: "app=example", placeholder: "key=value per line" }, { name: "replicas", label: t("Replicas"), section: "Spec", type: "number", defaultValue: "1" }, { name: "image", label: t("Container image"), section: "Template", defaultValue: "nginx:latest" }]
     default:
       if (config.path.includes("/calico/") || config.path.includes("/cilium/") || config.path.includes("/kube-ovn/")) {
-        return [...identity, { name: "labels", label: "Labels", section: "Metadata", type: "textarea", defaultValue: "", placeholder: "key=value per line" }, { name: "selector", label: "Selector", section: "Spec", defaultValue: "all()", placeholder: "selector expression or label selector" }, { name: "cidrs", label: "CIDRs / Nets", section: "Spec", defaultValue: "", placeholder: "comma-separated" }, { name: "specFields", label: `${config.kind} Spec Fields`, section: "Spec", type: "textarea", defaultValue: "", placeholder: "topLevelSpecKey=value per line" }]
+        return [...identity, { name: "labels", label: t("Labels"), section: "Metadata", type: "textarea", defaultValue: "", placeholder: "key=value per line" }, { name: "selector", label: t("Selector"), section: "Spec", defaultValue: "all()", placeholder: "selector expression or label selector" }, { name: "cidrs", label: t("CIDRs / nets"), section: "Spec", defaultValue: "", placeholder: "comma-separated" }, { name: "specFields", label: t("{v0} Spec Fields", { v0: config.kind }), section: "Spec", type: "textarea", defaultValue: "", placeholder: "topLevelSpecKey=value per line" }]
       }
       return config.createFields || identity
   }
@@ -1483,14 +1536,14 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   const kind = resource.kind || config.kind
   const spec = asRecord(resource.spec)
   const metadataFields: CreateFormField[] = [
-    { name: "labels", label: "Labels", section: "Metadata", type: "textarea", defaultValue: (r) => textFromRecord(r.metadata.labels), placeholder: "key=value per line" },
-    { name: "annotations", label: "Annotations", section: "Metadata", type: "textarea", defaultValue: (r) => textFromRecord(r.metadata.annotations), placeholder: "key=value per line" },
+    { name: "labels", label: t("Labels"), section: "Metadata", type: "textarea", defaultValue: (r) => textFromRecord(r.metadata.labels), placeholder: "key=value per line" },
+    { name: "annotations", label: t("Annotations"), section: "Metadata", type: "textarea", defaultValue: (r) => textFromRecord(r.metadata.annotations), placeholder: "key=value per line" },
   ]
   const actions: ResourceAction[] = [
     resourceAction(config, resource, {
       id: "edit-metadata",
-      label: "Edit Metadata",
-      description: `Update ${kind} labels and annotations.`,
+      label: t("Edit metadata"),
+      description: t("Update {v0} labels and annotations.", { v0: kind }),
       fields: metadataFields,
       patch: (values) => ({ metadata: { labels: replaceMap(resource.metadata.labels, recordFromText(values.labels)), annotations: replaceMap(resource.metadata.annotations, recordFromText(values.annotations)) } }),
     }),
@@ -1502,9 +1555,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (["Deployment", "StatefulSet", "ReplicaSet", "ReplicationController"].includes(kind)) {
     add({
       id: "edit-workload-scale",
-      label: "Edit Scale",
-      description: `Set ${kind} replica count.`,
-      fields: [{ name: "replicas", label: "Replicas", section: "Scale", type: "number", defaultValue: () => String(spec.replicas ?? 1) }],
+      label: t("Edit scale"),
+      description: t("Set {v0} replica count.", { v0: kind }),
+      fields: [{ name: "replicas", label: t("Replicas"), section: "Scale", type: "number", defaultValue: () => String(spec.replicas ?? 1) }],
       patch: (values) => ({ spec: { replicas: numberFromValue(values.replicas, 1) } }),
     })
   }
@@ -1513,11 +1566,11 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     const template = kind === "CronJob" ? asRecord(getValue(resource, ["spec", "jobTemplate", "spec", "template"])) : asRecord(spec.template)
     add({
       id: "edit-pod-template-metadata",
-      label: "Edit Template",
-      description: `Update ${kind} pod template labels and annotations.`,
+      label: t("Edit template"),
+      description: t("Update {v0} pod template labels and annotations.", { v0: kind }),
       fields: [
-        { name: "labels", label: "Template Labels", section: "Pod Template", type: "textarea", defaultValue: () => textFromRecord(asRecord(template.metadata).labels), placeholder: "key=value per line" },
-        { name: "annotations", label: "Template Annotations", section: "Pod Template", type: "textarea", defaultValue: () => textFromRecord(asRecord(template.metadata).annotations), placeholder: "key=value per line" },
+        { name: "labels", label: t("Template labels"), section: "Pod Template", type: "textarea", defaultValue: () => textFromRecord(asRecord(template.metadata).labels), placeholder: "key=value per line" },
+        { name: "annotations", label: t("Template annotations"), section: "Pod Template", type: "textarea", defaultValue: () => textFromRecord(asRecord(template.metadata).annotations), placeholder: "key=value per line" },
       ],
       patch: (values) => {
         const metadata = { labels: replaceMap(asRecord(template.metadata).labels, recordFromText(values.labels)), annotations: replaceMap(asRecord(template.metadata).annotations, recordFromText(values.annotations)) }
@@ -1529,13 +1582,13 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (kind === "CronJob") {
     add({
       id: "edit-cron-schedule",
-      label: "Edit Schedule",
-      description: "Update schedule, suspend state, and job history limits.",
+      label: t("Edit schedule"),
+      description: t("Update schedule, suspend state, and job history limits."),
       fields: [
-        { name: "schedule", label: "Schedule", section: "Schedule", defaultValue: () => compactValue(spec.schedule || "* * * * *") },
-        { name: "suspend", label: "Suspend", section: "Schedule", type: "checkbox", defaultValue: () => Boolean(spec.suspend) },
-        { name: "successfulJobsHistoryLimit", label: "Successful History", section: "History", type: "number", defaultValue: () => String(spec.successfulJobsHistoryLimit ?? 3) },
-        { name: "failedJobsHistoryLimit", label: "Failed History", section: "History", type: "number", defaultValue: () => String(spec.failedJobsHistoryLimit ?? 1) },
+        { name: "schedule", label: t("Schedule"), section: "Schedule", defaultValue: () => compactValue(spec.schedule || "* * * * *") },
+        { name: "suspend", label: t("Suspend"), section: "Schedule", type: "checkbox", defaultValue: () => Boolean(spec.suspend) },
+        { name: "successfulJobsHistoryLimit", label: t("Successful history"), section: "History", type: "number", defaultValue: () => String(spec.successfulJobsHistoryLimit ?? 3) },
+        { name: "failedJobsHistoryLimit", label: t("Failed history"), section: "History", type: "number", defaultValue: () => String(spec.failedJobsHistoryLimit ?? 1) },
       ],
       patch: (values) => ({ spec: { schedule: values.schedule, suspend: values.suspend === true, successfulJobsHistoryLimit: numberFromValue(values.successfulJobsHistoryLimit, 3), failedJobsHistoryLimit: numberFromValue(values.failedJobsHistoryLimit, 1) } }),
     })
@@ -1544,11 +1597,11 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (kind === "HorizontalPodAutoscaler") {
     add({
       id: "edit-hpa-bounds",
-      label: "Edit Bounds",
-      description: "Update HPA minimum and maximum replicas.",
+      label: t("Edit bounds"),
+      description: t("Update HPA minimum and maximum replicas."),
       fields: [
-        { name: "minReplicas", label: "Min Replicas", section: "Scale", type: "number", defaultValue: () => String(spec.minReplicas ?? 1) },
-        { name: "maxReplicas", label: "Max Replicas", section: "Scale", type: "number", defaultValue: () => String(spec.maxReplicas ?? 3) },
+        { name: "minReplicas", label: t("Min replicas"), section: "Scale", type: "number", defaultValue: () => String(spec.minReplicas ?? 1) },
+        { name: "maxReplicas", label: t("Max replicas"), section: "Scale", type: "number", defaultValue: () => String(spec.maxReplicas ?? 3) },
       ],
       patch: (values) => ({ spec: { minReplicas: numberFromValue(values.minReplicas, 1), maxReplicas: numberFromValue(values.maxReplicas, 3) } }),
     })
@@ -1565,19 +1618,19 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     const hasRunStrategy = kind !== "VirtualMachineInstanceReplicaSet"
     add({
       id: "edit-virtualization-runtime",
-      label: "Edit Runtime",
+      label: t("Edit runtime"),
       description: usesInstancetype
         ? `CPU and memory come from instance type ${compactValue(asRecord(vmSpec.instancetype).name)}; change the instance type to resize.`
         : `Update ${kind} run strategy, CPU, memory, and priority class.`,
       fields: [
-        ...(hasRunStrategy ? [{ name: "runStrategy", label: "Run Strategy", section: "Lifecycle", type: "select" as const, defaultValue: () => compactValue(vmSpec.runStrategy || (vmSpec.running === true ? "Always" : "Halted")), options: [{ label: "Halted", value: "Halted" }, { label: "Always", value: "Always" }, { label: "RerunOnFailure", value: "RerunOnFailure" }, { label: "Manual", value: "Manual" }] }] : []),
+        ...(hasRunStrategy ? [{ name: "runStrategy", label: t("Run strategy"), section: "Lifecycle", type: "select" as const, defaultValue: () => compactValue(vmSpec.runStrategy || (vmSpec.running === true ? "Always" : "Halted")), options: [{ label: t("Halted"), value: "Halted" }, { label: t("Always"), value: "Always" }, { label: t("RerunOnFailure"), value: "RerunOnFailure" }, { label: t("Manual"), value: "Manual" }] }] : []),
         ...(usesInstancetype ? [] : [
-          { name: "sockets", label: "CPU Sockets", section: "Compute", type: "number" as const, defaultValue: () => String(cpu.sockets ?? 1) },
-          { name: "cores", label: "CPU Cores", section: "Compute", type: "number" as const, defaultValue: () => String(cpu.cores ?? 1) },
-          { name: "threads", label: "CPU Threads", section: "Compute", type: "number" as const, defaultValue: () => String(cpu.threads ?? 1) },
-          { name: "memory", label: "Memory", section: "Compute", defaultValue: () => compactValue(asRecord(asRecord(domain.resources).requests).memory || asRecord(domain.memory).guest || "1Gi") },
+          { name: "sockets", label: t("CPU sockets"), section: "Compute", type: "number" as const, defaultValue: () => String(cpu.sockets ?? 1) },
+          { name: "cores", label: t("CPU cores"), section: "Compute", type: "number" as const, defaultValue: () => String(cpu.cores ?? 1) },
+          { name: "threads", label: t("CPU threads"), section: "Compute", type: "number" as const, defaultValue: () => String(cpu.threads ?? 1) },
+          { name: "memory", label: t("Memory"), section: "Compute", defaultValue: () => compactValue(asRecord(asRecord(domain.resources).requests).memory || asRecord(domain.memory).guest || "1Gi") },
         ]),
-        { name: "priorityClassName", label: "Priority Class", section: "Scheduling", defaultValue: () => compactValue(templateSpec.priorityClassName) },
+        { name: "priorityClassName", label: t("Priority class"), section: "Scheduling", defaultValue: () => compactValue(templateSpec.priorityClassName) },
       ],
       patch: (values) => {
         const templatePatch = {
@@ -1603,13 +1656,13 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (kind === "Service") {
     add({
       id: "edit-service-routing",
-      label: "Edit Service",
-      description: "Update service type, selector, external IPs, and load balancer IP.",
+      label: t("Edit service"),
+      description: t("Update service type, selector, external IPs, and load balancer IP."),
       fields: [
-        { name: "type", label: "Type", section: "Routing", type: "select", defaultValue: () => compactValue(spec.type || "ClusterIP"), options: [{ label: "ClusterIP", value: "ClusterIP" }, { label: "NodePort", value: "NodePort" }, { label: "LoadBalancer", value: "LoadBalancer" }, { label: "ExternalName", value: "ExternalName" }] },
-        { name: "selector", label: "Selector", section: "Routing", type: "textarea", defaultValue: () => textFromRecord(spec.selector), placeholder: "key=value per line" },
-        { name: "externalIPs", label: "External IPs", section: "Routing", defaultValue: () => csvFromList(spec.externalIPs), placeholder: "comma-separated" },
-        { name: "loadBalancerIP", label: "Load Balancer IP", section: "Routing", defaultValue: () => compactValue(spec.loadBalancerIP) },
+        { name: "type", label: t("Type"), section: "Routing", type: "select", defaultValue: () => compactValue(spec.type || "ClusterIP"), options: [{ label: t("ClusterIP"), value: "ClusterIP" }, { label: t("NodePort"), value: "NodePort" }, { label: t("LoadBalancer"), value: "LoadBalancer" }, { label: t("ExternalName"), value: "ExternalName" }] },
+        { name: "selector", label: t("Selector"), section: "Routing", type: "textarea", defaultValue: () => textFromRecord(spec.selector), placeholder: "key=value per line" },
+        { name: "externalIPs", label: t("External IPs"), section: "Routing", defaultValue: () => csvFromList(spec.externalIPs), placeholder: "comma-separated" },
+        { name: "loadBalancerIP", label: t("Load balancer IP"), section: "Routing", defaultValue: () => compactValue(spec.loadBalancerIP) },
       ],
       patch: (values) => ({ spec: { type: values.type, selector: replaceMap(spec.selector, recordFromText(values.selector)), externalIPs: listFromCsv(values.externalIPs), loadBalancerIP: values.loadBalancerIP || null } }),
     })
@@ -1621,12 +1674,12 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     // Calico policies select endpoints with a selector expression string, not label maps.
     add({
       id: "edit-network-policy",
-      label: "Edit Policy",
-      description: `Update ${kind} selector, order and policy types.`,
+      label: t("Edit policy"),
+      description: t("Update {v0} selector, order and policy types.", { v0: kind }),
       fields: [
-        { name: "selector", label: "Selector", section: "Policy", defaultValue: () => compactValue(spec.selector), placeholder: "app == 'web'" },
-        { name: "order", label: "Order", section: "Policy", type: "number", defaultValue: () => compactValue(spec.order) },
-        { name: "types", label: "Types", section: "Policy", defaultValue: () => csvFromList(spec.types), placeholder: "Ingress,Egress" },
+        { name: "selector", label: t("Selector"), section: "Policy", defaultValue: () => compactValue(spec.selector), placeholder: "app == 'web'" },
+        { name: "order", label: t("Order"), section: "Policy", type: "number", defaultValue: () => compactValue(spec.order) },
+        { name: "types", label: t("Types"), section: "Policy", defaultValue: () => csvFromList(spec.types), placeholder: t("Ingress,Egress") },
       ],
       patch: (values) => ({ spec: { selector: values.selector || null, order: values.order === "" ? null : numberFromValue(values.order, 1000), types: listFromCsv(values.types) } }),
     })
@@ -1635,11 +1688,11 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     const selector = asRecord(cilium ? spec.endpointSelector : spec.podSelector)
     add({
       id: "edit-network-policy",
-      label: "Edit Policy",
-      description: `Update ${kind} ${cilium ? "endpoint selector" : "pod selector and policy types"}. An empty selector matches every ${cilium ? "endpoint" : "pod"} in scope.`,
+      label: t("Edit policy"),
+      description: t("Update {v0} {v1}. An empty selector matches every {v2} in scope.", { v0: kind, v1: cilium ? "endpoint selector" : "pod selector and policy types", v2: cilium ? "endpoint" : "pod" }),
       fields: [
         { name: "selector", label: cilium ? "Endpoint Selector" : "Pod Selector", section: "Policy", type: "textarea", defaultValue: () => textFromRecord(selector.matchLabels), placeholder: "key=value per line" },
-        ...(cilium ? [] : [{ name: "policyTypes", label: "Policy Types", section: "Policy", defaultValue: () => csvFromList(spec.policyTypes), placeholder: "Ingress,Egress" }]),
+        ...(cilium ? [] : [{ name: "policyTypes", label: t("Policy types"), section: "Policy", defaultValue: () => csvFromList(spec.policyTypes), placeholder: t("Ingress,Egress") }]),
       ],
       patch: (values) => {
         const matchLabels = replaceMap(selector.matchLabels, recordFromText(values.selector))
@@ -1653,33 +1706,33 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (kind === "Ingress") {
     add({
       id: "edit-network-fields",
-      label: "Edit Ingress",
-      description: "Update the ingress class.",
-      fields: [{ name: "className", label: "Ingress Class", section: "Routing", defaultValue: () => compactValue(spec.ingressClassName) }],
+      label: t("Edit ingress"),
+      description: t("Update the ingress class."),
+      fields: [{ name: "className", label: t("Ingress class"), section: "Routing", defaultValue: () => compactValue(spec.ingressClassName) }],
       patch: (values) => ({ spec: { ingressClassName: values.className || null } }),
     })
   } else if (kind === "Gateway") {
     add({
       id: "edit-network-fields",
-      label: "Edit Gateway",
-      description: "Update the gateway class.",
-      fields: [{ name: "className", label: "Gateway Class", section: "Routing", defaultValue: () => compactValue(spec.gatewayClassName) }],
+      label: t("Edit gateway"),
+      description: t("Update the gateway class."),
+      fields: [{ name: "className", label: t("Gateway class"), section: "Routing", defaultValue: () => compactValue(spec.gatewayClassName) }],
       patch: (values) => ({ spec: { gatewayClassName: values.className } }),
     })
   } else if (["HTTPRoute", "GRPCRoute", "TLSRoute"].includes(kind)) {
     add({
       id: "edit-network-fields",
-      label: `Edit ${kind}`,
-      description: "Update route hostnames. Leave empty to match all hostnames.",
-      fields: [{ name: "hostnames", label: "Hostnames", section: "Routing", defaultValue: () => csvFromList(spec.hostnames), placeholder: "comma-separated" }],
+      label: t("Edit {v0}", { v0: kind }),
+      description: t("Update route hostnames. Leave empty to match all hostnames."),
+      fields: [{ name: "hostnames", label: t("Hostnames"), section: "Routing", defaultValue: () => csvFromList(spec.hostnames), placeholder: "comma-separated" }],
       patch: (values) => ({ spec: { hostnames: listFromCsv(values.hostnames).length ? listFromCsv(values.hostnames) : null } }),
     })
   } else if (config.path.includes("/networks/") && !isCalicoPolicy && !["NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"].includes(kind)) {
     add({
       id: "edit-network-fields",
-      label: `Edit ${kind}`,
-      description: `Set top-level ${kind} spec fields. Values are parsed as numbers, booleans or JSON where possible.`,
-      fields: [{ name: "specFields", label: `${kind} Spec Fields`, section: "Spec", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" }],
+      label: t("Edit {v0}", { v0: kind }),
+      description: t("Set top-level {v0} spec fields. Values are parsed as numbers, booleans or JSON where possible.", { v0: kind }),
+      fields: [{ name: "specFields", label: t("{v0} Spec Fields", { v0: kind }), section: "Spec", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" }],
       patch: specBasicsPatch,
     })
   }
@@ -1687,9 +1740,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (kind === "ConfigMap") {
     add({
       id: "edit-config-data",
-      label: "Edit Data",
-      description: "Update ConfigMap data keys. Removed lines delete the key.",
-      fields: [{ name: "data", label: "Data", section: "Data", type: "textarea", defaultValue: () => textFromRecord(resource.data), placeholder: "key=value per line" }],
+      label: t("Edit data"),
+      description: t("Update ConfigMap data keys. Removed lines delete the key."),
+      fields: [{ name: "data", label: t("Data"), section: "Data", type: "textarea", defaultValue: () => textFromRecord(resource.data), placeholder: "key=value per line" }],
       patch: (values) => ({ data: replaceMap(resource.data, recordFromText(values.data)) }),
     })
   }
@@ -1705,9 +1758,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     }))
     add({
       id: "edit-config-data",
-      label: "Edit Data",
-      description: "Values are shown decoded and stored base64 encoded. Removed lines delete the key.",
-      fields: [{ name: "data", label: "Data", section: "Data", type: "textarea", defaultValue: () => Object.entries(decoded).map(([key, value]) => `${key}=${value}`).join("\n"), placeholder: "key=value per line" }],
+      label: t("Edit data"),
+      description: t("Values are shown decoded and stored base64 encoded. Removed lines delete the key."),
+      fields: [{ name: "data", label: t("Data"), section: "Data", type: "textarea", defaultValue: () => Object.entries(decoded).map(([key, value]) => `${key}=${value}`).join("\n"), placeholder: "key=value per line" }],
       patch: (values) => {
         const next = recordFromText(values.data)
         const removed = Object.fromEntries(Object.keys(decoded).filter((key) => !(key in next)).map((key) => [key, null]))
@@ -1719,17 +1772,17 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (kind === "PersistentVolumeClaim") {
     add({
       id: "edit-storage",
-      label: "Expand Volume",
-      description: "Increase the requested size. Requires a storage class with allowVolumeExpansion; shrinking is not supported.",
-      fields: [{ name: "storage", label: "Requested Storage", section: "Storage", defaultValue: () => compactValue(asRecord(asRecord(spec.resources).requests).storage) }],
+      label: t("Expand volume"),
+      description: t("Increase the requested size. Requires a storage class with allowVolumeExpansion; shrinking is not supported."),
+      fields: [{ name: "storage", label: t("Requested storage"), section: "Storage", defaultValue: () => compactValue(asRecord(asRecord(spec.resources).requests).storage) }],
       patch: (values) => ({ spec: { resources: { requests: { storage: values.storage } } } }),
     })
   } else if (kind === "PersistentVolume") {
     add({
       id: "edit-storage",
-      label: "Edit Reclaim Policy",
-      description: "Change what happens to the volume when its claim is released.",
-      fields: [{ name: "reclaimPolicy", label: "Reclaim Policy", section: "Lifecycle", type: "select", defaultValue: () => compactValue(spec.persistentVolumeReclaimPolicy || "Retain"), options: [{ label: "Retain", value: "Retain" }, { label: "Delete", value: "Delete" }] }],
+      label: t("Edit reclaim policy"),
+      description: t("Change what happens to the volume when its claim is released."),
+      fields: [{ name: "reclaimPolicy", label: t("Reclaim policy"), section: "Lifecycle", type: "select", defaultValue: () => compactValue(spec.persistentVolumeReclaimPolicy || "Retain"), options: [{ label: t("Retain"), value: "Retain" }, { label: t("Delete"), value: "Delete" }] }],
       patch: (values) => ({ spec: { persistentVolumeReclaimPolicy: values.reclaimPolicy } }),
     })
   } else if (kind === "StorageClass") {
@@ -1737,11 +1790,11 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     const annotations = asRecord(resource.metadata.annotations)
     add({
       id: "edit-storage",
-      label: "Edit StorageClass",
-      description: "Only expansion and the default class can change; other StorageClass fields are immutable.",
+      label: t("Edit StorageClass"),
+      description: t("Only expansion and the default class can change; other StorageClass fields are immutable."),
       fields: [
-        { name: "allowVolumeExpansion", label: "Allow Volume Expansion", section: "Storage", type: "checkbox", defaultValue: () => resource.allowVolumeExpansion === true },
-        { name: "isDefault", label: "Default StorageClass", section: "Storage", type: "checkbox", defaultValue: () => annotations["storageclass.kubernetes.io/is-default-class"] === "true" },
+        { name: "allowVolumeExpansion", label: t("Allow volume expansion"), section: "Storage", type: "checkbox", defaultValue: () => resource.allowVolumeExpansion === true },
+        { name: "isDefault", label: t("Default StorageClass"), section: "Storage", type: "checkbox", defaultValue: () => annotations["storageclass.kubernetes.io/is-default-class"] === "true" },
       ],
       patch: (values) => ({
         allowVolumeExpansion: values.allowVolumeExpansion === true,
@@ -1753,9 +1806,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (["Role", "ClusterRole"].includes(kind)) {
     add({
       id: "edit-rbac-rules",
-      label: "Edit Rules",
-      description: "Replace RBAC rules using line-oriented fields.",
-      fields: [{ name: "rules", label: "Rules", section: "RBAC", type: "textarea", defaultValue: () => asRecordList(resource.rules).map((rule) => `${csvFromList(rule.apiGroups)}|${csvFromList(rule.resources)}|${csvFromList(rule.verbs)}`).join("\n"), placeholder: "apiGroups|resources|verbs per line" }],
+      label: t("Edit rules"),
+      description: t("Replace RBAC rules using line-oriented fields."),
+      fields: [{ name: "rules", label: t("Rules"), section: "RBAC", type: "textarea", defaultValue: () => asRecordList(resource.rules).map((rule) => `${csvFromList(rule.apiGroups)}|${csvFromList(rule.resources)}|${csvFromList(rule.verbs)}`).join("\n"), placeholder: "apiGroups|resources|verbs per line" }],
       patch: (values) => ({
         rules: String(values.rules || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
           const [apiGroups, resources, verbs] = line.split("|")
@@ -1769,10 +1822,10 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     const roleRef = asRecord(resource.roleRef)
     add({
       id: "edit-rbac-binding",
-      label: "Edit Subjects",
-      description: `Bound to ${compactValue(roleRef.kind)} ${compactValue(roleRef.name)}. roleRef is immutable; create a new binding to change it.`,
+      label: t("Edit subjects"),
+      description: t("Bound to {v0} {v1}. roleRef is immutable; create a new binding to change it.", { v0: compactValue(roleRef.kind), v1: compactValue(roleRef.name) }),
       fields: [
-        { name: "subjects", label: "Subjects", section: "Subjects", type: "textarea", defaultValue: () => asRecordList(resource.subjects).map((subject) => `${compactValue(subject.kind)}|${compactValue(subject.name)}|${compactValue(subject.namespace)}`).join("\n"), placeholder: "Kind|Name|Namespace per line" },
+        { name: "subjects", label: t("Subjects"), section: "Subjects", type: "textarea", defaultValue: () => asRecordList(resource.subjects).map((subject) => `${compactValue(subject.kind)}|${compactValue(subject.name)}|${compactValue(subject.namespace)}`).join("\n"), placeholder: t("Kind|Name|Namespace per line") },
       ],
       patch: (values) => ({
         subjects: String(values.subjects || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -1786,13 +1839,13 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (["MutatingWebhookConfiguration", "ValidatingWebhookConfiguration"].includes(kind)) {
     add({
       id: "edit-webhook-policy",
-      label: "Edit Webhooks",
-      description: "Update admission webhook failure policy, match policy, timeout, and side effects.",
+      label: t("Edit webhooks"),
+      description: t("Update admission webhook failure policy, match policy, timeout, and side effects."),
       fields: [
-        { name: "failurePolicy", label: "Failure Policy", section: "Policy", type: "select", defaultValue: () => compactValue(asRecordList(resource.webhooks)[0]?.failurePolicy || "Fail"), options: [{ label: "Fail", value: "Fail" }, { label: "Ignore", value: "Ignore" }] },
-        { name: "matchPolicy", label: "Match Policy", section: "Policy", type: "select", defaultValue: () => compactValue(asRecordList(resource.webhooks)[0]?.matchPolicy || "Equivalent"), options: [{ label: "Equivalent", value: "Equivalent" }, { label: "Exact", value: "Exact" }] },
-        { name: "sideEffects", label: "Side Effects", section: "Policy", type: "select", defaultValue: () => compactValue(asRecordList(resource.webhooks)[0]?.sideEffects || "None"), options: [{ label: "None", value: "None" }, { label: "NoneOnDryRun", value: "NoneOnDryRun" }] },
-        { name: "timeoutSeconds", label: "Timeout Seconds", section: "Policy", type: "number", defaultValue: () => String(asRecordList(resource.webhooks)[0]?.timeoutSeconds || 10) },
+        { name: "failurePolicy", label: t("Failure policy"), section: "Policy", type: "select", defaultValue: () => compactValue(asRecordList(resource.webhooks)[0]?.failurePolicy || "Fail"), options: [{ label: t("Fail"), value: "Fail" }, { label: t("Ignore"), value: "Ignore" }] },
+        { name: "matchPolicy", label: t("Match policy"), section: "Policy", type: "select", defaultValue: () => compactValue(asRecordList(resource.webhooks)[0]?.matchPolicy || "Equivalent"), options: [{ label: t("Equivalent"), value: "Equivalent" }, { label: t("Exact"), value: "Exact" }] },
+        { name: "sideEffects", label: t("Side effects"), section: "Policy", type: "select", defaultValue: () => compactValue(asRecordList(resource.webhooks)[0]?.sideEffects || "None"), options: [{ label: t("None"), value: "None" }, { label: t("NoneOnDryRun"), value: "NoneOnDryRun" }] },
+        { name: "timeoutSeconds", label: t("Timeout seconds"), section: "Policy", type: "number", defaultValue: () => String(asRecordList(resource.webhooks)[0]?.timeoutSeconds || 10) },
       ],
       patch: (values) => ({
         webhooks: asRecordList(resource.webhooks).map((webhook) => ({
@@ -1809,9 +1862,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (["ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding", "APIService", "CustomResourceDefinition", "FlowSchema", "PriorityLevelConfiguration", "RuntimeClass", "PriorityClass", "Namespace", "Lease"].includes(kind)) {
     add({
       id: "edit-control-plane",
-      label: `Edit ${kind}`,
-      description: `Update safe top-level spec fields for ${kind}.`,
-      fields: [{ name: "specFields", label: `${kind} Spec Fields`, section: "Spec", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" }],
+      label: t("Edit {v0}", { v0: kind }),
+      description: t("Update safe top-level spec fields for {v0}.", { v0: kind }),
+      fields: [{ name: "specFields", label: t("{v0} Spec Fields", { v0: kind }), section: "Spec", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" }],
       patch: specBasicsPatch,
     })
   }
@@ -1819,9 +1872,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
   if (canDeleteResource(config)) {
     actions.push({
       id: "delete-resource",
-      label: `Delete ${kind}`,
-      description: `Delete this ${kind}.`,
-      confirmLabel: "Delete",
+      label: t("Delete {v0}", { v0: kind }),
+      description: t("Delete this {v0}.", { v0: kind }),
+      confirmLabel: t("Delete"),
       variant: "destructive",
       buildRequest: () => ({
         url: resourceActionUrl(config, resource),
@@ -1847,13 +1900,13 @@ function FormField({ field, value, onChange }: { field: CreateFormField; value: 
   const id = `create-${field.name}`
   return (
     <label htmlFor={id} className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-foreground">{field.label}{field.required && <span className="text-destructive"> *</span>}</span>
+      <span className="text-sm font-medium text-foreground">{t(field.label)}{field.required && <span className="text-destructive"> *</span>}</span>
       {field.type === "textarea" ? (
         <textarea
           id={id}
           value={String(value)}
           onChange={(event) => onChange(event.target.value)}
-          placeholder={field.placeholder}
+          placeholder={field.placeholder && t(field.placeholder)}
           className="min-h-24 rounded-lg border bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       ) : field.type === "select" ? (
@@ -1863,7 +1916,7 @@ function FormField({ field, value, onChange }: { field: CreateFormField; value: 
           onChange={(event) => onChange(event.target.value)}
           className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
         >
-          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{t(option.label)}</option>)}
         </select>
       ) : field.type === "checkbox" ? (
         <div className="flex h-9 items-center gap-2">
@@ -1874,7 +1927,7 @@ function FormField({ field, value, onChange }: { field: CreateFormField; value: 
             onChange={(event) => onChange(event.target.checked)}
             className="h-4 w-4 rounded border-border accent-primary"
           />
-          <span className="text-sm text-muted-foreground">{field.placeholder || "Enabled"}</span>
+          <span className="text-sm text-muted-foreground">{field.placeholder ? t(field.placeholder) : t("Enabled")}</span>
         </div>
       ) : (
         <Input
@@ -1882,10 +1935,10 @@ function FormField({ field, value, onChange }: { field: CreateFormField; value: 
           type={field.type === "number" ? "number" : "text"}
           value={String(value)}
           onChange={(event) => onChange(event.target.value)}
-          placeholder={field.placeholder}
+          placeholder={field.placeholder && t(field.placeholder)}
         />
       )}
-      {field.description && <span className="text-xs text-muted-foreground">{field.description}</span>}
+      {field.description && <span className="text-xs text-muted-foreground">{t(field.description)}</span>}
     </label>
   )
 }
@@ -1976,20 +2029,19 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Create
+          <Plus className="h-4 w-4" />{t("Create")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-6xl">
         <DialogHeader>
-          <DialogTitle>Create {config.kind}</DialogTitle>
-          <DialogDescription>Fields on the left, generated YAML on the right.</DialogDescription>
+          <DialogTitle>{t("Create")} {config.kind}</DialogTitle>
+          <DialogDescription>{t("Fields on the left, generated YAML on the right.")}</DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
           <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
             {fieldGroups.map((group) => (
               <div key={group.section} className="rounded-lg border bg-muted/20 p-4">
-                <div className="mb-3 text-sm font-semibold text-foreground">{group.section}</div>
+                <div className="mb-3 text-sm font-semibold text-foreground">{t(group.section)}</div>
                 <div className="grid gap-4 md:grid-cols-2">
                   {group.items.map((field) => (
                     <div key={field.name} className={field.type === "textarea" ? "md:col-span-2" : ""}>
@@ -2010,16 +2062,15 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
           <div className="min-h-0 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-foreground">YAML Preview</div>
-                <div className="text-xs text-muted-foreground">{advanced ? "Advanced editing enabled" : "Generated from the form"}</div>
+                <div className="text-sm font-semibold text-foreground">{t("YAML Preview")}</div>
+                <div className="text-xs text-muted-foreground">{advanced ? t("Advanced editing enabled") : t("Generated from the form")}</div>
               </div>
               <Button
                 type="button"
                 variant={advanced ? "default" : "outline"}
                 size="sm"
                 onClick={() => setAdvanced((current) => !current)}
-              >
-                Advanced
+              >{t("Advanced")}
               </Button>
             </div>
             <textarea
@@ -2044,8 +2095,8 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={createResource} disabled={saving}>{saving ? "Creating..." : "Create"}</Button>
+          <Button variant="outline" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
+          <Button onClick={createResource} disabled={saving}>{saving ? t("Creating...") : t("Create")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -2105,7 +2156,7 @@ function ResourceActionDialog({
       setOpen(false)
       onComplete(request.navigateTo)
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${action.label.toLowerCase()}`)
+      setError(err instanceof Error ? err.message : t("Failed to {action}", { action: t(action.label).toLowerCase() }))
     } finally {
       setSaving(false)
     }
@@ -2115,13 +2166,13 @@ function ResourceActionDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {!controlled && (
         <DialogTrigger asChild>
-          <Button size="sm" variant={action.variant || "outline"}>{action.label}</Button>
+          <Button size="sm" variant={action.variant || "outline"}>{t(action.label)}</Button>
         </DialogTrigger>
       )}
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{action.label} {resource.kind || "Resource"}</DialogTitle>
-          {action.description && <DialogDescription>{action.description}</DialogDescription>}
+          <DialogTitle>{t(action.label)} {resource.kind || t("Resource")}</DialogTitle>
+          {action.description && <DialogDescription>{t(action.description)}</DialogDescription>}
         </DialogHeader>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-4">
@@ -2133,13 +2184,12 @@ function ResourceActionDialog({
                 onChange={(next) => setValues((current) => ({ ...current, [field.name]: next }))}
               />
             )) : (
-              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-                This action will update the current resource.
+              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">{t("This action will update the current resource.")}
               </div>
             )}
           </div>
           <div className="space-y-2">
-            <div className="text-sm font-semibold text-foreground">Request Preview</div>
+            <div className="text-sm font-semibold text-foreground">{t("Request Preview")}</div>
             <pre className="min-h-[220px] overflow-x-auto rounded-lg border bg-muted/30 p-4 font-mono text-xs text-foreground whitespace-pre">
               {preview}
             </pre>
@@ -2152,9 +2202,9 @@ function ResourceActionDialog({
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
           <Button variant={action.variant === "destructive" ? "destructive" : "default"} onClick={submit} disabled={saving}>
-            {saving ? "Applying..." : action.confirmLabel || action.label}
+            {saving ? t("Applying...") : t(action.confirmLabel || action.label)}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2235,7 +2285,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
   const { rows: pageRows, ...paging } = usePaged(filtered)
 
   const filtering = Boolean(search.trim()) || (config.namespaced && scope === "all" && Boolean(namespaceFilter.trim()))
-  const emptyTitle = filtering ? "No matching resources" : `No ${config.title.toLowerCase()} found`
+  const emptyTitle = filtering ? t("No matching resources") : t("No {name} found", { name: t(config.title) })
   const emptyDescription = filtering
     ? undefined
     : config.namespaced && scope !== "all"
@@ -2261,7 +2311,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={config.title}
+        title={t(config.title)}
         badge={!loading && <span className="text-sm text-muted-foreground tabular-nums">{items.length}</span>}
         subtitle={<span className="font-mono text-xs">{config.kind} · {config.listPath.split("/").slice(1, -1).join("/")}</span>}
         actions={canCreateResource(config) && <ResourceCreateDialog config={config} onCreated={load} defaultNamespace={scope === "all" ? "default" : scope} />}
@@ -2271,11 +2321,10 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
         right={<FilterInput value={search} onChange={setSearch} fields={fields} rows={inScope} />}
       >
         <Button size="sm" variant="outline" onClick={load} className="gap-2">
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          Refresh
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}
         </Button>
         {config.namespaced && (
-          <Combobox value={namespaceFilter} onChange={setNamespaceFilter} options={namespaces} placeholder="All namespaces" aria-label="Namespace" />
+          <Combobox value={namespaceFilter} onChange={setNamespaceFilter} options={namespaces} placeholder={t("All namespaces")} aria-label={t("Namespace")} />
         )}
         {selectedCount > 0 && <span className="text-sm text-muted-foreground">{selectedCount} selected</span>}
       </Toolbar>
@@ -2302,14 +2351,14 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
                         return next
                       })
                     }}
-                    aria-label="Select all rows"
+                    aria-label={t("Select all rows")}
                   />
                 </TableHead>
-                <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Name</TableHead>
-                {config.namespaced && <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Namespace</TableHead>}
-                <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Status</TableHead>
-                {config.extraColumns?.map((column) => <TableHead key={column.label} className="h-9 px-3 text-xs font-medium text-muted-foreground">{column.label}</TableHead>)}
-                <TableHead className="h-9 px-3 text-right text-xs font-medium text-muted-foreground">Age</TableHead>
+                <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
+                {config.namespaced && <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Namespace")}</TableHead>}
+                <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Status")}</TableHead>
+                {config.extraColumns?.map((column) => <TableHead key={column.label} className="h-9 px-3 text-xs font-medium text-muted-foreground">{t(column.label)}</TableHead>)}
+                <TableHead className="h-9 px-3 text-right text-xs font-medium text-muted-foreground">{t("Age")}</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
@@ -2334,7 +2383,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
                       className="size-4 rounded border-border accent-primary"
                       checked={Boolean(selected[rowKey])}
                       onChange={(event) => setSelected((current) => ({ ...current, [rowKey]: event.target.checked }))}
-                      aria-label={`Select ${item.metadata.name}`}
+                      aria-label={t("Select {v0}", { v0: item.metadata.name })}
                     />
                   </TableCell>
                   <TableCell className="h-9 px-3 py-1.5">
@@ -2360,7 +2409,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
                         size="icon"
                         className="text-muted-foreground hover:text-destructive"
                         onClick={() => setDeleting(item)}
-                        title="Delete"
+                        title={t("Delete")}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -2377,15 +2426,71 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
-        title={`Delete ${config.kind} ${deleting?.metadata.name}?`}
-        description={deleting?.metadata.namespace ? `Namespace ${deleting.metadata.namespace}. This cannot be undone.` : "This cannot be undone."}
+        title={t("Delete {v0} {v1}?", { v0: config.kind, v1: deleting?.metadata.name })}
+        description={deleting?.metadata.namespace ? `Namespace ${deleting.metadata.namespace}. This cannot be undone.` : t("This cannot be undone.")}
         destructive
-        confirmLabel="Delete"
+        confirmLabel={t("Delete")}
         onConfirm={async () => {
           if (deleting) await remove(deleting)
         }}
       />
     </div>
+  )
+}
+
+/** Long annotation values (JSON, certificates) are clamped; JSON is pretty-printed when expanded. */
+function AnnotationValue({ value }: { value: string }) {
+  const [open, setOpen] = useState(false)
+  const long = value.length > 160 || value.includes("\n")
+  if (!long) return <span className="break-all font-mono text-xs">{value}</span>
+  let pretty = value
+  try {
+    pretty = JSON.stringify(JSON.parse(value), null, 2)
+  } catch {
+    // Not JSON; show as is.
+  }
+  return (
+    <div className="min-w-0">
+      {open
+        ? <pre className="max-h-80 overflow-auto rounded-md bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap break-all">{pretty}</pre>
+        : <span className="line-clamp-2 break-all font-mono text-xs">{value}</span>}
+      <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-xs text-primary hover:underline">{open ? t("Show less") : t("Show more")}</button>
+    </div>
+  )
+}
+
+function MetadataSection({ resource, labels, annotations }: { resource: KubeResource; labels: Array<[string, string]>; annotations: Array<[string, string]> }) {
+  const owners = resource.metadata.ownerReferences || []
+  return (
+    <SectionCard title={t("Metadata")}>
+      <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-[10rem_minmax(0,1fr)]">
+        <dt className="text-xs text-muted-foreground">{t("UID")}</dt>
+        <dd className="min-w-0 break-all font-mono text-xs">{resource.metadata.uid || "-"}</dd>
+        <dt className="text-xs text-muted-foreground">{t("Created")}</dt>
+        <dd className="text-sm" title={resource.metadata.creationTimestamp}>{relativeTime(resource.metadata.creationTimestamp)}</dd>
+        {owners.length > 0 && (
+          <>
+            <dt className="text-xs text-muted-foreground">{t("Owner")}</dt>
+            <dd className="min-w-0 font-mono text-xs">{owners.map((owner) => `${owner.kind}/${owner.name}`).join(", ")}</dd>
+          </>
+        )}
+        <dt className="text-xs text-muted-foreground">{t("Labels")}</dt>
+        <dd className="min-w-0"><ChipList values={labels.map(([key, value]) => `${key}=${value}`)} /></dd>
+        <dt className="text-xs text-muted-foreground">{t("Annotations")}</dt>
+        <dd className="min-w-0">
+          {annotations.length === 0 ? <span className="text-muted-foreground">-</span> : (
+            <div className="divide-y rounded-md border">
+              {annotations.map(([key, value]) => (
+                <div key={key} className="grid gap-1 px-3 py-2 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] md:gap-4">
+                  <span className="break-all font-mono text-xs text-muted-foreground">{key}</span>
+                  <AnnotationValue value={value} />
+                </div>
+              ))}
+            </div>
+          )}
+        </dd>
+      </dl>
+    </SectionCard>
   )
 }
 
@@ -2428,7 +2533,7 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
     return (
       <div className="flex h-64 items-center justify-center gap-2">
         <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-        <span className="text-sm text-muted-foreground">Loading...</span>
+        <span className="text-sm text-muted-foreground">{t("Loading...")}</span>
       </div>
     )
   }
@@ -2436,13 +2541,13 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
   if (!resource) {
     return (
       <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
-        {error || "Resource not found"}
+        {error || t("Resource not found")}
       </div>
     )
   }
 
   const labels = Object.entries(resource.metadata.labels || {})
-  const annotations = Object.entries(resource.metadata.annotations || {})
+  const annotations = Object.entries(resource.metadata.annotations || {}).filter(([key]) => !hiddenAnnotations.has(key))
   const reload = (navigateTo?: string) => {
     if (navigateTo) {
       navigate(navigateTo)
@@ -2483,15 +2588,15 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: config.title, to: config.path }, ...(resource.metadata.namespace ? [{ label: resource.metadata.namespace }] : []), { label: resource.metadata.name }]}
+        breadcrumbs={[{ label: t(config.title), to: config.path }, ...(resource.metadata.namespace ? [{ label: resource.metadata.namespace }] : []), { label: resource.metadata.name }]}
         title={resource.metadata.name}
         badge={<ResourceStatus resource={resource} config={config} />}
         subtitle={
           <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
             <span className="font-mono">{resource.kind || config.kind}</span>
             {resource.apiVersion && <span className="font-mono">{resource.apiVersion}</span>}
-            <span title={resource.metadata.creationTimestamp}>created {relativeTime(resource.metadata.creationTimestamp)}</span>
-            {!resource.metadata.namespace && <span>cluster scoped</span>}
+            <span title={resource.metadata.creationTimestamp}>{t("created {time}", { time: relativeTime(resource.metadata.creationTimestamp) })}</span>
+            {!resource.metadata.namespace && <span>{t("cluster scoped")}</span>}
           </span>
         }
         actions={
@@ -2502,12 +2607,12 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
             {menuActions.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="outline" className="gap-1.5">Actions<ChevronDown className="size-3.5" /></Button>
+                  <Button size="sm" variant="outline" className="gap-1.5">{t("Actions")}<ChevronDown className="size-3.5" /></Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
                   {menuActions.map((action) => (
                     <DropdownMenuItem key={action.id} variant={action.variant === "destructive" ? "destructive" : "default"} onClick={() => setOpenAction(action.id)}>
-                      {action.label}
+                      {t(action.label)}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
@@ -2533,7 +2638,7 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
 
       {relatedPods && (
         <RelatedPodsCard
-          title={relatedPods.title}
+          title={t(relatedPods.title)}
           namespace={relatedPods.namespace}
           selector={relatedPods.selector}
           selectors={relatedPods.selectors}
@@ -2542,19 +2647,7 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
         />
       )}
 
-      {(labels.length > 0 || annotations.length > 0) && (
-        <SectionCard title="Labels and annotations">
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-1.5">
-              {labels.map(([key, value]) => (
-                <span key={key} className="rounded border bg-muted/60 px-1.5 py-0.5 font-mono text-xs">{key}={value}</span>
-              ))}
-              {labels.length === 0 && <span className="text-sm text-muted-foreground">No labels</span>}
-            </div>
-            {annotations.length > 0 && <CompactKvTable rows={annotations.map(([label, value]) => ({ label, value }))} />}
-          </div>
-        </SectionCard>
-      )}
+      <MetadataSection resource={resource} labels={labels} annotations={annotations} />
     </div>
   )
 }
@@ -2565,7 +2658,7 @@ export function ResourceEvents({ config }: { config: ResourceConfig }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: config.title, to: config.path }, ...(scopedNamespace ? [{ label: scopedNamespace }] : []), { label: name || "" }]}
+        breadcrumbs={[{ label: t(config.title), to: config.path }, ...(scopedNamespace ? [{ label: scopedNamespace }] : []), { label: name || "" }]}
         title={name}
         subtitle={<span className="font-mono text-xs">{config.kind}</span>}
       />
@@ -2614,7 +2707,7 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
     return (
       <div className="flex h-64 items-center justify-center gap-2">
         <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-        <span className="text-sm text-muted-foreground">Loading...</span>
+        <span className="text-sm text-muted-foreground">{t("Loading...")}</span>
       </div>
     )
   }
@@ -2624,18 +2717,16 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: config.title, to: config.path }, ...(namespace && namespace !== "_cluster" ? [{ label: namespace }] : []), { label: name || "" }]}
+        breadcrumbs={[{ label: t(config.title), to: config.path }, ...(namespace && namespace !== "_cluster" ? [{ label: namespace }] : []), { label: name || "" }]}
         title={name}
         subtitle={<span className="font-mono text-xs">{config.kind}</span>}
         actions={
           <>
             <Button size="sm" variant="outline" disabled={!yaml} onClick={() => navigator.clipboard.writeText(yaml)} className="gap-2">
-              <Copy className="h-4 w-4" />
-              Copy
+              <Copy className="h-4 w-4" />{t("Copy")}
             </Button>
             <Button size="sm" variant="outline" onClick={load} className="gap-2">
-              <RefreshCw className="h-4 w-4" />
-              Refresh
+              <RefreshCw className="h-4 w-4" />{t("Refresh")}
             </Button>
           </>
         }

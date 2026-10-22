@@ -13,7 +13,7 @@ export const secretsConfig: ResourceConfig = {
     kind: "Secret",
     createFields: [
       ...shared.namespaceNameFields("example-ssh-key"),
-      { name: "key", label: "SSH Public Key", type: "textarea", defaultValue: "ssh-rsa AAAA..." },
+      { name: "key", label: "SSH public key", type: "textarea", defaultValue: "ssh-rsa AAAA..." },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "v1",
@@ -32,7 +32,7 @@ export const secretsConfig: ResourceConfig = {
       items: [
         { label: "Type", value: r.type },
         { label: "Keys", value: Object.keys(shared.getRecord(r.data)) },
-        { label: "String Data Keys", value: Object.keys(shared.getRecord(r.stringData)) },
+        { label: "String data keys", value: Object.keys(shared.getRecord(r.stringData)) },
       ],
     }],
     extraColumns: [

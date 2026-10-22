@@ -13,8 +13,8 @@ export const kubeOvnVpcsConfig: ResourceConfig = {
     createFields: [
       ...shared.nameOnlyFields("example-vpc"),
       { name: "namespaces", label: "Namespaces", section: "VPC", defaultValue: "", placeholder: "comma separated, optional" },
-      { name: "staticRoutes", label: "Static Route CIDR", section: "Routing", defaultValue: "", placeholder: "optional" },
-      { name: "nextHopIP", label: "Next Hop IP", section: "Routing", defaultValue: "", placeholder: "optional" },
+      { name: "staticRoutes", label: "Static route CIDR", section: "Routing", defaultValue: "", placeholder: "optional" },
+      { name: "nextHopIP", label: "Next hop IP", section: "Routing", defaultValue: "", placeholder: "optional" },
     ],
     buildCreateResource: (values) => {
       const namespaces = shared.stringValue(values.namespaces).split(",").map((item) => item.trim()).filter(Boolean);

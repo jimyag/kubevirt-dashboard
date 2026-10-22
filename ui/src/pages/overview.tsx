@@ -21,6 +21,7 @@ import {
 import { engineLabel, listAllSecurityGroups, useSgProvider } from "@/lib/security-groups"
 import { vmStatus, vmStatusGroup } from "@/lib/instances"
 import { toneClasses, type SectionTone } from "@/lib/navigation"
+import { t } from "@/lib/i18n"
 
 type EventLike = KubeObject & { type?: string; reason?: string; message?: string; lastTimestamp?: string; eventTime?: string; involvedObject?: { kind?: string; name?: string; namespace?: string } }
 
@@ -133,16 +134,16 @@ export function OverviewPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Overview"
-        actions={<Button asChild size="sm" className="gap-1.5"><Link to="/kubevirt/virtualization/virtual-machines/create"><Plus className="size-4" />Create instance</Link></Button>}
+        title={t("Overview")}
+        actions={<Button asChild size="sm" className="gap-1.5"><Link to="/kubevirt/virtualization/virtual-machines/create"><Plus className="size-4" />{t("Create instance")}</Link></Button>}
       />
 
       <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border bg-card md:grid-cols-5 md:divide-y-0">
-        <Metric tone="compute" label="Hosts" value={data.nodes.length} detail={`${readyNodes} ready`} to="/nodes" />
-        <Metric tone="compute" label="Instances" value={data.vms.length} detail={`${statusCounts.running} running`} to="/kubevirt/virtualization/virtual-machines" />
-        <Metric tone="compute" label="vCPU allocated" value={pct(allocation.vcpu, allocation.capacityCpu)} ratio={allocation.capacityCpu ? allocation.vcpu / allocation.capacityCpu : 0} detail={`${allocation.vcpu} of ${allocation.capacityCpu}`} />
-        <Metric tone="compute" label="Memory allocated" value={pct(allocation.memoryGi, allocation.capacityMemory)} ratio={allocation.capacityMemory ? allocation.memoryGi / allocation.capacityMemory : 0} detail={`${formatGi(Math.round(allocation.memoryGi))} of ${formatGi(Math.round(allocation.capacityMemory))}`} />
-        <Metric tone="storage" label="Disks" value={formatGi(diskGi)} detail={`${data.dvs.length} volumes`} to="/kubevirt/cdi/data-volumes" />
+        <Metric tone="compute" label={t("Hosts")} value={data.nodes.length} detail={t("{count} ready", { count: readyNodes })} to="/nodes" />
+        <Metric tone="compute" label={t("Instances")} value={data.vms.length} detail={t("{count} running", { count: statusCounts.running })} to="/kubevirt/virtualization/virtual-machines" />
+        <Metric tone="compute" label={t("vCPU allocated")} value={pct(allocation.vcpu, allocation.capacityCpu)} ratio={allocation.capacityCpu ? allocation.vcpu / allocation.capacityCpu : 0} detail={t("{used} of {total}", { used: allocation.vcpu, total: allocation.capacityCpu })} />
+        <Metric tone="compute" label={t("Memory allocated")} value={pct(allocation.memoryGi, allocation.capacityMemory)} ratio={allocation.capacityMemory ? allocation.memoryGi / allocation.capacityMemory : 0} detail={t("{used} of {total}", { used: formatGi(Math.round(allocation.memoryGi)), total: formatGi(Math.round(allocation.capacityMemory)) })} />
+        <Metric tone="storage" label={t("Disks")} value={formatGi(diskGi)} detail={t("{count} volumes", { count: data.dvs.length })} to="/kubevirt/cdi/data-volumes" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -151,23 +152,23 @@ export function OverviewPage() {
             minWidth={520}
             rows={data.nodes}
             rowKey={(node) => node.metadata.name}
-            empty={<EmptyState title="No hosts" />}
+            empty={<EmptyState title={t("No hosts")} />}
             columns={[
-              { header: "Host", cell: (node) => <Link to={`/nodes/_cluster/${node.metadata.name}`} className="font-medium hover:text-primary transition-colors">{node.metadata.name}</Link> },
-              { header: "Status", cell: (node) => <StatusDot status={asRecord(node.spec).unschedulable ? "Cordoned" : nodeReady(node) ? "Ready" : "NotReady"} /> },
-              { header: "Instances", className: "text-right", cell: (node) => <span className="tabular-nums">{data.vmis.filter((vmi) => str(asRecord(vmi.status).nodeName) === node.metadata.name).length}</span> },
+              { header: t("Host"), cell: (node) => <Link to={`/nodes/_cluster/${node.metadata.name}`} className="font-medium hover:text-primary transition-colors">{node.metadata.name}</Link> },
+              { header: t("Status"), cell: (node) => <StatusDot status={asRecord(node.spec).unschedulable ? "Cordoned" : nodeReady(node) ? "Ready" : "NotReady"} /> },
+              { header: t("Instances"), className: "text-right", cell: (node) => <span className="tabular-nums">{data.vmis.filter((vmi) => str(asRecord(vmi.status).nodeName) === node.metadata.name).length}</span> },
               {
-                header: nodeUsage ? "CPU used" : "vCPU",
+                header: nodeUsage ? t("CPU used") : "vCPU",
                 className: nodeUsage ? "w-44" : "text-right",
                 cell: (node) => {
                   const allocatable = parseCpuCores(asRecord(asRecord(node.status).allocatable).cpu)
                   const used = nodeUsage?.[node.metadata.name]?.cpuCores
                   if (used === undefined) return <span className="tabular-nums">{str(asRecord(asRecord(node.status).allocatable).cpu)}</span>
-                  return <UsageBar used={used} total={allocatable} label={`${used.toFixed(1)} / ${allocatable} cores`} />
+                  return <UsageBar used={used} total={allocatable} label={t("{v0} / {v1} cores", { v0: used.toFixed(1), v1: allocatable })} />
                 },
               },
               {
-                header: nodeUsage ? "Memory used" : "Memory",
+                header: nodeUsage ? t("Memory used") : t("Memory"),
                 className: nodeUsage ? "w-48" : "text-right",
                 cell: (node) => {
                   const allocatable = parseBytes(asRecord(asRecord(node.status).allocatable).memory)
@@ -179,9 +180,9 @@ export function OverviewPage() {
             ]}
           />
 
-          <Panel title="Warning events" bodyClassName="p-0">
+          <Panel title={t("Warning events")} bodyClassName="p-0">
             {warnings.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-muted-foreground">None</p>
+              <p className="px-4 py-3 text-sm text-muted-foreground">{t("None")}</p>
             ) : (
               <div className="divide-y">
                 {warnings.map((event) => (
@@ -199,35 +200,35 @@ export function OverviewPage() {
         </div>
 
         <div className="space-y-4">
-          <Panel title="Instances" bodyClassName="p-0 divide-y">
+          <Panel title={t("Instances")} bodyClassName="p-0 divide-y">
             <div className="flex h-1.5 overflow-hidden">
               {[["running", "bg-green-500"], ["transitioning", "bg-amber-500"], ["error", "bg-red-500"], ["stopped", "bg-muted-foreground/30"]].map(([id, color]) => statusCounts[id] > 0 && (
                 <div key={id} className={color} style={{ width: `${(statusCounts[id] / Math.max(1, data.vms.length)) * 100}%` }} />
               ))}
             </div>
             {statusRows.map((row) => (
-              <CountRow key={row.id} label={row.label} value={statusCounts[row.id]} to="/kubevirt/virtualization/virtual-machines">
-                <StatusDot status={row.status} label={row.label} />
+              <CountRow key={row.id} label={t(row.label)} value={statusCounts[row.id]} to="/kubevirt/virtualization/virtual-machines">
+                <StatusDot status={row.status} label={t(row.label)} />
               </CountRow>
             ))}
           </Panel>
 
-          <Panel title="Network" description={profile.label} actions={<Link to="/settings" className="text-xs text-muted-foreground hover:text-foreground">Change</Link>} bodyClassName="p-0 divide-y">
+          <Panel title={t("Network")} description={t(profile.label)} actions={<Link to="/settings" className="text-xs text-muted-foreground hover:text-foreground">{t("Change")}</Link>} bodyClassName="p-0 divide-y">
             {profile.vpc && (
               <>
-                <CountRow label="VPCs" value={data.vpcs.length} to="/vpc/vpcs" />
-                <CountRow label="Subnets" value={data.subnets.length} to="/vpc/subnets" />
-                <CountRow label="Elastic IPs" value={data.eips.length} to="/vpc/elastic-ips" />
+                <CountRow label={t("VPCs")} value={data.vpcs.length} to="/vpc/vpcs" />
+                <CountRow label={t("Subnets")} value={data.subnets.length} to="/vpc/subnets" />
+                <CountRow label={t("Elastic IPs")} value={data.eips.length} to="/vpc/elastic-ips" />
               </>
             )}
             {providers.length > 0 ? (
-              <CountRow label={`Security groups (${providers.map((engine) => engineLabel[engine]).join(", ")})`} value={data.securityGroups.length} to="/vpc/security-groups" />
+              <CountRow label={t("Security groups ({v0})", { v0: providers.map((engine) => engineLabel[engine]).join(", ") })} value={data.securityGroups.length} to="/vpc/security-groups" />
             ) : (
-              <CountRow label="Network policies" value="" to="/networks/kubernetes/network-policies" />
+              <CountRow label={t("Network policies")} value="" to="/networks/kubernetes/network-policies" />
             )}
           </Panel>
 
-          <Panel title="KubeVirt" bodyClassName="p-0 divide-y">
+          <Panel title={t("KubeVirt")} bodyClassName="p-0 divide-y">
             {components.map((item) => (
               <CountRow key={item.component} label={item.component} value={item.total ? `${item.running}/${item.total}` : "-"}>
                 <StatusDot status={item.total === 0 ? "Unknown" : item.running === item.total ? "Running" : "Degraded"} label={item.component} />

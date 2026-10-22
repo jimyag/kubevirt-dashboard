@@ -12,12 +12,12 @@ export const ingressesConfig: ResourceConfig = {
     kind: "Ingress",
     createFields: [
       ...shared.namespaceNameFields("example-ingress"),
-      { name: "className", label: "Ingress Class", section: "Routing", defaultValue: "nginx", placeholder: "optional" },
+      { name: "className", label: "Ingress class", section: "Routing", defaultValue: "nginx", placeholder: "optional" },
       { name: "host", label: "Host", section: "Routing", defaultValue: "example.local" },
       { name: "path", label: "Path", section: "Routing", defaultValue: "/" },
-      { name: "serviceName", label: "Service Name", section: "Backend", defaultValue: "example-service" },
-      { name: "servicePort", label: "Service Port", section: "Backend", type: "number", defaultValue: "80" },
-      { name: "tlsSecretName", label: "TLS Secret", section: "TLS", defaultValue: "", placeholder: "optional" },
+      { name: "serviceName", label: "Service name", section: "Backend", defaultValue: "example-service" },
+      { name: "servicePort", label: "Service port", section: "Backend", type: "number", defaultValue: "80" },
+      { name: "tlsSecretName", label: "TLS secret", section: "TLS", defaultValue: "", placeholder: "optional" },
     ],
     buildCreateResource: (values) => {
       const host = shared.stringValue(values.host, "example.local");

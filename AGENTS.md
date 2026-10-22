@@ -93,6 +93,13 @@ kubevirt-console/
 - 状态色同时给出暗色值，例如 `text-red-700 dark:text-red-400`
 - 暗色模式通过 `next-themes`（`ThemeProvider`）管理，在 `main.tsx` 配置
 
+### 7. 国际化
+
+- 所有界面文案用英文书写并通过 `lib/i18n.ts` 的 `t()` 输出，例如 `t("Create instance")`、`t("Delete {name}?", { name })`；英文原文即 key，缺少翻译时回退为英文
+- 新增或修改文案时，同步在 `ui/src/lib/locales/zh.ts` 中补充简体中文翻译
+- 只在渲染时调用 `t()`，不要在模块顶层调用（切换语言会重新挂载界面，但模块级常量不会重新计算）；模块级的标签数组保留英文，在渲染处再 `t(item.label)`
+- 资源名称、Kind、字段值等技术内容不翻译；`StatusDot` 的 `status` 传原始英文状态（用于判断颜色），显示时会自动翻译
+
 ---
 
 ## 依赖规范

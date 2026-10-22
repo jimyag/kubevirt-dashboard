@@ -10,7 +10,7 @@ export const kubeOvnSwitchLBRulesConfig: ResourceConfig = shared.kubeOvnResource
     createFields: [
       { name: "vip", label: "VIP", section: "Load Balancer", defaultValue: "10.16.0.100" },
       { name: "ports", label: "Ports", section: "Load Balancer", defaultValue: "80" },
-      { name: "sessionAffinity", label: "Session Affinity", section: "Load Balancer", defaultValue: "", placeholder: "optional" },
+      { name: "sessionAffinity", label: "Session affinity", section: "Load Balancer", defaultValue: "", placeholder: "optional" },
     ],
     buildSpec: (values) => ({ vip: shared.stringValue(values.vip), ports: shared.csvList(values.ports), ...(shared.stringValue(values.sessionAffinity) ? { sessionAffinity: shared.stringValue(values.sessionAffinity) } : {}) }),
     statusPath: ["status", "service"],

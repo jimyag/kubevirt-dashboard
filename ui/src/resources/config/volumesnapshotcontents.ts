@@ -14,12 +14,12 @@ export const volumesnapshotcontentsConfig: ResourceConfig = {
     kind: "VolumeSnapshotContent",
     createFields: [
       ...shared.nameOnlyFields("example-snapshot-content"),
-      { name: "snapshotName", label: "Snapshot Name", section: "Snapshot Ref", defaultValue: "example-snapshot" },
-      { name: "snapshotNamespace", label: "Snapshot Namespace", section: "Snapshot Ref", defaultValue: "default" },
-      { name: "snapshotClassName", label: "Snapshot Class", section: "Snapshot", defaultValue: "example-snapshot-class" },
+      { name: "snapshotName", label: "Snapshot name", section: "Snapshot Ref", defaultValue: "example-snapshot" },
+      { name: "snapshotNamespace", label: "Snapshot namespace", section: "Snapshot Ref", defaultValue: "default" },
+      { name: "snapshotClassName", label: "Snapshot class", section: "Snapshot", defaultValue: "example-snapshot-class" },
       { name: "driver", label: "Driver", section: "Driver", defaultValue: "example.csi.io" },
-      { name: "deletionPolicy", label: "Deletion Policy", section: "Policy", type: "select", defaultValue: "Delete", options: [{ label: "Delete", value: "Delete" }, { label: "Retain", value: "Retain" }] },
-      { name: "snapshotHandle", label: "Snapshot Handle", section: "Source", defaultValue: "snapshot-handle" },
+      { name: "deletionPolicy", label: "Deletion policy", section: "Policy", type: "select", defaultValue: "Delete", options: [{ label: "Delete", value: "Delete" }, { label: "Retain", value: "Retain" }] },
+      { name: "snapshotHandle", label: "Snapshot handle", section: "Source", defaultValue: "snapshot-handle" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "snapshot.storage.k8s.io/v1",

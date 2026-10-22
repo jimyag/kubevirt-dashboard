@@ -8,8 +8,8 @@ export const kubeOvnSecurityGroupsConfig: ResourceConfig = shared.kubeOvnResourc
     subtitle: "Manage Kube-OVN SecurityGroup resources",
     kind: "SecurityGroup",
     createFields: [
-      { name: "allowSameGroupTraffic", label: "Allow Same Group Traffic", section: "Security Group", type: "checkbox", defaultValue: true },
-      { name: "ingressRules", label: "Ingress Rules", section: "Security Group", type: "textarea", defaultValue: "", placeholder: "edit detailed rules in manifest" },
+      { name: "allowSameGroupTraffic", label: "Allow same group traffic", section: "Security Group", type: "checkbox", defaultValue: true },
+      { name: "ingressRules", label: "Ingress rules", section: "Security Group", type: "textarea", defaultValue: "", placeholder: "edit detailed rules in manifest" },
     ],
     buildSpec: (values) => ({ allowSameGroupTraffic: values.allowSameGroupTraffic === true }),
     statusPath: ["status", "allowSameGroupTraffic"],

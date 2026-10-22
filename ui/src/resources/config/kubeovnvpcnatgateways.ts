@@ -11,8 +11,8 @@ export const kubeOvnVpcNatGatewaysConfig: ResourceConfig = shared.kubeOvnResourc
       { name: "vpc", label: "VPC", section: "Gateway", defaultValue: "", placeholder: "custom VPC name" },
       { name: "subnet", label: "Subnet", section: "Gateway", defaultValue: "", placeholder: "subnet in the VPC" },
       { name: "lanIp", label: "LAN IP", section: "Gateway", defaultValue: "", placeholder: "unused IP in the subnet" },
-      { name: "externalSubnets", label: "External Subnets", section: "Gateway", defaultValue: "", placeholder: "comma separated, optional" },
-      { name: "qosPolicy", label: "QoS Policy", section: "Gateway", defaultValue: "", placeholder: "optional" },
+      { name: "externalSubnets", label: "External subnets", section: "Gateway", defaultValue: "", placeholder: "comma separated, optional" },
+      { name: "qosPolicy", label: "QoS policy", section: "Gateway", defaultValue: "", placeholder: "optional" },
     ],
     // VpcNatGateway spec (kubeovn.io/v1): vpc, subnet, lanIp, externalSubnets, qosPolicy, selector, ...
     buildSpec: (values) => {

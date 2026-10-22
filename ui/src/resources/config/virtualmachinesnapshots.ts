@@ -27,16 +27,16 @@ export const virtualmachinesnapshotsConfig: ResourceConfig = {
         {
           title: "Snapshot Source",
           items: [
-            { label: "Source Kind", value: shared.getRecord(spec.source).kind },
+            { label: "Source kind", value: shared.getRecord(spec.source).kind },
             { label: "Source VM", value: shared.getRecord(spec.source).name },
-            { label: "Ready To Use", value: status.readyToUse },
-            { label: "Creation Time", value: status.creationTime },
+            { label: "Ready to use", value: status.readyToUse },
+            { label: "Creation time", value: status.creationTime },
           ],
         },
         {
           title: "Snapshot Content",
           items: [
-            { label: "Content Name", value: status.virtualMachineSnapshotContentName },
+            { label: "Content name", value: status.virtualMachineSnapshotContentName },
             { label: "Indications", value: status.indications },
           ],
         },

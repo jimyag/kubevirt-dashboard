@@ -14,11 +14,11 @@ export const csistoragecapacitiesConfig: ResourceConfig = {
     kind: "CSIStorageCapacity",
     createFields: [
       ...shared.namespaceNameFields("example-capacity", "default"),
-      { name: "storageClassName", label: "Storage Class", section: "Capacity", defaultValue: "standard" },
+      { name: "storageClassName", label: "Storage class", section: "Capacity", defaultValue: "standard" },
       { name: "capacity", label: "Capacity", section: "Capacity", defaultValue: "100Gi" },
-      { name: "maximumVolumeSize", label: "Maximum Volume Size", section: "Capacity", defaultValue: "", placeholder: "optional" },
-      { name: "topologyKey", label: "Topology Key", section: "Topology", defaultValue: "", placeholder: "topology.kubernetes.io/zone" },
-      { name: "topologyValue", label: "Topology Value", section: "Topology", defaultValue: "", placeholder: "us-east-1a" },
+      { name: "maximumVolumeSize", label: "Maximum volume size", section: "Capacity", defaultValue: "", placeholder: "optional" },
+      { name: "topologyKey", label: "Topology key", section: "Topology", defaultValue: "", placeholder: "topology.kubernetes.io/zone" },
+      { name: "topologyValue", label: "Topology value", section: "Topology", defaultValue: "", placeholder: "us-east-1a" },
     ],
     buildCreateResource: (values) => {
       const maximumVolumeSize = shared.stringValue(values.maximumVolumeSize);
@@ -37,9 +37,9 @@ export const csistoragecapacitiesConfig: ResourceConfig = {
     statusPath: ["storageClassName"],
     detailSections: shared.csiStorageCapacityDetailSections,
     extraColumns: [
-      { label: "Storage Class", value: (r) => String(shared.getRecord(r).storageClassName || "N/A") },
+      { label: "Storage class", value: (r) => String(shared.getRecord(r).storageClassName || "N/A") },
       { label: "Capacity", value: (r) => String(shared.getRecord(r).capacity || "N/A") },
-      { label: "Max Volume", value: (r) => String(shared.getRecord(r).maximumVolumeSize || "N/A") },
+      { label: "Max volume", value: (r) => String(shared.getRecord(r).maximumVolumeSize || "N/A") },
     ],
     createTemplate: `apiVersion: storage.k8s.io/v1beta1
 kind: CSIStorageCapacity

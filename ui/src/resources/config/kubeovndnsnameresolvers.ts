@@ -8,7 +8,7 @@ export const kubeOvnDNSNameResolversConfig: ResourceConfig = shared.kubeOvnResou
     subtitle: "Manage Kube-OVN DNSNameResolver resources",
     kind: "DNSNameResolver",
     createFields: [
-      { name: "names", label: "DNS Names", section: "Resolver", defaultValue: "example.com", placeholder: "comma separated" },
+      { name: "names", label: "DNS names", section: "Resolver", defaultValue: "example.com", placeholder: "comma separated" },
     ],
     buildSpec: (values) => ({ names: shared.csvList(values.names) }),
     statusPath: ["status", "resolved"],
