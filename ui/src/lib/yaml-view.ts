@@ -148,3 +148,29 @@ export const diffHunks = (lines: DiffLine[], context = 3): Array<DiffLine | null
   if (out[out.length - 1] === null) out.pop()
   return out
 }
+
+/**
+ * Foldable blocks: start line index -> last line index of its children. A line opens a block when
+ * the following lines are indented deeper, or when it is a bare `key:` followed by list items at
+ * the same indent (kubectl style, `- ` not indented under its key).
+ */
+export const foldRanges = (source: string): Map<number, number> => {
+  const lines = source.split("\n")
+  const indentOf = (line: string) => line.length - line.trimStart().length
+  const ranges = new Map<number, number>()
+  lines.forEach((line, start) => {
+    if (!line.trim()) return
+    const indent = indentOf(line)
+    const bareKey = /:\s*(?:[|>][-+]?\d*)?\s*$/.test(line)
+    let end = start
+    for (let j = start + 1; j < lines.length; j++) {
+      const next = lines[j]
+      if (!next.trim()) continue
+      const nextIndent = indentOf(next)
+      if (nextIndent > indent || (bareKey && nextIndent === indent && next.trimStart().startsWith("- "))) end = j
+      else break
+    }
+    if (end > start) ranges.set(start, end)
+  })
+  return ranges
+}

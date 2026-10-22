@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { apiFetch, asRecord, getContext, listItems, str, type KubeObject } from "./kube"
 import { t } from "./i18n"
+import { usePolling } from "./polling"
 
 // --- Quantities ---
 
@@ -80,22 +81,24 @@ export const fetchInstanceUsage = async (namespace?: string): Promise<Record<str
 /** Polls a metrics-server fetcher; returns null while unavailable. */
 export function useMetricsPoll<T>(fetcher: () => Promise<T | null>, deps: unknown[], intervalMs = 30000) {
   const [data, setData] = useState<T | null>(null)
+  // Each deps change starts a new generation; late responses from older ones are dropped.
+  const generation = useRef(0)
+  const latest = useRef(fetcher)
   useEffect(() => {
-    let cancelled = false
-    const tick = () => {
-      if (document.hidden) return
-      fetcher().then((next) => {
-        if (!cancelled) setData(next)
-      })
-    }
+    latest.current = fetcher
+  })
+  const tick = useCallback(() => {
+    const current = generation.current
+    latest.current().then((next) => {
+      if (generation.current === current) setData(next)
+    })
+  }, [])
+  useEffect(() => {
+    generation.current += 1
     tick()
-    const timer = setInterval(tick, intervalMs)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
+  usePolling(tick, intervalMs)
   return data
 }
 

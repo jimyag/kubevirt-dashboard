@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import type { ResourceConfig } from "@/components/resource-management";
-import { DataTable, EmptyState, PageHeader, Section } from "@/components/console";
+import { DataTable, EmptyState, FilterInput, PageHeader, Section, Toolbar } from "@/components/console";
+import { useFilteredRows, type FilterField } from "@/lib/filter";
 import {
   apiVersionFromListPath,
   expandListPaths as listPathCandidates,
@@ -59,19 +60,29 @@ function useAvailableResources(resources: ResourceConfig[]) {
   return available;
 }
 
-function ResourceConfigTable({ resources }: { resources: ResourceConfig[] }) {
+const configFields: FilterField<ResourceConfig>[] = [
+  // Match both the English and the translated title.
+  { key: "name", label: "Name", value: (config) => [config.title, t(config.title)] },
+  { key: "kind", label: "Kind", value: (config) => config.kind },
+  { key: "api", label: "API", value: (config) => apiVersionFromListPath(config.listPath) || "v1" },
+  { key: "scope", label: "Scope", value: (config) => (config.namespaced ? "Namespaced" : "Cluster") },
+]
+
+function ResourceConfigTable({ resources, query = "" }: { resources: ResourceConfig[]; query?: string }) {
   const available = useAvailableResources(resources)
   const visibleResources = useMemo(() => resources.filter((config) => available[config.path] !== false), [available, resources])
+  const matched = useFilteredRows(visibleResources, configFields, query)
   const hidden = resources.length - visibleResources.length
 
   if (Object.keys(available).length > 0 && visibleResources.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("Not served by this cluster.")}</p>
+    return query ? null : <p className="text-sm text-muted-foreground">{t("Not served by this cluster.")}</p>
   }
+  if (query.trim() && matched.length === 0) return null
 
   return (
     <div className="space-y-2">
       <DataTable
-        rows={visibleResources}
+        rows={matched}
         rowKey={(config) => config.path}
         minWidth={640}
         empty={<EmptyState title={t("Not served by this cluster")} />}
@@ -82,7 +93,7 @@ function ResourceConfigTable({ resources }: { resources: ResourceConfig[] }) {
           { header: t("Scope"), className: "text-right", cell: (config) => <span className="text-sm text-muted-foreground">{config.namespaced ? t("Namespaced") : t("Cluster")}</span> },
         ]}
       />
-      {hidden > 0 && <p className="text-xs text-muted-foreground">{hidden} {t("not served by this cluster, hidden.")}</p>}
+      {hidden > 0 && !query.trim() && <p className="text-xs text-muted-foreground">{t("{count} not served by this cluster, hidden.", { count: hidden })}</p>}
     </div>
   )
 }
@@ -94,21 +105,60 @@ type ResourceGroup = {
   resources: ResourceConfig[]
 }
 
+const allResources = (groups: ResourceGroup[]) => groups.flatMap((group) => group.resources)
+
 function GroupIndexPage({ title, base, groups }: { title: string; base: string; groups: ResourceGroup[] }) {
+  const [query, setQuery] = useState("")
+  const rows = useMemo(() => allResources(groups), [groups])
   return (
     <div className="space-y-6">
       <PageHeader breadcrumbs={[{ label: t("Resource Catalog"), to: "/catalog" }, { label: title }]} title={title} />
+      <Toolbar right={<FilterInput value={query} onChange={setQuery} fields={configFields} rows={rows} placeholder={t("Filter, e.g. pod kind:Deployment")} />} />
       {groups.map((group) => (
-        <Section key={group.slug} title={<Link to={`${base}/${group.slug}`} className="hover:text-primary transition-colors">{t(group.title)}</Link>}>
-          <ResourceConfigTable resources={group.resources} />
-        </Section>
+        <GroupSection key={group.slug} group={group} base={base} query={query} />
       ))}
+    </div>
+  )
+}
+
+/** A group's table under its title; renders nothing when a query matches none of its resources. */
+function GroupSection({ group, base, query }: { group: ResourceGroup; base: string; query: string }) {
+  const matched = useFilteredRows(group.resources, configFields, query)
+  if (query.trim() && matched.length === 0) return null
+  return (
+    <Section title={<Link to={`${base}/${group.slug}`} className="hover:text-primary transition-colors">{t(group.title)}</Link>}>
+      <ResourceConfigTable resources={group.resources} query={query} />
+    </Section>
+  )
+}
+
+/**
+ * Search over every catalog resource for the Resource Catalog page; shows `children` (the
+ * provider list) while the query is empty.
+ */
+export function ResourceCatalogSearch({ children }: { children: ReactNode }) {
+  const [query, setQuery] = useState("")
+  const rows = useMemo(
+    () => allResources([...kubevirtResourceGroups, ...storageResourceGroups, ...networkResourceGroups, ...kubernetesResourceGroups])
+      .filter((config, index, list) => list.findIndex((item) => item.path === config.path) === index),
+    [],
+  )
+  const matched = useFilteredRows(rows, configFields, query)
+  return (
+    <div className="space-y-4">
+      <Toolbar right={<FilterInput value={query} onChange={setQuery} fields={configFields} rows={rows} placeholder={t("Filter, e.g. pod kind:Deployment")} />} />
+      {!query.trim() ? children : matched.length === 0 ? (
+        <div className="rounded-lg border bg-card"><EmptyState title={t("No matching resources")} /></div>
+      ) : (
+        <ResourceConfigTable resources={rows} query={query} />
+      )}
     </div>
   )
 }
 
 function GroupCategoryPage({ title, base, groups }: { title: string; base: string; groups: ResourceGroup[] }) {
   const { category } = useParams()
+  const [query, setQuery] = useState("")
   const group = groups.find((item) => item.slug === category)
   if (!group) return <EmptyState title={t("{v0} category not found", { v0: title })} />
   return (
@@ -116,9 +166,10 @@ function GroupCategoryPage({ title, base, groups }: { title: string; base: strin
       <PageHeader
         breadcrumbs={[{ label: t("Resource Catalog"), to: "/catalog" }, { label: title, to: base }, { label: group.title }]}
         title={t(group.title)}
-        subtitle={group.description}
+        subtitle={t(group.description)}
       />
-      <ResourceConfigTable resources={group.resources} />
+      <Toolbar right={<FilterInput value={query} onChange={setQuery} fields={configFields} rows={group.resources} placeholder={t("Filter, e.g. pod kind:Deployment")} />} />
+      <ResourceConfigTable resources={group.resources} query={query} />
     </div>
   )
 }

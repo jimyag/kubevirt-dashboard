@@ -145,7 +145,7 @@ export function CreateSubnetDialog({
       onOpenChange(false)
       onCreated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create subnet")
+      setError(err instanceof Error ? err.message : t("Failed to create subnet"))
     } finally {
       setBusy(false)
     }
@@ -236,7 +236,7 @@ function CreateVpcDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
       onOpenChange(false)
       onCreated(name)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create VPC")
+      setError(err instanceof Error ? err.message : t("Failed to create VPC"))
     } finally {
       setBusy(false)
     }
@@ -626,7 +626,7 @@ export function SubnetDetailPage() {
       setRules(null)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save ACL")
+      setError(err instanceof Error ? err.message : t("Failed to save ACL"))
     } finally {
       setSaving(false)
     }

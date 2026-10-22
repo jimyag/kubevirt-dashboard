@@ -16,6 +16,7 @@ import {
 } from "@/lib/kube"
 import { engineResource } from "@/lib/security-groups"
 import { locales, setLocale, t, useLocale } from "@/lib/i18n"
+import { ResourceCatalogSearch } from "@/resources/group-pages"
 
 const components: Array<{ name: string; description: string; check: [string, string] }> = [
   { name: "KubeVirt", description: "Virtual machine runtime", check: ["kubevirt.io/v1", "virtualmachines"] },
@@ -143,7 +144,7 @@ function MonitoringSettings() {
       const version = await testPrometheus(form)
       setStatus({ ok: true, text: t("Connected to Prometheus {version}", { version }) })
     } catch (err) {
-      setStatus({ ok: false, text: err instanceof Error ? err.message : "Connection failed" })
+      setStatus({ ok: false, text: err instanceof Error ? err.message : t("Connection failed") })
     } finally {
       setTesting(false)
     }
@@ -183,7 +184,7 @@ function MonitoringSettings() {
         <Button size="sm" variant="outline" onClick={test} disabled={testing || !form.namespace || !form.service || !form.port}>{testing ? t("Testing...") : t("Test connection")}</Button>
         <Button size="sm" onClick={() => writePrometheusConfig(form)} disabled={!dirty || !form.namespace || !form.service || !form.port}>{saved ? t("Save") : t("Enable Prometheus")}</Button>
         {saved && <Button size="sm" variant="ghost" onClick={() => writePrometheusConfig(null)}>{t("Disable")}</Button>}
-        <span className="text-xs text-muted-foreground">{saved ? `In use: ${saved.namespace}/${saved.service}:${saved.port}` : t("Not configured: instance pages show live metrics-server samples only.")}</span>
+        <span className="text-xs text-muted-foreground">{saved ? t("In use: {target}", { target: `${saved.namespace}/${saved.service}:${saved.port}` }) : t("Not configured: instance pages show live metrics-server samples only.")}</span>
       </div>
     </Panel>
   )
@@ -193,17 +194,19 @@ export function CatalogPage() {
   return (
     <div className="space-y-5">
       <PageHeader title={t("Resource Catalog")} subtitle={t("Raw API resources, grouped by provider.")} />
-      <div className="divide-y rounded-lg border bg-card">
-        {catalog.map((item) => (
-          <Link key={item.to} to={item.to} className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-muted/50">
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{t(item.title)}</div>
-              <div className="text-xs text-muted-foreground">{t(item.description)}</div>
-            </div>
-            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-          </Link>
-        ))}
-      </div>
+      <ResourceCatalogSearch>
+        <div className="divide-y rounded-lg border bg-card">
+          {catalog.map((item) => (
+            <Link key={item.to} to={item.to} className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-muted/50">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t(item.title)}</div>
+                <div className="text-xs text-muted-foreground">{t(item.description)}</div>
+              </div>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </Link>
+          ))}
+        </div>
+      </ResourceCatalogSearch>
     </div>
   )
 }

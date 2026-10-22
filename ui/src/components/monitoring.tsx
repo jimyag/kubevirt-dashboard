@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Activity, RefreshCw } from "lucide-react"
@@ -16,12 +16,13 @@ import {
   type PrometheusConfig,
   type Series,
 } from "@/lib/metrics"
-import { t } from "@/lib/i18n"
+import { dateLocale, t } from "@/lib/i18n"
+import { usePolling } from "@/lib/polling"
 
 type ChartSeries = { key: string; label: string; color: string }
 
-const timeLabel = (t: number, rangeSeconds: number) =>
-  new Date(t).toLocaleString(undefined, rangeSeconds > 86400 ? { month: "numeric", day: "numeric", hour: "2-digit" } : { hour: "2-digit", minute: "2-digit" })
+const timeLabel = (ms: number, rangeSeconds: number) =>
+  new Date(ms).toLocaleString(dateLocale(), rangeSeconds > 86400 ? { month: "numeric", day: "numeric", hour: "2-digit" } : { hour: "2-digit", minute: "2-digit" })
 
 /** Small area chart; `data` rows carry `t` (ms) plus one numeric field per series key. */
 export function MetricChart({
@@ -48,10 +49,10 @@ export function MetricChart({
           <ResponsiveContainer>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-              <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={(t) => timeLabel(t, rangeSeconds)} fontSize={11} tickLine={false} axisLine={false} stroke="var(--muted-foreground)" minTickGap={40} />
+              <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={(ms) => timeLabel(ms, rangeSeconds)} fontSize={11} tickLine={false} axisLine={false} stroke="var(--muted-foreground)" minTickGap={40} />
               <YAxis tickFormatter={format} fontSize={11} tickLine={false} axisLine={false} stroke="var(--muted-foreground)" width={72} />
               <Tooltip
-                labelFormatter={(t) => new Date(Number(t)).toLocaleString()}
+                labelFormatter={(ms) => new Date(Number(ms)).toLocaleString(dateLocale())}
                 formatter={(value, name) => [format(Number(value)), series.find((item) => item.key === name)?.label || String(name)]}
                 contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--popover-foreground)" }}
               />
@@ -105,7 +106,7 @@ function PrometheusCharts({ config, namespace, name }: { config: PrometheusConfi
         setError("")
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Prometheus query failed")
+        if (!cancelled) setError(err instanceof Error ? err.message : t("Prometheus query failed"))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -115,12 +116,7 @@ function PrometheusCharts({ config, namespace, name }: { config: PrometheusConfi
     }
   }, [config, queries, range, tick])
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (!document.hidden) setTick((current) => current + 1)
-    }, 60000)
-    return () => clearInterval(timer)
-  }, [])
+  usePolling(() => setTick((current) => current + 1), 60000)
 
   const last = (key: string) => {
     const points = data[key]?.[0]?.points || []
@@ -169,24 +165,25 @@ function LiveCharts({ namespace, name }: { namespace: string; name: string }) {
   const [samples, setSamples] = useState<Array<Record<string, number>>>([])
   const [available, setAvailable] = useState<boolean | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    const sample = () => {
-      if (document.hidden) return
-      fetchInstanceUsage(namespace).then((usage) => {
-        if (cancelled) return
-        setAvailable(usage !== null)
-        const current = usage?.[`${namespace}/${name}`]
-        if (current) setSamples((previous) => [...previous.slice(-59), { t: Date.now(), cpu: current.cpuCores, memory: current.memoryBytes }])
-      })
-    }
-    sample()
-    const timer = setInterval(sample, 10000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
+  // Ignore responses for an instance the page no longer shows.
+  const shown = useRef("")
+  const sample = useCallback(() => {
+    const key = `${namespace}/${name}`
+    fetchInstanceUsage(namespace).then((usage) => {
+      if (shown.current !== key) return
+      setAvailable(usage !== null)
+      const current = usage?.[key]
+      if (current) setSamples((previous) => [...previous.slice(-59), { t: Date.now(), cpu: current.cpuCores, memory: current.memoryBytes }])
+    })
   }, [namespace, name])
+  useEffect(() => {
+    shown.current = `${namespace}/${name}`
+    sample()
+    return () => {
+      shown.current = ""
+    }
+  }, [namespace, name, sample])
+  usePolling(sample, 10000)
 
   if (available === false) {
     return <EmptyState icon={Activity} title={t("No metrics source")} description={t("Install metrics-server for live usage, or configure Prometheus in Settings for history.")} />

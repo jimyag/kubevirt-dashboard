@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { Bell, RefreshCw } from "lucide-react"
 
@@ -9,6 +9,7 @@ import { relativeTime } from "@/lib/kube"
 import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { eventCount, eventTime, fetchEvents, involvedObjectPath, type KubeEvent } from "@/lib/events"
 import { t } from "@/lib/i18n"
+import { usePolling } from "@/lib/polling"
 
 const eventFields: FilterField<KubeEvent>[] = [
   { key: "type", label: "Type", value: (event) => event.type || "Normal" },
@@ -29,12 +30,15 @@ export function EventList({
   refreshMs = 15000,
   toolbarExtra,
   prefilter,
+  onEvents,
 }: {
   url: string
   showObject?: boolean
   refreshMs?: number
   toolbarExtra?: ReactNode
   prefilter?: (event: KubeEvent) => boolean
+  /** Called with each loaded batch, e.g. to suggest the object kinds present. */
+  onEvents?: (events: KubeEvent[]) => void
 }) {
   const [events, setEvents] = useState<KubeEvent[]>([])
   const [loading, setLoading] = useState(true)
@@ -42,6 +46,10 @@ export function EventList({
   const [type, setType] = useState("")
   const [search, setSearch] = useState("")
   const [tick, setTick] = useState(0)
+  const onEventsRef = useRef(onEvents)
+  useEffect(() => {
+    onEventsRef.current = onEvents
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -49,10 +57,11 @@ export function EventList({
       .then((items) => {
         if (cancelled) return
         setEvents(items)
+        onEventsRef.current?.(items)
         setError("")
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load events")
+        if (!cancelled) setError(err instanceof Error ? err.message : t("Failed to load events"))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -62,13 +71,7 @@ export function EventList({
     }
   }, [url, tick])
 
-  useEffect(() => {
-    if (!refreshMs) return
-    const timer = setInterval(() => {
-      if (!document.hidden) setTick((current) => current + 1)
-    }, refreshMs)
-    return () => clearInterval(timer)
-  }, [refreshMs])
+  usePolling(() => setTick((current) => current + 1), refreshMs)
 
   const scoped = useMemo(() => {
     const typeNeedle = type.trim().toLowerCase()

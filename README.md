@@ -10,7 +10,8 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 - **Instance wizard**: create a VM step by step (spec or instance type, image and disks, VPC/subnet and security groups, cloud-init login) and review the exact manifest before submitting.
 - **Network stacks**: detects Kube-OVN and Cilium and adapts instance networking and security groups (see below).
 - **Filtering**: every list filter is a text box with suggestions (namespaces, VPCs, kinds), and the search box filters any shown column with `field:value` tokens, e.g. `web status:running host:node-1 -ns:dev`. An exact namespace is sent to the API; partial text filters locally. Long lists are paged.
-- **NAT**: elastic IPs, SNAT, DNAT and floating IPs for both Kube-OVN NAT models: VPC NAT gateways (`IptablesEIP`, `Iptables*Rule`) and OVN native NAT (`OvnEip`, `OvnSnatRule`, `OvnDnatRule`, `OvnFip`).
+- **NAT**: elastic IPs, SNAT, DNAT and floating IPs for both Kube-OVN NAT models: VPC NAT gateways (`IptablesEIP`, `Iptables*Rule`) and OVN native NAT (`OvnEip`, `OvnSnatRule`, `OvnDnatRule`, `OvnFip`). An instance's network tab shows its elastic IPs and binds a floating IP or adds port forwarding directly.
+- **Manifests**: `kubectl get -o yaml` output with highlighting, search and folding; edits are saved after a diff review and rejected if someone else changed the object meanwhile.
 - **Events and monitoring**: a cluster-wide event browser, events on every resource detail page, live CPU and memory from metrics-server, and VM history charts from Prometheus when one is configured.
 - **Languages**: English and Simplified Chinese, switched from the header or Settings; the browser language is used by default.
 - **Discovery aware**: the UI checks which API groups and versions the selected cluster serves and hides resources it does not serve.
@@ -25,6 +26,8 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 | ![Instances](images/machines.png) | ![Instance detail](images/vm-detail.png) |
 | **Subnet detail** | **Create instance** |
 | ![Subnet detail](images/resource-detail.png) | ![Create instance](images/resource-create.png) |
+| **Overview (Chinese)** | **Instance network and elastic IPs (Chinese)** |
+| ![Overview in Chinese](images/dashboard-zh.png) | ![Instance network in Chinese](images/vm-detail-zh.png) |
 
 ## Network Stacks
 
@@ -64,6 +67,7 @@ The dashboard has **no authentication of its own**. Every request runs with the 
 
 - Prefer `kubectl port-forward` or binding to `127.0.0.1`.
 - Do not apply `manifest/nodeport.yaml` or `manifest/ingress.yaml` without putting an authenticating proxy (for example oauth2-proxy) in front, and restricting who can reach it.
+- Console, VNC and pod shell WebSockets only accept pages served by the dashboard itself (same origin), so other sites open in the same browser cannot use them. Behind a proxy that rewrites the Host header, list the public origin with `--allowed-origin`.
 - Narrow the ClusterRole in `manifest/deploy.yaml` if you only need part of the console.
 
 ## Installation
@@ -81,6 +85,7 @@ Download a release from the [Releases](https://github.com/jimyag/kubevirt-dashbo
 | `--listen` | `127.0.0.1:11111` | Address to serve the console on |
 | `--kubeconfig` | `$KUBECONFIG` or `~/.kube/config` | Kubeconfig file |
 | `--context` | current context | Context selected when the browser has none stored |
+| `--allowed-origin` | none | Extra browser origin (e.g. `https://dash.example.com`) allowed to open console, VNC and pod shell WebSockets when a reverse proxy rewrites the Host header; repeatable |
 
 ### In cluster
 

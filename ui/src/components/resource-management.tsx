@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import * as YAML from "js-yaml"
 import {
@@ -19,7 +19,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -50,8 +49,11 @@ import { EventList } from "@/components/events"
 import { eventsUrl } from "@/lib/events"
 import { ManifestPanel } from "@/components/manifest"
 import { t } from "@/lib/i18n"
+import { ResourceSpecificOverview } from "@/components/resource-overviews"
+import { MetadataSection } from "@/components/detail-parts"
+import { asRecord, asRecordList, compactValue, getValue, hiddenAnnotations, isPrimitiveDetailValue, isRecordValue } from "@/lib/detail-values"
 
-type KubeResource = {
+export type KubeResource = {
   apiVersion?: string
   kind?: string
   metadata: {
@@ -206,318 +208,6 @@ const createPathUrl = (config: ResourceConfig, basePath: string, resource: KubeR
     ? `${basePath}/namespaces/${resource.metadata.namespace}/${config.id}`
     : `${basePath}/${config.id}`
 
-const getValue = (obj: unknown, path?: string[]) => {
-  if (!path) return undefined
-  return path.reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object") return undefined
-    return (current as Record<string, unknown>)[key]
-  }, obj)
-}
-
-const compactValue = (value: unknown): string => {
-  if (value === undefined || value === null || value === "") return "N/A"
-  if (typeof value === "boolean") return value ? "true" : "false"
-  if (Array.isArray(value)) return value.length ? value.map(compactValue).join(", ") : "None"
-  if (typeof value === "object") return `${Object.keys(value as Record<string, unknown>).length} fields`
-  return String(value)
-}
-
-const isPrimitiveDetailValue = (value: unknown) =>
-  value === undefined ||
-  value === null ||
-  ["string", "number", "boolean"].includes(typeof value)
-
-
-const isRecordValue = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value)
-
-const detailObjectTitle = (value: Record<string, unknown>, fallback: string) => {
-  const title = value.name || value.type || value.action || value.protocol || value.kind || value.id
-  return isPrimitiveDetailValue(title) && title !== undefined && title !== null && title !== "" ? compactValue(title) : fallback
-}
-
-const asRecord = (value: unknown) => isRecordValue(value) ? value : {}
-const asRecordList = (value: unknown) => Array.isArray(value) ? value.filter(isRecordValue) : []
-const joinList = (value: unknown) => Array.isArray(value) ? value.map(compactValue).join(", ") : compactValue(value)
-const objectLabels = (value: unknown) => Object.entries(asRecord(value)).map(([key, next]) => `${key}=${compactValue(next)}`)
-const resourceKeys = (value: Record<string, unknown>) => Object.keys(value).filter((key) => key !== "name" && hasRenderableValue(value[key]))
-/** False for empty values, including objects and lists that only hold empty values (e.g. status.loadBalancer: {}). */
-const hasRenderableValue = (value: unknown): boolean => {
-  if (value === undefined || value === null || value === "") return false
-  if (Array.isArray(value)) return value.some(hasRenderableValue)
-  if (isRecordValue(value)) return Object.values(value).some(hasRenderableValue)
-  return true
-}
-
-const keyAcronyms: Record<string, string> = Object.fromEntries(
-  ["IP", "IPs", "VPC", "CIDR", "NAT", "EIP", "FIP", "QoS", "MAC", "DNS", "ID", "URL", "API", "CPU", "LAN", "TLS", "UID", "VLAN", "BGP", "ASN", "MTU", "OVN", "ACL", "ACLs", "PVC", "VM", "VMI"].map((word) => [word.toLowerCase(), word]),
-)
-
-/** "targetPort" -> "Target port", "podIPs" -> "Pod IPs", "lanIp" -> "LAN IP". */
-const humanizeKey = (key: string) => {
-  const words = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim()
-    .split(/\s+/)
-  return words.map((word, index) => {
-    const acronym = keyAcronyms[word.toLowerCase()]
-    if (acronym) return acronym
-    if (/[A-Z].*[A-Z]|^[A-Z]{2,}/.test(word)) return word
-    return index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word.toLowerCase()
-  }).join(" ")
-}
-
-const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
-
-/** Annotations that only repeat the manifest; shown in the Manifest tab instead. */
-const hiddenAnnotations = new Set(["kubectl.kubernetes.io/last-applied-configuration"])
-
-function CompactKvTable({ rows }: { rows: Array<{ label: string; value: unknown }> }) {
-  const visible = rows.filter((row) => hasRenderableValue(row.value))
-  if (visible.length === 0) return <span className="text-sm text-muted-foreground">{t("None")}</span>
-  return (
-    <div className="overflow-hidden rounded-lg border">
-      <Table>
-        <TableBody>
-          {visible.map((row) => (
-            <TableRow key={row.label} className="hover:bg-muted/50">
-              <TableCell className="w-40 py-2 align-top text-xs text-muted-foreground">{/^[a-z][a-z0-9]*[A-Z]/.test(row.label) ? humanizeKey(row.label) : row.label}</TableCell>
-              <TableCell className="min-w-0 py-2 text-sm whitespace-normal text-foreground">
-                <DetailValue value={row.value} depth={2} />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-function ChipList({ values }: { values: unknown[] }) {
-  if (values.length === 0) return <span className="text-sm text-muted-foreground">-</span>
-  return (
-    <div className="flex min-w-0 flex-wrap gap-1.5">
-      {values.slice(0, 20).map((item, index) => (
-        <span key={`${compactValue(item)}-${index}`} className="min-w-0 max-w-full break-all rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-xs text-foreground">
-          {compactValue(item)}
-        </span>
-      ))}
-      {values.length > 20 && <span className="text-xs text-muted-foreground">+{values.length - 20} more</span>}
-    </div>
-  )
-}
-
-function DetailContainerTable({ containers, statuses }: { containers: Record<string, unknown>[]; statuses?: Record<string, unknown>[] }) {
-  if (containers.length === 0) return <span className="text-sm text-muted-foreground">{t("No containers")}</span>
-  return (
-    <div className="overflow-x-auto rounded-lg border">
-      <Table className="min-w-[880px]">
-        <TableHeader className="bg-muted/60">
-          <TableRow>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Image")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Ready")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Restarts")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Ports")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Resources")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Args")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {containers.map((container) => {
-            const status = statuses?.find((item) => item.name === container.name) || {}
-            const resources = asRecord(container.resources)
-            const requests = asRecord(resources.requests)
-            const limits = asRecord(resources.limits)
-            const ports = asRecordList(container.ports)
-            return (
-              <TableRow key={String(container.name)} className="hover:bg-muted/50">
-                <TableCell className="font-semibold">{compactValue(container.name)}</TableCell>
-                <TableCell className="max-w-[260px] break-all text-xs text-muted-foreground">{compactValue(container.image)}</TableCell>
-                <TableCell><Badge variant={status.ready ? "success" : "outline"}>{compactValue(status.ready)}</Badge></TableCell>
-                <TableCell className="tabular-nums">{compactValue(status.restartCount ?? 0)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {ports.length ? ports.map((port) => `${compactValue(port.containerPort || port.port)}/${compactValue(port.protocol || "TCP")}`).join(", ") : t("None")}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {[Object.keys(requests).length ? `req ${objectLabels(requests).join(", ")}` : "", Object.keys(limits).length ? `lim ${objectLabels(limits).join(", ")}` : ""].filter(Boolean).join(" / ") || t("None")}
-                </TableCell>
-                <TableCell className="max-w-[280px] text-xs text-muted-foreground">
-                  <div className="line-clamp-3 break-words">{joinList(container.args) || joinList(container.command) || t("None")}</div>
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-function DetailVolumeTable({ volumes }: { volumes: Record<string, unknown>[] }) {
-  if (volumes.length === 0) return <span className="text-sm text-muted-foreground">{t("No volumes")}</span>
-  return (
-    <div className="overflow-x-auto rounded-lg border">
-      <Table className="min-w-[720px]">
-        <TableHeader className="bg-muted/60">
-          <TableRow>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Type")}</TableHead>
-            <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Source")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {volumes.map((volume) => {
-            const type = resourceKeys(volume)[0] || "volume"
-            const source = asRecord(volume[type])
-            return (
-              <TableRow key={String(volume.name)} className="hover:bg-muted/50">
-                <TableCell className="font-semibold">{compactValue(volume.name)}</TableCell>
-                <TableCell>{type}</TableCell>
-                <TableCell className="break-words text-xs text-muted-foreground">
-                  {Object.keys(source).length ? objectLabels(source).join(", ") : compactValue(volume[type])}
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-function DetailSimpleObjectTable({ rows }: { rows: Record<string, unknown>[] }) {
-  const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row).filter((key) => isPrimitiveDetailValue(row[key]))))).slice(0, 6)
-  if (keys.length === 0) return <ChipList values={rows.map((row, index) => detailObjectTitle(row, `Item ${index + 1}`))} />
-  return (
-    <div className="overflow-x-auto rounded-md border">
-      <Table>
-        <TableHeader className="bg-muted/50">
-          <TableRow>{keys.map((key) => <TableHead key={key} className="h-8 text-xs font-medium text-muted-foreground">{humanizeKey(key)}</TableHead>)}</TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.slice(0, 12).map((row, index) => (
-            <TableRow key={index} className="hover:bg-muted/40">
-              {keys.map((key) => <TableCell key={key} className="max-w-[260px] py-1.5 text-xs whitespace-normal break-words">{hasRenderableValue(row[key]) ? compactValue(row[key]) : <span className="text-muted-foreground">-</span>}</TableCell>)}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {rows.length > 12 && <div className="border-t px-3 py-2 text-xs text-muted-foreground">+{rows.length - 12} more</div>}
-    </div>
-  )
-}
-
-function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
-  if (!hasRenderableValue(value)) return <span className="text-muted-foreground">-</span>
-  if (isPrimitiveDetailValue(value)) {
-    if (typeof value === "string" && isoTimestamp.test(value)) return <span title={value}>{relativeTime(value)}</span>
-    return <span className="break-words">{compactValue(value)}</span>
-  }
-
-  if (depth > 4) {
-    return (
-      <pre className="max-h-56 max-w-full overflow-auto rounded-lg border bg-muted/30 p-3 text-xs text-foreground whitespace-pre-wrap break-words">
-        {YAML.dump(value, { noRefs: true, lineWidth: 120 })}
-      </pre>
-    )
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) return <span>{t("None")}</span>
-
-    const conditionLike = value.every((item) => isRecordValue(item) && "type" in item)
-    if (conditionLike) {
-      return (
-        <div className="divide-y rounded-md border">
-          {value.map((item, index) => {
-            const condition = item as Record<string, unknown>
-            return (
-              <div key={`${String(condition.type || "condition")}-${index}`} className="px-3 py-2 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium text-foreground">{compactValue(condition.type)}</span>
-                  <StatusDot status={compactValue(condition.status)} />
-                </div>
-                {Boolean(condition.reason || condition.message) && (
-                  <p className="mt-1 break-words text-xs text-muted-foreground">
-                    {[condition.reason, condition.message].filter(Boolean).map(compactValue).join(" - ")}
-                  </p>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )
-    }
-
-    const objectLike = value.every((item) => isRecordValue(item))
-    if (objectLike) {
-      const records = value as Record<string, unknown>[]
-      if (records.every((item) => "image" in item && "name" in item)) {
-        return <DetailContainerTable containers={records} />
-      }
-      if (records.every((item) => "name" in item && resourceKeys(item).length > 0) && records.some((item) => ["hostPath", "persistentVolumeClaim", "configMap", "secret", "emptyDir", "projected", "downwardAPI", "csi"].some((key) => key in item))) {
-        return <DetailVolumeTable volumes={records} />
-      }
-      if (records.every((item) => "key" in item || "effect" in item || "operator" in item)) {
-        return <DetailSimpleObjectTable rows={records} />
-      }
-      if (records.every((item) => Object.values(item).every((next) => isPrimitiveDetailValue(next)))) {
-        return <DetailSimpleObjectTable rows={records} />
-      }
-      return (
-        <div className="grid gap-2">
-          {value.slice(0, 12).map((item, index) => {
-            const record = item as Record<string, unknown>
-            const entries = Object.entries(record)
-            return (
-              <div key={index} className="min-w-0 max-w-full rounded-md border px-3 py-2">
-                <div className="mb-1.5 min-w-0 break-words text-sm font-medium text-foreground">
-                  {detailObjectTitle(record, `Item ${index + 1}`)}
-                </div>
-                <DetailValue value={Object.fromEntries(entries.filter(([key]) => key !== "name"))} depth={depth + 1} />
-              </div>
-            )
-          })}
-          {value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
-        </div>
-      )
-    }
-
-    return (
-      <div className="flex min-w-0 max-w-full flex-wrap gap-1.5">
-        {value.slice(0, 12).map((item, index) => (
-          <span key={index} className="min-w-0 max-w-full break-words rounded-md border bg-muted px-2 py-1 text-xs text-foreground">
-            {compactValue(item)}
-          </span>
-        ))}
-        {value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
-      </div>
-    )
-  }
-
-  const entries = Object.entries(value as Record<string, unknown>).filter(([, nextValue]) => hasRenderableValue(nextValue))
-  // Flat objects read best as key=value chips (selectors, labels, resource lists).
-  if (entries.every(([, nextValue]) => isPrimitiveDetailValue(nextValue))) {
-    return <ChipList values={entries.map(([key, nextValue]) => `${key}=${compactValue(nextValue)}`)} />
-  }
-
-  return (
-    <dl className="grid min-w-0 max-w-full gap-x-4 gap-y-1.5 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
-      {entries.map(([key, nextValue]) => (
-        <div key={key} className="contents">
-          <dt className="min-w-0 break-words text-xs text-muted-foreground">{humanizeKey(key)}</dt>
-          <dd className="min-w-0 break-words text-xs text-foreground">
-            <DetailValue value={nextValue} depth={depth + 1} />
-          </dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
 function DetailTabs({ config, namespace, name, active }: { config: ResourceConfig; namespace?: string; name?: string; active: "overview" | "events" | "manifest" }) {
   const scopedNamespace = namespace || "_cluster"
   const tabs = [
@@ -634,11 +324,23 @@ const relatedPodsForResource = (resource: KubeResource) => {
   return undefined
 }
 
+/** Status from the config path, the phase, or a Ready / Available condition (not just the first one). */
+const readinessText = (resource: KubeResource) => {
+  const conditions = asRecordList(getValue(resource, ["status", "conditions"]))
+  const ready = conditions.find((item) => item.type === "Ready" || item.type === "Available") || conditions[0]
+  if (!ready) return undefined
+  if (ready.status === "True") return String(ready.type)
+  return ready.type === "Ready" ? "NotReady" : ready.type === "Available" ? "Unavailable" : `${String(ready.type)} (${String(ready.status)})`
+}
+
+const conditionsStatusPath = (path?: string[]) => Boolean(path && path[0] === "status" && path[1] === "conditions")
+
 const resourceStatusText = (resource: KubeResource, config: ResourceConfig) =>
   String(
-    getValue(resource, config.statusPath) ??
+    // Condition-based paths (often conditions[0].type) would name a condition even when it is False.
+    (conditionsStatusPath(config.statusPath) ? readinessText(resource) : getValue(resource, config.statusPath)) ??
     getValue(resource, ["status", "phase"]) ??
-    getValue(resource, ["status", "conditions", "0", "type"]) ??
+    readinessText(resource) ??
     "Active"
   )
 
@@ -656,644 +358,6 @@ const resourceFilterFields = (config: ResourceConfig): FilterField<KubeResource>
   ...(config.extraColumns || []).map((column) => ({ key: fieldKey(column.label), label: column.label, value: (r: KubeResource) => column.value(r) })),
   { key: "label", label: t("Labels"), value: (r) => Object.entries(r.metadata.labels || {}).map(([key, value]) => `${key}=${value}`) },
 ]
-
-function PodDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  const containers = asRecordList(spec.containers)
-  const initContainers = asRecordList(spec.initContainers)
-  const containerStatuses = asRecordList(status.containerStatuses)
-  const initContainerStatuses = asRecordList(status.initContainerStatuses)
-  const volumes = asRecordList(spec.volumes)
-  const conditions = asRecordList(status.conditions)
-  const podIPs = asRecordList(status.podIPs).map((item) => item.ip).filter(Boolean)
-  const nodeSelector = objectLabels(spec.nodeSelector)
-  const tolerations = asRecordList(spec.tolerations)
-
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Phase")} value={status.phase} variant={String(status.phase || "")} />
-        <SummaryCard label={t("Pod IP")} value={status.podIP} />
-        <SummaryCard label={t("Node")} value={spec.nodeName} />
-        <SummaryCard label={t("QoS")} value={status.qosClass} />
-      </SummaryRow>
-
-      <SectionCard title={t("Containers")}>
-<div className="space-y-4">
-          <DetailContainerTable containers={containers} statuses={containerStatuses} />
-          {initContainers.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-medium text-muted-foreground">{t("Init Containers")}</div>
-              <DetailContainerTable containers={initContainers} statuses={initContainerStatuses} />
-            </div>
-          )}
-        </div>
-</SectionCard>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Scheduling")} rows={[
-              { label: t("Service account"), value: spec.serviceAccountName },
-              { label: t("Restart policy"), value: spec.restartPolicy },
-              { label: t("Priority class"), value: spec.priorityClassName },
-              { label: t("Priority"), value: spec.priority },
-              { label: t("Runtime class"), value: spec.runtimeClassName },
-              { label: t("Node selector"), value: nodeSelector },
-              { label: t("Tolerations"), value: tolerations },
-              { label: t("Start time"), value: status.startTime },
-            ]} />
-
-        <KvSection title={t("Networking")} rows={[
-              { label: t("Host IP"), value: status.hostIP },
-              { label: t("Pod IPs"), value: podIPs },
-              { label: t("DNS policy"), value: spec.dnsPolicy },
-              { label: t("Host network"), value: spec.hostNetwork },
-              { label: t("Host PID"), value: spec.hostPID },
-              { label: t("Host IPC"), value: spec.hostIPC },
-            ]} />
-      </div>
-
-      <SectionCard title={t("Volumes")}>
-          <DetailVolumeTable volumes={volumes} />
-        </SectionCard>
-
-      <ValueSection title={t("Conditions")} value={conditions} />
-    </div>
-  )
-}
-
-/** One fact in a SummaryRow; empty facts are skipped since the full spec is one tab away. */
-function SummaryCard({ label, value, variant }: { label: string; value: unknown; variant?: string }) {
-  if (!variant && (!hasRenderableValue(value) || compactValue(value) === "N/A")) return null
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 min-w-0 break-words text-sm font-medium">
-        {variant ? <StatusDot status={variant} label={compactValue(value)} /> : <DetailValue value={value} />}
-      </dd>
-    </div>
-  )
-}
-
-/** Key facts of a resource in one card, instead of a row of small cards. */
-function SummaryRow({ children }: { children: ReactNode }) {
-  return (
-    <dl className="grid gap-x-8 gap-y-4 rounded-lg border bg-card px-4 py-3.5 sm:grid-cols-2 xl:grid-cols-4">
-      {children}
-    </dl>
-  )
-}
-
-function SectionCard({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return (
-    // In a two-column grid, a section left alone on its row takes the full width.
-    <section className="min-w-0 rounded-lg border bg-card xl:last:odd:col-span-2">
-      <header className="border-b px-4 py-2.5">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      </header>
-      <div className="p-4">{children}</div>
-    </section>
-  )
-}
-
-/** Section with key/value rows; hidden when every row is empty. */
-function KvSection({ title, description, rows }: { title: string; description?: string; rows: Array<{ label: string; value: unknown }> }) {
-  if (!rows.some((row) => hasRenderableValue(row.value))) return null
-  return <SectionCard title={title} description={description}><CompactKvTable rows={rows} /></SectionCard>
-}
-
-/** Section showing one structured value; hidden when the value is empty. */
-function ValueSection({ title, description, value }: { title: string; description?: string; value: unknown }) {
-  if (!hasRenderableValue(value)) return null
-  return <SectionCard title={title} description={description}><DetailValue value={value} /></SectionCard>
-}
-
-function WorkloadDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  const template = asRecord(spec.template)
-  const templateSpec = asRecord(template.spec)
-  const containers = asRecordList(templateSpec.containers)
-  const volumes = asRecordList(templateSpec.volumes)
-  const selector = asRecord(spec.selector).matchLabels || spec.selector
-
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Replicas")} value={status.replicas ?? spec.replicas} />
-        <SummaryCard label={t("Ready")} value={status.readyReplicas} />
-        <SummaryCard label={t("Available")} value={status.availableReplicas} />
-        <SummaryCard label={t("Updated")} value={status.updatedReplicas} />
-        <SummaryCard label={t("Unavailable")} value={status.unavailableReplicas} />
-      </SummaryRow>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Rollout")} rows={[
-            { label: t("Selector"), value: objectLabels(selector) },
-            { label: t("Strategy"), value: spec.strategy || spec.updateStrategy },
-            { label: t("Min ready seconds"), value: spec.minReadySeconds },
-            { label: t("Revision history"), value: spec.revisionHistoryLimit },
-            { label: t("Observed generation"), value: status.observedGeneration },
-          ]} />
-        <KvSection title={t("Pod template")} rows={[
-            { label: t("Service account"), value: templateSpec.serviceAccountName },
-            { label: t("Restart policy"), value: templateSpec.restartPolicy },
-            { label: t("Labels"), value: objectLabels(asRecord(template.metadata).labels) },
-            { label: t("Annotations"), value: objectLabels(asRecord(template.metadata).annotations) },
-          ]} />
-      </div>
-      <SectionCard title={t("Template containers")}>
-        <DetailContainerTable containers={containers} />
-      </SectionCard>
-      <SectionCard title={t("Template volumes")}>
-        <DetailVolumeTable volumes={volumes} />
-      </SectionCard>
-      <ValueSection title={t("Conditions")} value={status.conditions} />
-    </div>
-  )
-}
-
-function PortsTable({ ports }: { ports: Record<string, unknown>[] }) {
-  const showNodePort = ports.some((port) => port.nodePort)
-  return (
-    <div className="overflow-x-auto rounded-md border">
-      <Table>
-        <TableHeader className="bg-muted/50">
-          <TableRow>
-            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
-            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Protocol")}</TableHead>
-            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Port")}</TableHead>
-            <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Target port")}</TableHead>
-            {showNodePort && <TableHead className="h-8 text-xs font-medium text-muted-foreground">{t("Node port")}</TableHead>}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {ports.map((port, index) => (
-            <TableRow key={`${compactValue(port.name)}-${index}`} className="hover:bg-muted/40">
-              <TableCell className="py-1.5 text-sm">{hasRenderableValue(port.name) ? compactValue(port.name) : <span className="text-muted-foreground">-</span>}</TableCell>
-              <TableCell className="py-1.5 text-sm">{compactValue(port.protocol || "TCP")}</TableCell>
-              <TableCell className="py-1.5 font-mono text-xs">{compactValue(port.port)}</TableCell>
-              <TableCell className="py-1.5 font-mono text-xs">{compactValue(port.targetPort ?? port.port)}</TableCell>
-              {showNodePort && <TableCell className="py-1.5 font-mono text-xs">{hasRenderableValue(port.nodePort) ? compactValue(port.nodePort) : "-"}</TableCell>}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-function ServiceDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  const ports = asRecordList(spec.ports)
-  const ingress = asRecordList(asRecord(status.loadBalancer).ingress).map((item) => item.ip || item.hostname).filter(Boolean)
-  const clusterIPs = Array.isArray(spec.clusterIPs) && spec.clusterIPs.length ? spec.clusterIPs : [spec.clusterIP]
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Type")} value={spec.type || "ClusterIP"} />
-        <SummaryCard label={t("Cluster IP")} value={clusterIPs.filter((ip) => ip && ip !== "None").join(", ") || (spec.clusterIP === "None" ? "None (headless)" : "")} />
-        <SummaryCard label={t("External address")} value={[...ingress, ...(Array.isArray(spec.externalIPs) ? spec.externalIPs : []), spec.externalName].filter(Boolean)} />
-        <SummaryCard label={t("Selector")} value={asRecord(spec.selector)} />
-      </SummaryRow>
-      {ports.length > 0 && <SectionCard title={t("Ports")}><PortsTable ports={ports} /></SectionCard>}
-      <KvSection title={t("Traffic")} rows={[
-        { label: t("Session affinity"), value: spec.sessionAffinity === "None" ? "" : spec.sessionAffinity },
-        { label: t("External traffic policy"), value: spec.externalTrafficPolicy },
-        { label: t("Internal traffic policy"), value: spec.internalTrafficPolicy },
-        { label: t("IP families"), value: spec.ipFamilies },
-        { label: t("IP family policy"), value: spec.ipFamilyPolicy },
-        { label: t("Load balancer class"), value: spec.loadBalancerClass },
-      ]} />
-      <ValueSection title={t("Conditions")} value={status.conditions} />
-    </div>
-  )
-}
-
-function NetworkDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  if (resource.kind === "Service") return <ServiceDetailOverview resource={resource} />
-  const selector = spec.selector || asRecord(spec.podSelector).matchLabels || spec.podSelector
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Type")} value={spec.type} />
-        <SummaryCard label={t("Class")} value={spec.ingressClassName || spec.gatewayClassName || spec.controllerName || spec.provider} />
-        <SummaryCard label={t("Selector")} value={selector} />
-        <SummaryCard label={t("Address")} value={spec.cidrBlock || spec.cidr || spec.vpc || asRecord(status).addresses} />
-      </SummaryRow>
-      {asRecordList(spec.ports).length > 0 && <SectionCard title={t("Ports")}><PortsTable ports={asRecordList(spec.ports)} /></SectionCard>}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Routing and selectors")} rows={[
-            { label: t("Policy types"), value: spec.policyTypes },
-            { label: t("Rules"), value: spec.rules || spec.ingress || spec.egress },
-            { label: t("Hostnames"), value: spec.hostnames },
-            { label: t("Parent refs"), value: spec.parentRefs },
-          ]} />
-        <KvSection title={t("Addresses")} rows={[
-            { label: t("Cluster IP"), value: spec.clusterIP },
-            { label: t("External IPs"), value: spec.externalIPs },
-            { label: t("Load balancer"), value: status.loadBalancer },
-            { label: t("CIDR"), value: spec.cidrBlock || spec.cidr },
-            { label: t("Gateway"), value: spec.gateway || spec.gatewayNode },
-          ]} />
-      </div>
-      <ValueSection title={t("Status")} value={status.conditions || status} />
-    </div>
-  )
-}
-
-function StorageDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Phase")} value={status.phase || status.status || resource.kind} variant={String(status.phase || status.status || "")} />
-        <SummaryCard label={t("Capacity")} value={asRecord(status.capacity).storage || asRecord(spec.resources).requests} />
-        <SummaryCard label={t("Storage class")} value={spec.storageClassName || resource.storageClassName || resource.provisioner} />
-        <SummaryCard label={t("Access modes")} value={spec.accessModes || resource.reclaimPolicy} />
-      </SummaryRow>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Storage")} rows={[
-            { label: t("Provisioner"), value: resource.provisioner },
-            { label: t("Volume name"), value: spec.volumeName },
-            { label: t("Volume mode"), value: spec.volumeMode },
-            { label: t("Reclaim policy"), value: resource.reclaimPolicy || spec.persistentVolumeReclaimPolicy },
-            { label: t("Binding mode"), value: resource.volumeBindingMode },
-            { label: t("Expansion"), value: resource.allowVolumeExpansion },
-          ]} />
-        <KvSection title={t("Source and parameters")} rows={[
-            { label: t("Parameters"), value: resource.parameters },
-            { label: t("Source"), value: spec.source || spec.csi || spec.hostPath || spec.nfs },
-            { label: t("Claim ref"), value: spec.claimRef },
-            { label: t("Node affinity"), value: spec.nodeAffinity },
-            { label: t("Conditions"), value: status.conditions },
-          ]} />
-      </div>
-    </div>
-  )
-}
-
-function VirtualizationDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  const template = asRecord(spec.template)
-  const templateSpec = asRecord(template.spec)
-  const domain = asRecord(templateSpec.domain || spec.domain)
-  const devices = asRecord(domain.devices)
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Printable status")} value={status.printableStatus || status.phase || status.conditions} variant={String(status.printableStatus || status.phase || "")} />
-        <SummaryCard label={t("Run strategy")} value={spec.runStrategy || spec.running} />
-        <SummaryCard label={t("Node")} value={status.nodeName} />
-        <SummaryCard label={t("IP")} value={asRecordList(status.interfaces).map((item) => item.ipAddress).filter(Boolean)} />
-      </SummaryRow>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Compute")} rows={[
-            { label: t("CPU"), value: domain.cpu },
-            { label: t("Memory"), value: asRecord(domain.resources).requests || spec.memory },
-            { label: t("Machine"), value: asRecord(domain.machine).type },
-            { label: t("Firmware"), value: domain.firmware },
-            { label: t("Features"), value: domain.features },
-          ]} />
-        <KvSection title={t("Runtime")} rows={[
-            { label: t("Phase"), value: status.phase },
-            { label: t("Conditions"), value: status.conditions },
-            { label: t("Guest OS"), value: status.guestOSInfo },
-            { label: t("Migration"), value: status.migrationState },
-          ]} />
-      </div>
-      <SectionCard title={t("Disks and volumes")}>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <DetailValue value={devices.disks || spec.disks} />
-          <DetailVolumeTable volumes={asRecordList(templateSpec.volumes || spec.volumes)} />
-        </div>
-      </SectionCard>
-      <ValueSection title={t("Networks")} value={templateSpec.networks || devices.interfaces || spec.networks || spec.interfaces} />
-    </div>
-  )
-}
-
-function NodeDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Status")} value={asRecordList(status.conditions).find((item) => item.status === "True")?.type || "Unknown"} />
-        <SummaryCard label={t("Kubelet")} value={asRecord(status.nodeInfo).kubeletVersion} />
-        <SummaryCard label={t("OS")} value={asRecord(status.nodeInfo).osImage} />
-        <SummaryCard label={t("Unschedulable")} value={spec.unschedulable || false} />
-      </SummaryRow>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Capacity")} rows={Object.entries(asRecord(status.capacity)).map(([label, value]) => ({ label, value }))} />
-        <KvSection title={t("Allocatable")} rows={Object.entries(asRecord(status.allocatable)).map(([label, value]) => ({ label, value }))} />
-      </div>
-      <ValueSection title={t("Conditions")} value={status.conditions} />
-      <ValueSection title={t("Addresses")} value={status.addresses} />
-    </div>
-  )
-}
-
-const admissionRuleText = (rules: unknown) => asRecordList(rules).map((rule) => {
-  const operations = joinList(rule.operations)
-  const apiGroups = joinList(rule.apiGroups)
-  const resources = joinList(rule.resources)
-  const scope = compactValue(rule.scope)
-  return [operations, apiGroups, resources, scope].filter((item) => item && item !== "N/A").join(" / ")
-}).filter(Boolean)
-
-const admissionClientText = (clientConfig: unknown) => {
-  const client = asRecord(clientConfig)
-  const service = asRecord(client.service)
-  if (service.name) {
-    return `Service ${compactValue(service.namespace || "default")}/${compactValue(service.name)}${service.path ? compactValue(service.path) : ""}`
-  }
-  return compactValue(client.url)
-}
-
-function AdmissionDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  const webhooks = asRecordList(resource.webhooks)
-  const validations = asRecordList(spec.validations)
-  const variables = asRecordList(spec.variables)
-  const auditAnnotations = asRecordList(spec.auditAnnotations)
-  const matchConstraints = asRecord(spec.matchConstraints || spec.matchResources)
-
-  if (webhooks.length > 0) {
-    return (
-      <div className="space-y-4">
-        <SummaryRow>
-          <SummaryCard label={t("Webhooks")} value={webhooks.length} />
-          <SummaryCard label={t("Failure policies")} value={[...new Set(webhooks.map((item) => compactValue(item.failurePolicy || "Fail")))]} />
-          <SummaryCard label={t("Side effects")} value={[...new Set(webhooks.map((item) => compactValue(item.sideEffects)))]} />
-          <SummaryCard label={t("Admission review")} value={[...new Set(webhooks.flatMap((item) => Array.isArray(item.admissionReviewVersions) ? item.admissionReviewVersions.map(compactValue) : []))]} />
-        </SummaryRow>
-        <SectionCard title={t("Webhooks")} description={t("Client endpoints, matching rules, selector scope, and admission behavior.")}>
-          <div className="overflow-x-auto rounded-lg border">
-            <Table className="min-w-[1040px]">
-              <TableHeader className="bg-muted/60">
-                <TableRow>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Client")}</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Rules")}</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Selectors")}</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Policy")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {webhooks.map((webhook, index) => (
-                  <TableRow key={`${compactValue(webhook.name)}-${index}`} className="hover:bg-muted/50">
-                    <TableCell className="max-w-[220px] break-words font-semibold">{compactValue(webhook.name)}</TableCell>
-                    <TableCell className="max-w-[240px] break-words text-xs text-muted-foreground">{admissionClientText(webhook.clientConfig)}</TableCell>
-                    <TableCell className="max-w-[320px] text-xs text-muted-foreground">
-                      <ChipList values={admissionRuleText(webhook.rules)} />
-                    </TableCell>
-                    <TableCell className="max-w-[240px] text-xs text-muted-foreground">
-                      <DetailValue value={{
-                        namespaceSelector: webhook.namespaceSelector,
-                        objectSelector: webhook.objectSelector,
-                        matchConditions: webhook.matchConditions,
-                      }} />
-                    </TableCell>
-                    <TableCell className="max-w-[220px] text-xs text-muted-foreground">
-                      <CompactKvTable rows={[
-                        { label: t("Failure"), value: webhook.failurePolicy || "Fail" },
-                        { label: t("Match"), value: webhook.matchPolicy },
-                        { label: t("Side effects"), value: webhook.sideEffects },
-                        { label: t("Timeout"), value: webhook.timeoutSeconds },
-                        { label: t("Reinvocation"), value: webhook.reinvocationPolicy },
-                      ]} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </SectionCard>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Policy")} value={spec.policyName || resource.metadata.name} />
-        <SummaryCard label={t("Failure policy")} value={spec.failurePolicy} />
-        <SummaryCard label={t("Actions")} value={spec.validationActions} />
-        <SummaryCard label={t("Conditions")} value={asRecordList(status.conditions).length || "N/A"} />
-      </SummaryRow>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Policy")} rows={[
-            { label: t("Policy name"), value: spec.policyName },
-            { label: t("Failure policy"), value: spec.failurePolicy },
-            { label: t("Validation actions"), value: spec.validationActions },
-            { label: t("Param kind"), value: spec.paramKind },
-            { label: t("Param ref"), value: spec.paramRef },
-          ]} />
-        <KvSection title={t("Match constraints")} rows={[
-            { label: t("Resource rules"), value: matchConstraints.resourceRules },
-            { label: t("Exclude rules"), value: matchConstraints.excludeResourceRules },
-            { label: t("Namespace selector"), value: matchConstraints.namespaceSelector },
-            { label: t("Object selector"), value: matchConstraints.objectSelector },
-            { label: t("Match conditions"), value: matchConstraints.matchConditions },
-          ]} />
-      </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ValueSection title={t("Validations")} value={validations} />
-        <ValueSection title={t("Variables and audit")} value={{ variables, auditAnnotations }} />
-      </div>
-      <ValueSection title={t("Status")} value={status.conditions || status} />
-    </div>
-  )
-}
-
-function RbacDetailOverview({ resource }: { resource: KubeResource }) {
-  const rules = asRecordList(resource.rules)
-  const roleRef = asRecord(resource.roleRef)
-  const subjects = asRecordList(resource.subjects)
-  const secrets = asRecordList(resource.secrets)
-  const imagePullSecrets = asRecordList(resource.imagePullSecrets)
-
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Rules")} value={rules.length || "N/A"} />
-        <SummaryCard label={t("Subjects")} value={subjects.length || "N/A"} />
-        <SummaryCard label={t("Role ref")} value={[roleRef.kind, roleRef.name].filter(Boolean).map(compactValue).join("/")} />
-        <SummaryCard label={t("Automount token")} value={resource.automountServiceAccountToken} />
-      </SummaryRow>
-      {rules.length > 0 && (
-        <SectionCard title={t("Rules")}>
-          <div className="overflow-x-auto rounded-lg border">
-            <Table className="min-w-[900px]">
-              <TableHeader className="bg-muted/60">
-                <TableRow>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("API groups")}</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Resources")}</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Resource names")}</TableHead>
-                  <TableHead className="h-9 text-xs font-medium text-muted-foreground">{t("Verbs")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rules.map((rule, index) => (
-                  <TableRow key={index} className="hover:bg-muted/50">
-                    <TableCell className="max-w-[220px] break-words text-xs">{joinList(rule.apiGroups)}</TableCell>
-                    <TableCell className="max-w-[280px] break-words text-xs">{joinList(rule.resources)}</TableCell>
-                    <TableCell className="max-w-[240px] break-words text-xs">{joinList(rule.resourceNames)}</TableCell>
-                    <TableCell className="max-w-[240px] break-words text-xs">{joinList(rule.verbs)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </SectionCard>
-      )}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ValueSection title={t("Subjects")} value={subjects} />
-        <KvSection title={t("Service account")} rows={[
-            { label: t("Secrets"), value: secrets },
-            { label: t("Image pull secrets"), value: imagePullSecrets },
-            { label: t("Automount token"), value: resource.automountServiceAccountToken },
-          ]} />
-      </div>
-    </div>
-  )
-}
-
-function ConfigDetailOverview({ resource }: { resource: KubeResource }) {
-  const data = asRecord(resource.data)
-  const binaryData = asRecord(resource.binaryData)
-  const type = compactValue(resource.type || resource.kind)
-  const keys = Object.keys(data)
-  const binaryKeys = Object.keys(binaryData)
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Type")} value={type} />
-        <SummaryCard label={t("Data keys")} value={keys.length} />
-        <SummaryCard label={t("Binary keys")} value={binaryKeys.length || "N/A"} />
-        <SummaryCard label={t("Immutable")} value={resource.immutable} />
-      </SummaryRow>
-      <SectionCard title={t("Data")}>
-        <div className="grid gap-3 xl:grid-cols-2">
-          {keys.length === 0 && <span className="text-sm text-muted-foreground">{t("No data")}</span>}
-          {keys.map((key) => (
-            <div key={key} className="min-w-0 rounded-lg border bg-muted/30 p-3">
-              <div className="mb-2 break-all text-xs font-semibold text-foreground">{key}</div>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">{compactValue(data[key])}</pre>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-      {binaryKeys.length > 0 && (
-        <SectionCard title={t("Binary data")}>
-          <ChipList values={binaryKeys} />
-        </SectionCard>
-      )}
-    </div>
-  )
-}
-
-function PolicyDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  const hard = asRecord(spec.hard)
-  const used = asRecord(status.used)
-  const limits = asRecordList(spec.limits)
-
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Type")} value={resource.kind} />
-        <SummaryCard label={t("Scopes")} value={spec.scopes || spec.scopeSelector} />
-        <SummaryCard label={t("Limits")} value={limits.length || "N/A"} />
-        <SummaryCard label={t("Disruptions")} value={`${compactValue(status.currentHealthy)} / ${compactValue(status.desiredHealthy)}`} />
-      </SummaryRow>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Spec")} rows={[
-            { label: t("Min available"), value: spec.minAvailable },
-            { label: t("Max unavailable"), value: spec.maxUnavailable },
-            { label: t("Selector"), value: asRecord(spec.selector).matchLabels || spec.selector },
-            { label: t("Hard"), value: hard },
-            { label: t("Limits"), value: limits },
-          ]} />
-        <KvSection title={t("Status")} rows={[
-            { label: t("Used"), value: used },
-            { label: t("Current healthy"), value: status.currentHealthy },
-            { label: t("Desired healthy"), value: status.desiredHealthy },
-            { label: t("Expected pods"), value: status.expectedPods },
-            { label: t("Disruptions allowed"), value: status.disruptionsAllowed },
-          ]} />
-      </div>
-    </div>
-  )
-}
-
-function ClusterControlDetailOverview({ resource }: { resource: KubeResource }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  return (
-    <div className="space-y-4">
-      <SummaryRow>
-        <SummaryCard label={t("Kind")} value={resource.kind} />
-        <SummaryCard label={t("Version")} value={resource.apiVersion || spec.version} />
-        <SummaryCard label={t("Available")} value={status.available ?? status.phase ?? asRecordList(status.conditions).find((item) => item.status === "True")?.type} />
-        <SummaryCard label={t("Created")} value={resource.metadata.creationTimestamp} />
-      </SummaryRow>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Spec")} rows={Object.entries(spec).map(([label, value]) => ({ label, value }))} />
-        <KvSection title={t("Status")} rows={Object.entries(status).map(([label, value]) => ({ label, value }))} />
-      </div>
-      <ValueSection title={t("Conditions")} value={status.conditions} />
-    </div>
-  )
-}
-
-/** Spec and status as readable key/value sections; used for CRDs without a dedicated layout. */
-function StructuredResourceOverview({ resource, sections }: { resource: KubeResource; sections: DetailSection[] }) {
-  const spec = asRecord(resource.spec)
-  const status = asRecord(resource.status)
-  const rows = (record: Record<string, unknown>, skip: string[] = []) =>
-    Object.entries(record).filter(([key, value]) => !skip.includes(key) && hasRenderableValue(value)).map(([key, value]) => ({ label: t(humanizeKey(key)), value }))
-  // Kinds without spec/status (e.g. NetworkAttachmentDefinition config) still show their top-level fields.
-  const topLevel = Object.fromEntries(Object.entries(resource).filter(([key]) => !["apiVersion", "kind", "metadata", "spec", "status"].includes(key)))
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Spec")} rows={rows(spec)} />
-        <KvSection title={t("Status")} rows={rows(status, ["conditions"])} />
-      </div>
-      <KvSection title={t("Details")} rows={rows(topLevel)} />
-      <ValueSection title={t("Conditions")} value={status.conditions} />
-      {sections.filter((section) => !["Metadata", "Status", "Spec"].some((title) => title === section.title || t(title) === section.title)).map((section) => (
-        <KvSection key={section.title} title={t(section.title)} description={section.description && t(section.description)} rows={section.items.map((item) => ({ label: t(item.label), value: item.value }))} />
-      ))}
-    </div>
-  )
-}
-
-function ResourceSpecificOverview({ resource, config, sections }: { resource: KubeResource; config: ResourceConfig; sections: DetailSection[] }) {
-  const kind = resource.kind || config.kind
-  const scope = `${config.id} ${config.path}`.toLowerCase()
-  if (kind === "Pod") return <PodDetailOverview resource={resource} />
-  if (["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "HorizontalPodAutoscaler", "ReplicationController", "PodTemplate", "ControllerRevision", "VirtualMachinePool", "VirtualMachineInstanceReplicaSet"].includes(kind)) return <WorkloadDetailOverview resource={resource} />
-  if (kind === "Node") return <NodeDetailOverview resource={resource} />
-  if (["MutatingWebhookConfiguration", "ValidatingWebhookConfiguration", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"].includes(kind)) return <AdmissionDetailOverview resource={resource} />
-  if (["Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding", "ServiceAccount"].includes(kind)) return <RbacDetailOverview resource={resource} />
-  if (["ConfigMap", "Secret"].includes(kind)) return <ConfigDetailOverview resource={resource} />
-  if (["LimitRange", "ResourceQuota", "PodDisruptionBudget"].includes(kind)) return <PolicyDetailOverview resource={resource} />
-  if (["APIService", "CustomResourceDefinition", "ComponentStatus", "Namespace", "Lease", "CertificateSigningRequest", "FlowSchema", "PriorityLevelConfiguration", "RuntimeClass", "PriorityClass", "Event"].includes(kind)) return <ClusterControlDetailOverview resource={resource} />
-  if (["Service", "Ingress", "IngressClass", "NetworkPolicy", "EndpointSlice", "Endpoints", "Gateway", "GatewayClass", "HTTPRoute"].includes(kind)) return <NetworkDetailOverview resource={resource} />
-  if (["PersistentVolume", "PersistentVolumeClaim", "StorageClass", "CSIDriver", "CSINode", "CSIStorageCapacity", "VolumeAttachment", "VolumeSnapshot", "VolumeSnapshotClass", "VolumeSnapshotContent", "DataVolume", "DataSource", "StorageProfile"].includes(kind) || ["volume", "storage", "snapshot"].some((item) => scope.includes(item))) return <StorageDetailOverview resource={resource} />
-  if (kind.includes("VirtualMachine") || kind === "KubeVirt" || kind.startsWith("CDI") || ["ObjectTransfer", "DataImportCron", "VolumeImportSource", "VolumeUploadSource", "VolumeCloneSource"].includes(kind)) return <VirtualizationDetailOverview resource={resource} />
-  return <StructuredResourceOverview resource={resource} sections={sections} />
-}
 
 const fieldDefaults = (fields?: CreateFormField[]) =>
   Object.fromEntries((fields || []).map((field) => [field.name, typeof field.defaultValue === "function" ? "" : field.defaultValue ?? ""])) as Record<string, string | boolean>
@@ -1992,7 +1056,7 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
             headers: { "Content-Type": "application/json", Accept: "application/json" },
             body: JSON.stringify(resource),
           })
-          if (!res.ok) throw new Error(`${resource.kind || "Resource"} ${resource.metadata.name}: ${await res.text()}`)
+          if (!res.ok) throw new Error(`${resource.kind || t("Resource")} ${resource.metadata.name}: ${await res.text()}`)
           continue
         }
 
@@ -2012,14 +1076,14 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
           lastError = await res.text()
           if (res.status !== 404) break
         }
-        if (!created) throw new Error(`${resource.kind || "Resource"} ${resource.metadata.name}: ${lastError || "Resource API is not served by this cluster"}`)
+        if (!created) throw new Error(`${resource.kind || t("Resource")} ${resource.metadata.name}: ${lastError || t("Resource API is not served by this cluster")}`)
       }
       setOpen(false)
       setValues(createFieldDefaults(createFields, defaultNamespace))
       setYamlEdited(false)
       onCreated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create resource")
+      setError(err instanceof Error ? err.message : t("Failed to create resource"))
     } finally {
       setSaving(false)
     }
@@ -2113,7 +1177,7 @@ function requestPreview(action: ResourceAction, resource: KubeResource, values: 
       body: typeof request.options?.body === "string" ? YAML.load(request.options.body) || request.options.body : request.options?.body,
     }, { noRefs: true, lineWidth: 120 })
   } catch (err) {
-    return err instanceof Error ? err.message : "Unable to preview request"
+    return err instanceof Error ? err.message : t("Unable to preview request")
   }
 }
 
@@ -2266,9 +1330,9 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
         lastError = await res.text()
         if (res.status !== 404) break
       }
-      if (!loaded) throw new Error(lastError || "Resource API is not served by this cluster")
+      if (!loaded) throw new Error(lastError || t("Resource API is not served by this cluster"))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load resources")
+      setError(err instanceof Error ? err.message : t("Failed to load resources"))
       setItems([])
     } finally {
       setLoading(false)
@@ -2305,7 +1369,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
       lastError = await res.text()
       if (res.status !== 404) break
     }
-    throw new Error(lastError || "Delete failed")
+    throw new Error(lastError || t("Delete failed"))
   }
 
   return (
@@ -2439,61 +1503,6 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
 }
 
 /** Long annotation values (JSON, certificates) are clamped; JSON is pretty-printed when expanded. */
-function AnnotationValue({ value }: { value: string }) {
-  const [open, setOpen] = useState(false)
-  const long = value.length > 160 || value.includes("\n")
-  if (!long) return <span className="break-all font-mono text-xs">{value}</span>
-  let pretty = value
-  try {
-    pretty = JSON.stringify(JSON.parse(value), null, 2)
-  } catch {
-    // Not JSON; show as is.
-  }
-  return (
-    <div className="min-w-0">
-      {open
-        ? <pre className="max-h-80 overflow-auto rounded-md bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap break-all">{pretty}</pre>
-        : <span className="line-clamp-2 break-all font-mono text-xs">{value}</span>}
-      <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-xs text-primary hover:underline">{open ? t("Show less") : t("Show more")}</button>
-    </div>
-  )
-}
-
-function MetadataSection({ resource, labels, annotations }: { resource: KubeResource; labels: Array<[string, string]>; annotations: Array<[string, string]> }) {
-  const owners = resource.metadata.ownerReferences || []
-  return (
-    <SectionCard title={t("Metadata")}>
-      <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-[10rem_minmax(0,1fr)]">
-        <dt className="text-xs text-muted-foreground">{t("UID")}</dt>
-        <dd className="min-w-0 break-all font-mono text-xs">{resource.metadata.uid || "-"}</dd>
-        <dt className="text-xs text-muted-foreground">{t("Created")}</dt>
-        <dd className="text-sm" title={resource.metadata.creationTimestamp}>{relativeTime(resource.metadata.creationTimestamp)}</dd>
-        {owners.length > 0 && (
-          <>
-            <dt className="text-xs text-muted-foreground">{t("Owner")}</dt>
-            <dd className="min-w-0 font-mono text-xs">{owners.map((owner) => `${owner.kind}/${owner.name}`).join(", ")}</dd>
-          </>
-        )}
-        <dt className="text-xs text-muted-foreground">{t("Labels")}</dt>
-        <dd className="min-w-0"><ChipList values={labels.map(([key, value]) => `${key}=${value}`)} /></dd>
-        <dt className="text-xs text-muted-foreground">{t("Annotations")}</dt>
-        <dd className="min-w-0">
-          {annotations.length === 0 ? <span className="text-muted-foreground">-</span> : (
-            <div className="divide-y rounded-md border">
-              {annotations.map(([key, value]) => (
-                <div key={key} className="grid gap-1 px-3 py-2 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] md:gap-4">
-                  <span className="break-all font-mono text-xs text-muted-foreground">{key}</span>
-                  <AnnotationValue value={value} />
-                </div>
-              ))}
-            </div>
-          )}
-        </dd>
-      </dl>
-    </SectionCard>
-  )
-}
-
 export function ResourceDetail({ config }: { config: ResourceConfig }) {
   const { namespace, name } = useParams()
   const navigate = useNavigate()
@@ -2519,9 +1528,9 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
           lastError = await res.text()
           if (res.status !== 404) break
         }
-        if (!loaded) throw new Error(lastError || "Resource API is not served by this cluster")
+        if (!loaded) throw new Error(lastError || t("Resource API is not served by this cluster"))
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load resource")
+        setError(err instanceof Error ? err.message : t("Failed to load resource"))
       } finally {
         setLoading(false)
       }
@@ -2529,7 +1538,7 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
     load()
   }, [config, name, namespace])
 
-  if (loading) {
+  if (loading && !resource) {
     return (
       <div className="flex h-64 items-center justify-center gap-2">
         <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
@@ -2566,9 +1575,9 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
           lastError = await res.text()
           if (res.status !== 404) break
         }
-        throw new Error(lastError || "Resource API is not served by this cluster")
+        throw new Error(lastError || t("Resource API is not served by this cluster"))
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load resource"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("Failed to load resource")))
       .finally(() => setLoading(false))
   }
 
@@ -2693,9 +1702,9 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
         lastError = await res.text()
         if (res.status !== 404) break
       }
-      if (!loaded) throw new Error(lastError || "Resource API is not served by this cluster")
+      if (!loaded) throw new Error(lastError || t("Resource API is not served by this cluster"))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load manifest")
+      setError(err instanceof Error ? err.message : t("Failed to load manifest"))
       setResource(null)
     } finally {
       setLoading(false)
@@ -2706,7 +1715,8 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
     load()
   }, [load])
 
-  if (loading) {
+  // Keep the panel (and an in-progress edit) mounted during reloads.
+  if (loading && !resource) {
     return (
       <div className="flex h-64 items-center justify-center gap-2">
         <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />

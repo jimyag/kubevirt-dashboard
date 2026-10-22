@@ -234,7 +234,7 @@ function CreateSecurityGroupDialog({
       onOpenChange(false)
       onCreated({ provider, name: name.trim(), namespace: provider === "cilium" ? namespace : undefined })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create security group")
+      setError(err instanceof Error ? err.message : t("Failed to create security group"))
     } finally {
       setBusy(false)
     }
@@ -503,7 +503,7 @@ export function SecurityGroupDetailPage() {
       setDraft(null)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save rules")
+      setError(err instanceof Error ? err.message : t("Failed to save rules"))
     } finally {
       setSaving(false)
     }
