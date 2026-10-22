@@ -41,7 +41,7 @@
       "groupName": "KubeVirt and Kubernetes"
     },
     {
-      "description": "KubeVirt client-go 1.9 uses Kubernetes 0.34; allow compatible patch updates.",
+      "description": "kubevirt.io/client-go 1.9 imports client-go packages removed in Kubernetes 0.35 (autoscaling/v2beta1, scheduling/v1alpha1, storagemigration/v1alpha1); keep 0.34.x until a KubeVirt SDK release supports newer clients.",
       "matchManagers": ["gomod"],
       "matchPackageNames": ["k8s.io/api", "k8s.io/apimachinery", "k8s.io/apiextensions-apiserver", "k8s.io/client-go"],
       "allowedVersions": "<0.35.0"

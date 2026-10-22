@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/spf13/cobra v1.10.1
+	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.34.12
 	k8s.io/apimachinery v0.34.12
 	k8s.io/client-go v0.34.12
@@ -69,7 +69,7 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.31.0 // indirect
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3 // indirect
-	kubevirt.io/containerized-data-importer-api v1.64.0 // indirect
+	kubevirt.io/containerized-data-importer-api v1.66.1 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.2.4 // indirect
 	sigs.k8s.io/json v0.0.0-20260909141634-11ed52e25bc5 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect

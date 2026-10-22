@@ -29,7 +29,7 @@ export const horizontalpodautoscalersConfig: ResourceConfig = {
           minReplicas: shared.numberValue(values.minReplicas, 1),
           maxReplicas: shared.numberValue(values.maxReplicas, 3),
           scaleTargetRef: {
-            apiVersion: targetKind === "Deployment" ? "apps/v1" : "pool.kubevirt.io/v1alpha1",
+            apiVersion: targetKind === "Deployment" ? "apps/v1" : "pool.kubevirt.io/v1beta1",
             kind: targetKind,
             name: shared.stringValue(values.targetName, "example-pool"),
           },
@@ -74,7 +74,7 @@ spec:
   minReplicas: 1
   maxReplicas: 3
   scaleTargetRef:
-    apiVersion: pool.kubevirt.io/v1alpha1
+    apiVersion: pool.kubevirt.io/v1beta1
     kind: VirtualMachinePool
     name: example-pool
   metrics:

@@ -6,9 +6,9 @@ export const virtualmachinepoolsConfig: ResourceConfig = {
     path: "/kubevirt/virtualization/vm-pools",
     title: "VM Pools",
     subtitle: "Manage KubeVirt VirtualMachinePool resources",
-    listPath: "/apis/pool.kubevirt.io/v1alpha1/virtualmachinepools",
+    listPath: "/apis/pool.kubevirt.io/v1beta1/virtualmachinepools",
     namespaced: true,
-    resourcePath: "/apis/pool.kubevirt.io/v1alpha1",
+    resourcePath: "/apis/pool.kubevirt.io/v1beta1",
     kind: "VirtualMachinePool",
     actions: shared.poolActions,
     createFields: [
@@ -21,7 +21,7 @@ export const virtualmachinepoolsConfig: ResourceConfig = {
     buildCreateResource: (values) => {
       const name = shared.stringValue(values.name, "example-pool");
       return {
-        apiVersion: "pool.kubevirt.io/v1alpha1",
+        apiVersion: "pool.kubevirt.io/v1beta1",
         kind: "VirtualMachinePool",
         metadata: { name, namespace: shared.stringValue(values.namespace, "default"), labels: { "kubevirt-manager.io/managed": "true" } },
         spec: {
@@ -82,7 +82,7 @@ export const virtualmachinepoolsConfig: ResourceConfig = {
       { label: "Replicas", value: (r) => String((r.spec?.replicas as number | undefined) ?? "N/A") },
       { label: "Ready", value: (r) => String((r.status?.readyReplicas as number | undefined) ?? 0) },
     ],
-    createTemplate: `apiVersion: pool.kubevirt.io/v1alpha1
+    createTemplate: `apiVersion: pool.kubevirt.io/v1beta1
 kind: VirtualMachinePool
 metadata:
   name: example-pool

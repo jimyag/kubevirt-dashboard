@@ -82,6 +82,8 @@ const jsonPut = (body: unknown = {}): RequestInit => ({
 const resourceRefPath = (base: string, id: string, resource: { metadata: { namespace?: string; name: string } }) =>
   `${base}${resource.metadata.namespace ? `/namespaces/${resource.metadata.namespace}` : ""}/${id}/${resource.metadata.name}`;
 
+/** Pools are served as v1beta1 since KubeVirt 1.7 and v1alpha1 before; act on the version the object was read from. */
+const poolBase = (resource: { apiVersion?: string }) => `/apis/${resource.apiVersion || "pool.kubevirt.io/v1beta1"}`;
 const poolVmSpec = (r: { spec?: Record<string, unknown> }) => getRecord(getRecord(r.spec).virtualMachineTemplate).spec as Record<string, unknown> | undefined;
 const poolDomain = (r: { spec?: Record<string, unknown> }) => getRecord(getRecord(getRecord(poolVmSpec(r)).template).spec).domain;
 
@@ -91,7 +93,7 @@ const poolActions: ResourceAction[] = [
     label: "Start",
     description: "Set the pool VM template run strategy to Always.",
     buildRequest: (resource) => ({
-      url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+      url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
       options: mergePatch({ spec: { virtualMachineTemplate: { spec: { runStrategy: "Always" } } } }),
     }),
   },
@@ -100,7 +102,7 @@ const poolActions: ResourceAction[] = [
     label: "Stop",
     description: "Set the pool VM template run strategy to Halted.",
     buildRequest: (resource) => ({
-      url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+      url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
       options: mergePatch({ spec: { virtualMachineTemplate: { spec: { runStrategy: "Halted" } } } }),
     }),
   },
@@ -109,7 +111,7 @@ const poolActions: ResourceAction[] = [
     label: "Scale",
     fields: [{ name: "replicas", label: "Replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).replicas || 1) }],
     buildRequest: (resource, values) => ({
-      url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+      url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
       options: mergePatch({ spec: { replicas: numberValue(values.replicas, 1) } }),
     }),
   },
@@ -124,7 +126,7 @@ const poolActions: ResourceAction[] = [
       { name: "memory", label: "Memory", defaultValue: (r) => String(getRecord(getRecord(getRecord(poolDomain(r)).resources).requests).memory || getRecord(getRecord(poolDomain(r)).memory).guest || "1Gi") },
     ],
     buildRequest: (resource, values) => ({
-      url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+      url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
       options: mergePatch({
         spec: {
           virtualMachineTemplate: {
@@ -152,7 +154,7 @@ const poolActions: ResourceAction[] = [
     label: "Run Strategy",
     fields: [{ name: "runStrategy", label: "Run Strategy", type: "select", defaultValue: (r) => String(getRecord(poolVmSpec(r)).runStrategy || "Always"), options: [{ label: "Always", value: "Always" }, { label: "Halted", value: "Halted" }, { label: "RerunOnFailure", value: "RerunOnFailure" }, { label: "Manual", value: "Manual" }] }],
     buildRequest: (resource, values) => ({
-      url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+      url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
       options: mergePatch({ spec: { virtualMachineTemplate: { spec: { runStrategy: stringValue(values.runStrategy, "Always") } } } }),
     }),
   },
@@ -168,7 +170,7 @@ const poolActions: ResourceAction[] = [
         ? { instancetype: { kind: "VirtualMachineClusterInstancetype", name }, template: { spec: { domain: { cpu: null, resources: { requests: { memory: null } }, memory: null } } } }
         : { instancetype: null };
       return {
-        url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+        url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
         options: mergePatch({ spec: { virtualMachineTemplate: { spec } } }),
       };
     },
@@ -178,7 +180,7 @@ const poolActions: ResourceAction[] = [
     label: "Priority Class",
     fields: [{ name: "priorityClassName", label: "Priority Class Name", defaultValue: (r) => String(getRecord(getRecord(getRecord(poolVmSpec(r)).template).spec).priorityClassName || "") }],
     buildRequest: (resource, values) => ({
-      url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+      url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
       options: mergePatch({ spec: { virtualMachineTemplate: { spec: { template: { spec: { priorityClassName: stringValue(values.priorityClassName) || null } } } } } }),
     }),
   },
@@ -227,7 +229,7 @@ const poolActions: ResourceAction[] = [
     buildRequest: (resource, values) => {
       const probe = stringValue(values.probe);
       return {
-        url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+        url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
         options: mergePatch({ spec: { virtualMachineTemplate: { spec: { template: { spec: { livenessProbe: probe ? JSON.parse(probe) : null } } } } } }),
       };
     },
@@ -240,7 +242,7 @@ const poolActions: ResourceAction[] = [
     buildRequest: (resource, values) => {
       const probe = stringValue(values.probe);
       return {
-        url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+        url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
         options: mergePatch({ spec: { virtualMachineTemplate: { spec: { template: { spec: { readinessProbe: probe ? JSON.parse(probe) : null } } } } } }),
       };
     },
