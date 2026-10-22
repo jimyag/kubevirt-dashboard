@@ -1,14 +1,3 @@
-import { useEffect, useState } from "react"
-import {
-  Cpu,
-  Globe,
-  HardDrive,
-  LayoutDashboard,
-  Boxes,
-  Network,
-  Server,
-  Terminal,
-} from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 
 import {
@@ -17,134 +6,76 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { useNetworkProfile } from "@/lib/kube"
+import { findActiveNav, toneClasses, useNavSections } from "@/lib/navigation"
 
-const getContext = () => localStorage.getItem("kube-context") || ""
-const setContext = (ctx: string) => localStorage.setItem("kube-context", ctx)
-
-const navItems = [
-  { name: "Overview", path: "/", icon: LayoutDashboard },
-  { name: "Kubernetes", path: "/kubernetes", icon: Boxes },
-  { name: "KubeVirt", path: "/kubevirt", icon: Cpu },
-  { name: "Storage", path: "/storage", icon: HardDrive },
-  { name: "Nodes", path: "/nodes", icon: Server },
-  { name: "Networks", path: "/networks", icon: Network },
-]
+const navButtonClass = [
+  "h-8 text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
+].join(" ")
 
 export function AppSidebar() {
   const location = useLocation()
-  const [contexts, setContexts] = useState<string[]>([])
-  const [currentCtx, setCurrentCtx] = useState(getContext())
-
-  useEffect(() => {
-    fetch("/api/v1/contexts")
-      .then((r) => r.json())
-      .then((d) => {
-        setContexts(d.contexts || [])
-        if (!getContext() && d.default) {
-          setContext(d.default)
-          setCurrentCtx(d.default)
-        }
-      })
-      .catch(() => {})
-  }, [])
-
-  const handleContextChange = (v: string) => {
-    setContext(v)
-    setCurrentCtx(v)
-    window.location.reload()
-  }
-
-  const isActive = (path: string) => {
-    if (path === "/") return location.pathname === "/"
-    return location.pathname.startsWith(path)
-  }
+  const profile = useNetworkProfile()
+  const sections = useNavSections()
+  const active = findActiveNav(location.pathname)?.item.path
 
   return (
-    <Sidebar collapsible="offcanvas">
-      <SidebarHeader>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="h-(--header-height) justify-center border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:!p-1.5">
+            <SidebarMenuButton asChild className="h-9 hover:bg-transparent active:bg-transparent">
               <Link to="/">
-                <div className="flex items-center gap-2">
-                  <div className="bg-sidebar-primary p-1.5 rounded-lg shadow-sm">
-                    <Terminal className="text-sidebar-primary-foreground h-4 w-4" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-base font-semibold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-                      Virt
-                    </span>
-                    <span className="text-[10px] font-medium text-muted-foreground leading-none">
-                      Dashboard
-                    </span>
-                  </div>
-                </div>
+                <div className="flex aspect-square size-7 shrink-0 items-center justify-center rounded-md bg-primary font-mono text-xs font-semibold text-primary-foreground">kv</div>
+                <span className="text-sm font-semibold text-sidebar-accent-foreground">virt console</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.path}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive(item.path)}
-                    className="transition-all duration-200 hover:bg-accent/60 active:scale-95 data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:shadow-sm"
-                  >
-                    <Link to={item.path}>
-                      <item.icon className="text-sidebar-primary" />
-                      <span className="font-medium">{item.name}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+      <SidebarContent className="gap-0 py-2">
+        {sections.map((section) => (
+          <SidebarGroup key={section.label} className="py-1">
+            {section.label !== "Home" && <SidebarGroupLabel className="h-7 text-xs text-muted-foreground">{section.label}</SidebarGroupLabel>}
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {section.items.map((item) => (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton asChild isActive={active === item.path} tooltip={item.name} className={navButtonClass}>
+                      <Link to={item.path}>
+                        <item.icon className={toneClasses[section.tone].text} />
+                        <span>{item.name}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
-      <SidebarFooter>
-        <div className="rounded-lg border bg-card p-2 shadow-sm transition-colors hover:bg-muted/50">
-          <div className="mb-1 flex items-center gap-2 px-1">
-            <span className="h-2 w-2 rounded-full bg-primary" />
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">Cluster</span>
+      <SidebarFooter className="border-t border-sidebar-border group-data-[collapsible=icon]:hidden">
+        <Link to="/settings" className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-accent">
+          <span className={profile.loaded ? "size-2 shrink-0 rounded-full bg-green-600" : "size-2 shrink-0 rounded-full bg-muted-foreground/40"} />
+          <div className="min-w-0">
+            <div className="truncate text-xs font-medium text-sidebar-accent-foreground">{profile.loaded ? profile.label : "Detecting..."}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              ACL {profile.aclEngines.length ? profile.aclEngines.map((engine) => engine === "cilium" ? "Cilium" : "Kube-OVN").join(" / ") : "NetworkPolicy"}
+            </div>
           </div>
-          <Select
-            value={currentCtx}
-            onValueChange={handleContextChange}
-            disabled={contexts.length === 0}
-          >
-            <SelectTrigger className="h-9 w-full justify-start gap-2 bg-background px-2 text-xs font-semibold">
-              <Globe className="h-3.5 w-3.5 text-muted-foreground" />
-              <SelectValue placeholder="Loading..." />
-            </SelectTrigger>
-            <SelectContent align="start" side="top" className="max-h-72 w-[var(--radix-select-trigger-width)]">
-              {contexts.map((c) => (
-                <SelectItem key={c} value={c} className="text-xs">
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        </Link>
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }

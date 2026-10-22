@@ -58,7 +58,7 @@ export function VncConsole({ namespace, name }: { namespace: string, name: strin
     <div className={cn("bg-card shadow-2xl overflow-hidden flex flex-col transition-all duration-300 relative", isTheaterMode ? "fixed inset-0 z-[100] h-screen w-screen rounded-none" : "rounded-lg border h-[calc(100vh-280px)] min-h-[600px] w-full")}>
       <div className="flex items-center justify-between gap-2 bg-muted/50 border-b p-3 px-5">
          <div className="flex items-center gap-3">
-            <div className={cn("w-2.5 h-2.5 rounded-full", status === "connected" ? "bg-primary animate-pulse" : status === "error" ? "bg-destructive" : "bg-muted-foreground")} />
+            <div className={cn("w-2.5 h-2.5 rounded-full", status === "connected" ? "bg-green-600" : status === "error" ? "bg-destructive" : "bg-muted-foreground")} />
             <span className="text-[10px] font-semibold text-muted-foreground">{status === "connected" ? (isTheaterMode ? `VNC: ${namespace}/${name}` : "VNC session active") : status === "error" ? "Connection error" : "Initializing VNC..."}</span>
          </div>
          {status === "connected" && (
@@ -82,7 +82,7 @@ export function VncConsole({ namespace, name }: { namespace: string, name: strin
         </div>
       )}
       {showCADModal && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center p-4 bg-background/60 backdrop-blur-md animate-in fade-in duration-200">
+        <div className="absolute inset-0 z-[200] flex items-center justify-center p-4 bg-background/60 backdrop-blur-md">
            <div className="bg-card rounded-lg shadow-2xl border max-w-sm w-full p-8 animate-in zoom-in-95 duration-200">
               <div className="flex flex-col items-center text-center space-y-4">
                  <div className="bg-destructive/10 p-4 rounded-full"><ShieldAlert className="text-destructive" size={32} /></div>

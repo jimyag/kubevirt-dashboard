@@ -1,5 +1,7 @@
 # kubevirt-dashboard UI 主题迁移方案
 
+> **状态：已被取代。** 本文记录的是 2026-05 将 UI 对齐 kite 风格（Maple Mono 字体、内联组件迁移到 shadcn/ui）的方案，已经实施完毕，随后又被新的设计体系替换：字体改为 IBM Plex Sans / Mono，配色、分区色和共享组件见 `ui/src/index.css`、`ui/src/components/console.tsx`。当前必须遵守的规则以仓库根目录的 [AGENTS.md](../../AGENTS.md) 为准，本文仅作历史参考。
+
 目标：将 `ui/`（kubevirt-dashboard 前端）的视觉风格对齐到 `kite/ui/` 的设计体系。
 
 ---
