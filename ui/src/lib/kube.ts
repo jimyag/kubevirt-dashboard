@@ -307,3 +307,12 @@ export const subnetUsage = (subnet: KubeObject) => {
   const available = Number(status.v4availableIPs ?? status.v4AvailableIPs ?? 0) + Number(status.v6availableIPs ?? 0)
   return { used, total: used + available }
 }
+
+/**
+ * JSON merge patch only deletes map keys that are explicitly null. Use this when a form edits a
+ * whole map (labels, annotations, selectors) so removed entries are actually removed.
+ */
+export const replaceMap = (current: unknown, next: Record<string, unknown>) => ({
+  ...Object.fromEntries(Object.keys(asRecord(current)).map((key) => [key, null])),
+  ...next,
+})

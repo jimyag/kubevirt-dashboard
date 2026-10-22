@@ -275,6 +275,7 @@ const kubevirtResourceGroups: ResourceGroup[] = [
     description: "KubeVirt migration and operational resources.",
     resources: [
       resourceConfigs.virtualmachineinstancemigrations,
+      resourceConfigs.secrets,
     ],
   },
 ];

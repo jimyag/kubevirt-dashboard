@@ -12,6 +12,7 @@ import {
   type KubeObject,
   type UnknownRecord,
 } from "./kube"
+import { parseIPv4Cidr } from "./validate"
 
 /**
  * A provider-neutral security group, modeled after cloud security groups:
@@ -102,6 +103,23 @@ export const portRange = (ports: string) => {
   const [min, max] = ports.split("-").map((part) => Number(part.trim()))
   if (!Number.isFinite(min) || min <= 0) return null
   return { min, max: Number.isFinite(max) && max >= min ? max : min }
+}
+
+/** Returns why a rule cannot be saved, or "" when it is valid. */
+export const ruleProblem = (rule: SgRule) => {
+  if (rule.remoteType === "cidr") {
+    const remote = rule.remote.trim()
+    if (!remote) return "A CIDR rule needs a CIDR block."
+    if (!remote.includes(":") && !parseIPv4Cidr(remote)) return `${remote} is not a valid CIDR.`
+  }
+  if (rule.remoteType === "group" && !rule.remote.trim()) return "Choose a security group."
+  if ((rule.protocol === "tcp" || rule.protocol === "udp") && rule.ports.trim()) {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(rule.ports.trim())
+    const min = Number(match?.[1])
+    const max = Number(match?.[2] ?? match?.[1])
+    if (!match || min < 1 || max > 65535 || min > max) return `Invalid port range ${rule.ports}. Use 22 or 8000-8100 within 1-65535.`
+  }
+  return ""
 }
 
 export const ruleSummary = (rule: SgRule) => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { Network, Plus, RefreshCw, Search, Split, Trash2 } from "lucide-react"
 
@@ -43,6 +43,7 @@ import {
   useNetworkProfile,
   type KubeObject,
 } from "@/lib/kube"
+import { cidrContains, cidrsOverlap, ipv4Cidr, isDnsLabel, parseIPv4Cidr } from "@/lib/validate"
 
 const OVN = "/apis/kubeovn.io/v1"
 const VM_API = "/apis/kubevirt.io/v1"
@@ -86,28 +87,50 @@ export function CreateSubnetDialog({
   onOpenChange,
   vpcs,
   defaultVpc,
+  existingSubnets = [],
   onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   vpcs: string[]
   defaultVpc?: string
+  /** Used to reject CIDRs that overlap another subnet of the same VPC, which Kube-OVN refuses. */
+  existingSubnets?: KubeObject[]
   onCreated: () => void
 }) {
   const [values, setValues] = useState({ name: "", vpc: defaultVpc || "ovn-cluster", cidrBlock: "10.100.0.0/24", gateway: "", namespaces: "", excludeIps: "", natOutgoing: true, isPrivate: false })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const set = (patch: Partial<typeof values>) => setValues((current) => ({ ...current, ...patch }))
+  useEffect(() => {
+    if (open) setValues((current) => ({ ...current, vpc: defaultVpc || current.vpc || "ovn-cluster" }))
+  }, [defaultVpc, open])
+  // natOutgoing only applies to subnets of the default VPC; custom VPCs egress through NAT gateways.
+  const defaultVpcSelected = values.vpc === "ovn-cluster"
+  const validate = () => {
+    const v4 = ipv4Cidr(values.cidrBlock)
+    if (!isDnsLabel(values.name.trim())) return "Name must be at most 63 lowercase letters, digits and dashes."
+    if (values.cidrBlock.split(",").some((part) => part.includes(".") && !parseIPv4Cidr(part))) return `Invalid IPv4 CIDR: ${values.cidrBlock}`
+    if (v4 && values.gateway.trim() && !cidrContains(v4, values.gateway)) return `Gateway ${values.gateway.trim()} is not inside ${v4}.`
+    const clash = existingSubnets.find((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === values.vpc && v4 && cidrsOverlap(v4, ipv4Cidr(str(asRecord(subnet.spec).cidrBlock))))
+    if (clash) return `${v4} overlaps subnet ${clash.metadata.name} (${str(asRecord(clash.spec).cidrBlock)}) in VPC ${values.vpc}.`
+    return ""
+  }
   const submit = async () => {
+    const problem = validate()
+    if (problem) {
+      setError(problem)
+      return
+    }
     setBusy(true)
     setError("")
     try {
       const spec: Record<string, unknown> = {
         vpc: values.vpc,
-        cidrBlock: values.cidrBlock.trim(),
-        protocol: values.cidrBlock.includes(":") ? (values.cidrBlock.includes(",") ? "Dual" : "IPv6") : "IPv4",
-        natOutgoing: values.natOutgoing,
+        cidrBlock: values.cidrBlock.split(",").map((part) => part.trim()).filter(Boolean).join(","),
+        protocol: values.cidrBlock.includes(":") ? (values.cidrBlock.includes(".") ? "Dual" : "IPv6") : "IPv4",
         private: values.isPrivate,
+        ...(defaultVpcSelected ? { natOutgoing: values.natOutgoing } : {}),
       }
       if (values.gateway.trim()) spec.gateway = values.gateway.trim()
       const namespaces = values.namespaces.split(",").map((item) => item.trim()).filter(Boolean)
@@ -143,13 +166,17 @@ export function CreateSubnetDialog({
           <FieldRow label="Reserved IPs"><Input value={values.excludeIps} onChange={(e) => set({ excludeIps: e.target.value })} placeholder="10.100.0.1..10.100.0.10" /></FieldRow>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
-            <div>
-              <div className="text-sm font-medium">NAT outgoing</div>
-              <div className="text-xs text-muted-foreground">SNAT traffic leaving the cluster</div>
-            </div>
-            <Switch checked={values.natOutgoing} onCheckedChange={(checked) => set({ natOutgoing: checked })} />
-          </label>
+          {defaultVpcSelected ? (
+            <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+              <div>
+                <div className="text-sm font-medium">NAT outgoing</div>
+                <div className="text-xs text-muted-foreground">SNAT traffic leaving the cluster</div>
+              </div>
+              <Switch checked={values.natOutgoing} onCheckedChange={(checked) => set({ natOutgoing: checked })} />
+            </label>
+          ) : (
+            <div className="rounded-lg border p-3 text-xs text-muted-foreground">Custom VPCs reach outside networks through a NAT gateway, not subnet NAT.</div>
+          )}
           <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
             <div>
               <div className="text-sm font-medium">Private</div>
@@ -172,21 +199,35 @@ function CreateVpcDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
   const [values, setValues] = useState({ name: "", namespaces: "", withSubnet: true, subnetName: "", cidrBlock: "192.168.0.0/24" })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  // Set once the VPC exists, so a retry after a failed subnet does not try to create the VPC again.
+  const [createdVpc, setCreatedVpc] = useState("")
   const set = (patch: Partial<typeof values>) => setValues((current) => ({ ...current, ...patch }))
   const submit = async () => {
+    const name = values.name.trim()
+    const subnetName = values.subnetName.trim() || `${name}-default`
+    if (!isDnsLabel(name)) return setError("Name must be at most 63 lowercase letters, digits and dashes.")
+    if (values.withSubnet && !isDnsLabel(subnetName)) return setError("Subnet name must be at most 63 lowercase letters, digits and dashes.")
+    if (values.withSubnet && !parseIPv4Cidr(values.cidrBlock)) return setError(`Invalid IPv4 CIDR: ${values.cidrBlock}`)
     setBusy(true)
     setError("")
-    const name = values.name.trim()
     try {
       const namespaces = values.namespaces.split(",").map((item) => item.trim()).filter(Boolean)
-      await requestJson(`${OVN}/vpcs`, jsonBody("POST", { apiVersion: "kubeovn.io/v1", kind: "Vpc", metadata: { name }, spec: namespaces.length ? { namespaces } : {} }))
+      if (createdVpc !== name) {
+        await requestJson(`${OVN}/vpcs`, jsonBody("POST", { apiVersion: "kubeovn.io/v1", kind: "Vpc", metadata: { name }, spec: namespaces.length ? { namespaces } : {} }))
+        setCreatedVpc(name)
+      }
       if (values.withSubnet) {
-        await requestJson(`${OVN}/subnets`, jsonBody("POST", {
-          apiVersion: "kubeovn.io/v1",
-          kind: "Subnet",
-          metadata: { name: values.subnetName.trim() || `${name}-default` },
-          spec: { vpc: name, cidrBlock: values.cidrBlock.trim(), protocol: "IPv4", ...(namespaces.length ? { namespaces } : {}) },
-        }))
+        // No subnet namespace binding: that would move every pod of those namespaces onto this subnet.
+        try {
+          await requestJson(`${OVN}/subnets`, jsonBody("POST", {
+            apiVersion: "kubeovn.io/v1",
+            kind: "Subnet",
+            metadata: { name: subnetName },
+            spec: { vpc: name, cidrBlock: values.cidrBlock.trim(), protocol: "IPv4" },
+          }))
+        } catch (err) {
+          throw new Error(`VPC ${name} was created, but subnet ${subnetName} failed: ${err instanceof Error ? err.message : String(err)}`)
+        }
       }
       onOpenChange(false)
       onCreated(name)
@@ -418,7 +459,7 @@ export function VpcDetailPage() {
         />
       </div>
 
-      <CreateSubnetDialog open={subnetOpen} onOpenChange={setSubnetOpen} vpcs={[name]} defaultVpc={name} onCreated={reload} />
+      <CreateSubnetDialog open={subnetOpen} onOpenChange={setSubnetOpen} vpcs={[name]} defaultVpc={name} existingSubnets={data.subnets} onCreated={reload} />
     </div>
   )
 }
@@ -500,7 +541,7 @@ export function SubnetListPage() {
         </NativeSelect>
       </Toolbar>
       <SubnetTable subnets={rows} loading={loading} vms={data.vms} onCreate={() => setCreateOpen(true)} onDelete={setDeleting} />
-      <CreateSubnetDialog open={createOpen} onOpenChange={setCreateOpen} vpcs={vpcNames} defaultVpc={vpcFilter === "all" ? undefined : vpcFilter} onCreated={reload} />
+      <CreateSubnetDialog open={createOpen} onOpenChange={setCreateOpen} vpcs={vpcNames} defaultVpc={vpcFilter === "all" ? undefined : vpcFilter} existingSubnets={data.subnets} onCreated={reload} />
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}

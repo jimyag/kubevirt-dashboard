@@ -1,3 +1,5 @@
+import * as YAML from "js-yaml"
+
 import {
   asList,
   asRecord,
@@ -117,12 +119,18 @@ export const buildVirtualMachine = (state: WizardState, vpcEnabled: boolean) => 
     volumes.push({ name: `datadisk${index + 1}`, dataVolume: { name: dvName } })
   })
 
-  const cloudInit = ["#cloud-config", `hostname: ${state.name}`]
-  if (state.username) cloudInit.push(`user: ${state.username}`)
-  if (state.password) cloudInit.push(`password: ${JSON.stringify(state.password)}`, "chpasswd: { expire: False }", "ssh_pwauth: True")
-  if (state.sshKey.trim()) cloudInit.push("ssh_authorized_keys:", ...state.sshKey.trim().split("\n").filter(Boolean).map((key) => `  - ${key.trim()}`))
+  // Serialize with a YAML library: keys, usernames and passwords may contain ":" or "#".
+  const sshKeys = state.sshKey.split("\n").map((key) => key.trim()).filter(Boolean)
+  const cloudConfig: UnknownRecord = { hostname: state.name }
+  if (state.username) cloudConfig.user = state.username
+  if (state.password) {
+    cloudConfig.password = state.password
+    cloudConfig.chpasswd = { expire: false }
+    cloudConfig.ssh_pwauth = true
+  }
+  if (sshKeys.length) cloudConfig.ssh_authorized_keys = sshKeys
   disks.push({ name: "cloudinitdisk", disk: { bus: "virtio" } })
-  volumes.push({ name: "cloudinitdisk", cloudInitNoCloud: { userData: `${cloudInit.join("\n")}\n` } })
+  volumes.push({ name: "cloudinitdisk", cloudInitNoCloud: { userData: `#cloud-config\n${YAML.dump(cloudConfig, { lineWidth: -1 })}` } })
 
   const templateLabels: Record<string, string> = { "kubevirt.io/domain": state.name, "vm.kubevirt.io/name": state.name }
   const templateAnnotations: Record<string, string> = {}

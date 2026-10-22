@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { relativeTime } from "@/lib/kube"
+import { relativeTime, replaceMap } from "@/lib/kube"
 import { ConfirmDialog, EmptyState, ErrorNote, LoadingState, NativeSelect, PageHeader, StatusDot, Toolbar } from "@/components/console"
 import {
   DropdownMenu,
@@ -103,6 +103,8 @@ export type ResourceConfig = {
   title: string
   subtitle: string
   listPath: string
+  /** Query string (without "?") added to list requests, e.g. a label selector. Kept out of listPath so discovery still sees the plural. */
+  listQuery?: string
   listPathAlternates?: string[]
   namespaced: boolean
   resourcePath: string
@@ -189,10 +191,12 @@ const resourcePathUrl = (config: ResourceConfig, basePath: string, name: string,
   return `${basePath}${nsPath}/${config.id}/${name}`
 }
 
-const resourceListUrl = (config: ResourceConfig, path: ServedPath, namespace: string) =>
-  config.namespaced && namespace !== "all"
+const resourceListUrl = (config: ResourceConfig, path: ServedPath, namespace: string) => {
+  const url = config.namespaced && namespace !== "all"
     ? `${path.resourcePath}/namespaces/${namespace}/${config.id}`
     : path.listPath
+  return config.listQuery ? `${url}?${config.listQuery}` : url
+}
 
 const createPathUrl = (config: ResourceConfig, basePath: string, resource: KubeResource) =>
   config.namespaced
@@ -1231,11 +1235,29 @@ const createFieldDefaults = (fields: CreateFormField[], defaultNamespace?: strin
   return defaults
 }
 
+// "N/A" is a display placeholder; it must never be prefilled into an editable field and sent back.
+const editableDefault = (value: string | boolean) => (value === "N/A" ? "" : value)
+
 const resourceFieldDefaults = (resource: KubeResource, fields?: CreateFormField[]) =>
   Object.fromEntries((fields || []).map((field) => [
     field.name,
-    typeof field.defaultValue === "function" ? field.defaultValue(resource) : field.defaultValue ?? "",
+    editableDefault(typeof field.defaultValue === "function" ? field.defaultValue(resource) : field.defaultValue ?? ""),
   ])) as Record<string, string | boolean>
+
+/** Parses free-form spec values so "replicas=3" sends a number and "enabled=true" a boolean. */
+const scalarFromText = (value: string): unknown => {
+  if (value === "true" || value === "false") return value === "true"
+  if (value === "null") return null
+  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value)
+  if (/^[[{]/.test(value)) {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return value
+    }
+  }
+  return value
+}
 
 const textFromRecord = (value: unknown) =>
   Object.entries(asRecord(value)).map(([key, next]) => `${key}=${compactValue(next)}`).join("\n")
@@ -1298,7 +1320,7 @@ const jsonPatchOptions = (body: unknown[]): RequestInit => ({
 })
 
 const specBasicsPatch = (values: Record<string, string | boolean>) => {
-  const spec = recordFromText(values.specFields)
+  const spec = Object.fromEntries(Object.entries(recordFromText(values.specFields)).map(([key, value]) => [key, scalarFromText(String(value))]))
   return Object.keys(spec).length ? { spec } : {}
 }
 
@@ -1454,7 +1476,7 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
       label: "Edit Metadata",
       description: `Update ${kind} labels and annotations.`,
       fields: metadataFields,
-      patch: (values) => ({ metadata: { labels: recordFromText(values.labels), annotations: recordFromText(values.annotations) } }),
+      patch: (values) => ({ metadata: { labels: replaceMap(resource.metadata.labels, recordFromText(values.labels)), annotations: replaceMap(resource.metadata.annotations, recordFromText(values.annotations)) } }),
     }),
   ]
 
@@ -1481,9 +1503,10 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
         { name: "labels", label: "Template Labels", section: "Pod Template", type: "textarea", defaultValue: () => textFromRecord(asRecord(template.metadata).labels), placeholder: "key=value per line" },
         { name: "annotations", label: "Template Annotations", section: "Pod Template", type: "textarea", defaultValue: () => textFromRecord(asRecord(template.metadata).annotations), placeholder: "key=value per line" },
       ],
-      patch: (values) => kind === "CronJob"
-        ? { spec: { jobTemplate: { spec: { template: { metadata: { labels: recordFromText(values.labels), annotations: recordFromText(values.annotations) } } } } } }
-        : { spec: { template: { metadata: { labels: recordFromText(values.labels), annotations: recordFromText(values.annotations) } } } },
+      patch: (values) => {
+        const metadata = { labels: replaceMap(asRecord(template.metadata).labels, recordFromText(values.labels)), annotations: replaceMap(asRecord(template.metadata).annotations, recordFromText(values.annotations)) }
+        return kind === "CronJob" ? { spec: { jobTemplate: { spec: { template: { metadata } } } } } : { spec: { template: { metadata } } }
+      },
     })
   }
 
@@ -1515,35 +1538,48 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     })
   }
 
-  if (["VirtualMachine", "VirtualMachineInstance", "VirtualMachinePool", "VirtualMachineInstanceReplicaSet"].includes(kind)) {
-    const templateSpec = kind === "VirtualMachinePool" ? asRecord(getValue(resource, ["spec", "virtualMachineTemplate", "spec", "template", "spec"])) : asRecord(getValue(resource, ["spec", "template", "spec"]))
-    const domain = asRecord(templateSpec.domain || getValue(resource, ["spec", "domain"]))
+  // VMI specs are immutable, so runtime edits apply to the owning VM, pool or replica set only.
+  if (["VirtualMachine", "VirtualMachinePool", "VirtualMachineInstanceReplicaSet"].includes(kind)) {
+    const vmSpec = kind === "VirtualMachinePool" ? asRecord(getValue(resource, ["spec", "virtualMachineTemplate", "spec"])) : spec
+    const templateSpec = asRecord(getValue(vmSpec, ["template", "spec"]))
+    const domain = asRecord(templateSpec.domain)
     const cpu = asRecord(domain.cpu)
+    // KubeVirt rejects CPU/memory on the template when an instance type provides them.
+    const usesInstancetype = Boolean(asRecord(vmSpec.instancetype).name)
+    const hasRunStrategy = kind !== "VirtualMachineInstanceReplicaSet"
     add({
       id: "edit-virtualization-runtime",
       label: "Edit Runtime",
-      description: `Update ${kind} run strategy, CPU, memory, and priority class.`,
+      description: usesInstancetype
+        ? `CPU and memory come from instance type ${compactValue(asRecord(vmSpec.instancetype).name)}; change the instance type to resize.`
+        : `Update ${kind} run strategy, CPU, memory, and priority class.`,
       fields: [
-        { name: "runStrategy", label: "Run Strategy", section: "Lifecycle", type: "select", defaultValue: () => compactValue(spec.runStrategy || "Halted"), options: [{ label: "Halted", value: "Halted" }, { label: "Always", value: "Always" }, { label: "Manual", value: "Manual" }] },
-        { name: "sockets", label: "CPU Sockets", section: "Compute", type: "number", defaultValue: () => String(cpu.sockets ?? 1) },
-        { name: "cores", label: "CPU Cores", section: "Compute", type: "number", defaultValue: () => String(cpu.cores ?? cpu.guest ?? 1) },
-        { name: "threads", label: "CPU Threads", section: "Compute", type: "number", defaultValue: () => String(cpu.threads ?? 1) },
-        { name: "memory", label: "Memory", section: "Compute", defaultValue: () => compactValue(asRecord(asRecord(domain.resources).requests).memory || asRecord(domain.memory).guest || "1Gi") },
+        ...(hasRunStrategy ? [{ name: "runStrategy", label: "Run Strategy", section: "Lifecycle", type: "select" as const, defaultValue: () => compactValue(vmSpec.runStrategy || (vmSpec.running === true ? "Always" : "Halted")), options: [{ label: "Halted", value: "Halted" }, { label: "Always", value: "Always" }, { label: "RerunOnFailure", value: "RerunOnFailure" }, { label: "Manual", value: "Manual" }] }] : []),
+        ...(usesInstancetype ? [] : [
+          { name: "sockets", label: "CPU Sockets", section: "Compute", type: "number" as const, defaultValue: () => String(cpu.sockets ?? 1) },
+          { name: "cores", label: "CPU Cores", section: "Compute", type: "number" as const, defaultValue: () => String(cpu.cores ?? 1) },
+          { name: "threads", label: "CPU Threads", section: "Compute", type: "number" as const, defaultValue: () => String(cpu.threads ?? 1) },
+          { name: "memory", label: "Memory", section: "Compute", defaultValue: () => compactValue(asRecord(asRecord(domain.resources).requests).memory || asRecord(domain.memory).guest || "1Gi") },
+        ]),
         { name: "priorityClassName", label: "Priority Class", section: "Scheduling", defaultValue: () => compactValue(templateSpec.priorityClassName) },
       ],
       patch: (values) => {
         const templatePatch = {
           spec: {
             priorityClassName: values.priorityClassName || null,
-            domain: {
-              cpu: { sockets: numberFromValue(values.sockets, 1), cores: numberFromValue(values.cores, 1), threads: numberFromValue(values.threads, 1) },
-              resources: { requests: { memory: values.memory } },
-            },
+            ...(usesInstancetype ? {} : {
+              domain: {
+                cpu: { sockets: numberFromValue(values.sockets, 1), cores: numberFromValue(values.cores, 1), threads: numberFromValue(values.threads, 1) },
+                resources: { requests: { memory: values.memory } },
+              },
+            }),
           },
         }
-        if (kind === "VirtualMachinePool") return { spec: { virtualMachineTemplate: { spec: { runStrategy: values.runStrategy, template: templatePatch } } } }
-        if (kind === "VirtualMachine") return { spec: { runStrategy: values.runStrategy, template: templatePatch } }
-        return { spec: templatePatch.spec }
+        // runStrategy and the legacy spec.running field are mutually exclusive.
+        const lifecycle = hasRunStrategy ? { runStrategy: values.runStrategy, running: null } : {}
+        if (kind === "VirtualMachinePool") return { spec: { virtualMachineTemplate: { spec: { ...lifecycle, template: templatePatch } } } }
+        if (kind === "VirtualMachine") return { spec: { ...lifecycle, template: templatePatch } }
+        return { spec: { template: templatePatch } }
       },
     })
   }
@@ -1559,66 +1595,142 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
         { name: "externalIPs", label: "External IPs", section: "Routing", defaultValue: () => csvFromList(spec.externalIPs), placeholder: "comma-separated" },
         { name: "loadBalancerIP", label: "Load Balancer IP", section: "Routing", defaultValue: () => compactValue(spec.loadBalancerIP) },
       ],
-      patch: (values) => ({ spec: { type: values.type, selector: recordFromText(values.selector), externalIPs: listFromCsv(values.externalIPs), loadBalancerIP: values.loadBalancerIP || null } }),
+      patch: (values) => ({ spec: { type: values.type, selector: replaceMap(spec.selector, recordFromText(values.selector)), externalIPs: listFromCsv(values.externalIPs), loadBalancerIP: values.loadBalancerIP || null } }),
     })
   }
 
-  if (["NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"].includes(kind) || config.path.includes("/calico/") || config.path.includes("/cilium/")) {
+  const calicoPolicyKinds = ["NetworkPolicy", "GlobalNetworkPolicy", "StagedNetworkPolicy", "StagedGlobalNetworkPolicy"]
+  const isCalicoPolicy = config.path.includes("/calico/") && calicoPolicyKinds.includes(kind)
+  if (isCalicoPolicy) {
+    // Calico policies select endpoints with a selector expression string, not label maps.
     add({
       id: "edit-network-policy",
       label: "Edit Policy",
-      description: `Update ${kind} selectors and policy type fields.`,
+      description: `Update ${kind} selector, order and policy types.`,
       fields: [
-        { name: "selector", label: "Selector / Endpoint Selector", section: "Policy", type: "textarea", defaultValue: () => textFromRecord(asRecord(spec.podSelector).matchLabels || asRecord(spec.endpointSelector).matchLabels), placeholder: "key=value per line" },
-        { name: "policyTypes", label: "Policy Types", section: "Policy", defaultValue: () => csvFromList(spec.policyTypes || spec.types), placeholder: "Ingress,Egress" },
-        { name: "specFields", label: `${kind} Spec Fields`, section: "Advanced Fields", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" },
+        { name: "selector", label: "Selector", section: "Policy", defaultValue: () => compactValue(spec.selector), placeholder: "app == 'web'" },
+        { name: "order", label: "Order", section: "Policy", type: "number", defaultValue: () => compactValue(spec.order) },
+        { name: "types", label: "Types", section: "Policy", defaultValue: () => csvFromList(spec.types), placeholder: "Ingress,Egress" },
       ],
-      patch: (values) => ({
-        spec: {
-          ...(kind.startsWith("Cilium") ? { endpointSelector: { matchLabels: recordFromText(values.selector) } } : { podSelector: { matchLabels: recordFromText(values.selector) } }),
-          ...(kind.startsWith("Cilium") ? {} : { policyTypes: listFromCsv(values.policyTypes) }),
-          ...asRecord(specBasicsPatch(values).spec),
-        },
-      }),
+      patch: (values) => ({ spec: { selector: values.selector || null, order: values.order === "" ? null : numberFromValue(values.order, 1000), types: listFromCsv(values.types) } }),
     })
-  } else if (["Ingress", "IngressClass", "Gateway", "GatewayClass", "HTTPRoute", "NetworkAttachmentDefinition", "Endpoints", "EndpointSlice"].includes(kind) || config.path.includes("/networks/") || config.path.includes("/kube-ovn/")) {
+  } else if (["NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"].includes(kind)) {
+    const cilium = kind.startsWith("Cilium")
+    const selector = asRecord(cilium ? spec.endpointSelector : spec.podSelector)
+    add({
+      id: "edit-network-policy",
+      label: "Edit Policy",
+      description: `Update ${kind} ${cilium ? "endpoint selector" : "pod selector and policy types"}. An empty selector matches every ${cilium ? "endpoint" : "pod"} in scope.`,
+      fields: [
+        { name: "selector", label: cilium ? "Endpoint Selector" : "Pod Selector", section: "Policy", type: "textarea", defaultValue: () => textFromRecord(selector.matchLabels), placeholder: "key=value per line" },
+        ...(cilium ? [] : [{ name: "policyTypes", label: "Policy Types", section: "Policy", defaultValue: () => csvFromList(spec.policyTypes), placeholder: "Ingress,Egress" }]),
+      ],
+      patch: (values) => {
+        const matchLabels = replaceMap(selector.matchLabels, recordFromText(values.selector))
+        return cilium
+          ? { spec: { endpointSelector: { matchLabels } } }
+          : { spec: { podSelector: { matchLabels }, policyTypes: listFromCsv(values.policyTypes) } }
+      },
+    })
+  }
+
+  if (kind === "Ingress") {
+    add({
+      id: "edit-network-fields",
+      label: "Edit Ingress",
+      description: "Update the ingress class.",
+      fields: [{ name: "className", label: "Ingress Class", section: "Routing", defaultValue: () => compactValue(spec.ingressClassName) }],
+      patch: (values) => ({ spec: { ingressClassName: values.className || null } }),
+    })
+  } else if (kind === "Gateway") {
+    add({
+      id: "edit-network-fields",
+      label: "Edit Gateway",
+      description: "Update the gateway class.",
+      fields: [{ name: "className", label: "Gateway Class", section: "Routing", defaultValue: () => compactValue(spec.gatewayClassName) }],
+      patch: (values) => ({ spec: { gatewayClassName: values.className } }),
+    })
+  } else if (["HTTPRoute", "GRPCRoute", "TLSRoute"].includes(kind)) {
     add({
       id: "edit-network-fields",
       label: `Edit ${kind}`,
-      description: `Update common ${kind} network fields without editing YAML.`,
-      fields: [
-        { name: "className", label: "Class Name", section: "Routing", defaultValue: () => compactValue(spec.ingressClassName || spec.gatewayClassName || spec.controllerName) },
-        { name: "hostnames", label: "Hostnames", section: "Routing", defaultValue: () => csvFromList(spec.hostnames), placeholder: "comma-separated" },
-        { name: "specFields", label: `${kind} Spec Fields`, section: "Advanced Fields", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" },
-      ],
-      patch: (values) => ({ spec: { ingressClassName: values.className || undefined, gatewayClassName: values.className || undefined, hostnames: listFromCsv(values.hostnames), ...asRecord(specBasicsPatch(values).spec) } }),
+      description: "Update route hostnames. Leave empty to match all hostnames.",
+      fields: [{ name: "hostnames", label: "Hostnames", section: "Routing", defaultValue: () => csvFromList(spec.hostnames), placeholder: "comma-separated" }],
+      patch: (values) => ({ spec: { hostnames: listFromCsv(values.hostnames).length ? listFromCsv(values.hostnames) : null } }),
+    })
+  } else if (config.path.includes("/networks/") && !isCalicoPolicy && !["NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"].includes(kind)) {
+    add({
+      id: "edit-network-fields",
+      label: `Edit ${kind}`,
+      description: `Set top-level ${kind} spec fields. Values are parsed as numbers, booleans or JSON where possible.`,
+      fields: [{ name: "specFields", label: `${kind} Spec Fields`, section: "Spec", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" }],
+      patch: specBasicsPatch,
     })
   }
 
-  if (["ConfigMap", "Secret"].includes(kind)) {
+  if (kind === "ConfigMap") {
     add({
       id: "edit-config-data",
       label: "Edit Data",
-      description: `Update ${kind} data keys.`,
+      description: "Update ConfigMap data keys. Removed lines delete the key.",
       fields: [{ name: "data", label: "Data", section: "Data", type: "textarea", defaultValue: () => textFromRecord(resource.data), placeholder: "key=value per line" }],
-      patch: (values) => ({ data: recordFromText(values.data) }),
+      patch: (values) => ({ data: replaceMap(resource.data, recordFromText(values.data)) }),
     })
   }
 
-  if (["PersistentVolumeClaim", "PersistentVolume", "StorageClass", "VolumeSnapshot", "VolumeSnapshotClass", "VolumeSnapshotContent", "DataVolume", "DataSource", "StorageProfile"].includes(kind) || config.path.includes("/storage/") || config.path.includes("/cdi/")) {
+  if (kind === "Secret") {
+    // Secret.data is base64; edit decoded values and write them back through stringData.
+    const decoded = Object.fromEntries(Object.entries(asRecord(resource.data)).map(([key, value]) => {
+      try {
+        return [key, new TextDecoder().decode(Uint8Array.from(atob(String(value)), (char) => char.charCodeAt(0)))]
+      } catch {
+        return [key, String(value)]
+      }
+    }))
+    add({
+      id: "edit-config-data",
+      label: "Edit Data",
+      description: "Values are shown decoded and stored base64 encoded. Removed lines delete the key.",
+      fields: [{ name: "data", label: "Data", section: "Data", type: "textarea", defaultValue: () => Object.entries(decoded).map(([key, value]) => `${key}=${value}`).join("\n"), placeholder: "key=value per line" }],
+      patch: (values) => {
+        const next = recordFromText(values.data)
+        const removed = Object.fromEntries(Object.keys(decoded).filter((key) => !(key in next)).map((key) => [key, null]))
+        return { data: removed, stringData: next }
+      },
+    })
+  }
+
+  if (kind === "PersistentVolumeClaim") {
     add({
       id: "edit-storage",
-      label: `Edit ${kind}`,
-      description: `Update common ${kind} storage fields.`,
+      label: "Expand Volume",
+      description: "Increase the requested size. Requires a storage class with allowVolumeExpansion; shrinking is not supported.",
+      fields: [{ name: "storage", label: "Requested Storage", section: "Storage", defaultValue: () => compactValue(asRecord(asRecord(spec.resources).requests).storage) }],
+      patch: (values) => ({ spec: { resources: { requests: { storage: values.storage } } } }),
+    })
+  } else if (kind === "PersistentVolume") {
+    add({
+      id: "edit-storage",
+      label: "Edit Reclaim Policy",
+      description: "Change what happens to the volume when its claim is released.",
+      fields: [{ name: "reclaimPolicy", label: "Reclaim Policy", section: "Lifecycle", type: "select", defaultValue: () => compactValue(spec.persistentVolumeReclaimPolicy || "Retain"), options: [{ label: "Retain", value: "Retain" }, { label: "Delete", value: "Delete" }] }],
+      patch: (values) => ({ spec: { persistentVolumeReclaimPolicy: values.reclaimPolicy } }),
+    })
+  } else if (kind === "StorageClass") {
+    // Provisioner, parameters, reclaimPolicy and volumeBindingMode are immutable on StorageClass.
+    const annotations = asRecord(resource.metadata.annotations)
+    add({
+      id: "edit-storage",
+      label: "Edit StorageClass",
+      description: "Only expansion and the default class can change; other StorageClass fields are immutable.",
       fields: [
-        { name: "storageClassName", label: "Storage Class", section: "Storage", defaultValue: () => compactValue(spec.storageClassName || resource.storageClassName) },
-        { name: "storage", label: "Requested Storage", section: "Storage", defaultValue: () => compactValue(asRecord(asRecord(spec.resources).requests).storage || asRecord(asRecord(resource.status).capacity).storage) },
-        { name: "reclaimPolicy", label: "Reclaim Policy", section: "Lifecycle", type: "select", defaultValue: () => compactValue(resource.reclaimPolicy || spec.persistentVolumeReclaimPolicy || "Retain"), options: [{ label: "Retain", value: "Retain" }, { label: "Delete", value: "Delete" }, { label: "Recycle", value: "Recycle" }] },
-        { name: "parameters", label: "Parameters", section: "Parameters", type: "textarea", defaultValue: () => textFromRecord(resource.parameters), placeholder: "key=value per line" },
+        { name: "allowVolumeExpansion", label: "Allow Volume Expansion", section: "Storage", type: "checkbox", defaultValue: () => resource.allowVolumeExpansion === true },
+        { name: "isDefault", label: "Default StorageClass", section: "Storage", type: "checkbox", defaultValue: () => annotations["storageclass.kubernetes.io/is-default-class"] === "true" },
       ],
-      patch: (values) => kind === "StorageClass"
-        ? { reclaimPolicy: values.reclaimPolicy, parameters: recordFromText(values.parameters) }
-        : { spec: { storageClassName: values.storageClassName || undefined, persistentVolumeReclaimPolicy: values.reclaimPolicy || undefined, resources: { requests: { storage: values.storage } } } },
+      patch: (values) => ({
+        allowVolumeExpansion: values.allowVolumeExpansion === true,
+        metadata: { annotations: { "storageclass.kubernetes.io/is-default-class": values.isDefault === true ? "true" : null } },
+      }),
     })
   }
 
@@ -1641,15 +1753,12 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     const roleRef = asRecord(resource.roleRef)
     add({
       id: "edit-rbac-binding",
-      label: "Edit Binding",
-      description: "Update role reference and subjects.",
+      label: "Edit Subjects",
+      description: `Bound to ${compactValue(roleRef.kind)} ${compactValue(roleRef.name)}. roleRef is immutable; create a new binding to change it.`,
       fields: [
-        { name: "roleKind", label: "Role Kind", section: "Role Ref", type: "select", defaultValue: () => compactValue(roleRef.kind || "Role"), options: [{ label: "Role", value: "Role" }, { label: "ClusterRole", value: "ClusterRole" }] },
-        { name: "roleName", label: "Role Name", section: "Role Ref", defaultValue: () => compactValue(roleRef.name) },
         { name: "subjects", label: "Subjects", section: "Subjects", type: "textarea", defaultValue: () => asRecordList(resource.subjects).map((subject) => `${compactValue(subject.kind)}|${compactValue(subject.name)}|${compactValue(subject.namespace)}`).join("\n"), placeholder: "Kind|Name|Namespace per line" },
       ],
       patch: (values) => ({
-        roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: values.roleKind, name: values.roleName },
         subjects: String(values.subjects || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
           const [subjectKind, name, namespace] = line.split("|")
           return { kind: subjectKind, name, ...(namespace ? { namespace } : {}) }

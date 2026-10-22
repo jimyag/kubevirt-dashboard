@@ -46,6 +46,7 @@ import {
   getSecurityGroup,
   listSecurityGroups,
   remoteSummary,
+  ruleProblem,
   ruleSummary,
   ruleTemplates,
   saveSecurityGroupRules,
@@ -65,6 +66,7 @@ import {
   sgRefKey,
   vmSecurityGroupRefs,
 } from "@/lib/security-groups"
+import { isDnsLabel } from "@/lib/validate"
 
 const providerLabel = engineResource
 
@@ -215,6 +217,11 @@ function CreateSecurityGroupDialog({
   }, [defaultNamespace, defaultProvider, open])
 
   const submit = async () => {
+    // The name also becomes a label key suffix (sg.kubevirt-dashboard.io/<name>) for Cilium.
+    if (!isDnsLabel(name.trim())) {
+      setError("Name must be at most 63 lowercase letters, digits and dashes.")
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -474,9 +481,9 @@ export function SecurityGroupDetailPage() {
 
   const save = async () => {
     if (!draft) return
-    const invalid = draft.rules.find((rule) => (rule.remoteType !== "any" && !rule.remote.trim()) || ((rule.protocol === "tcp" || rule.protocol === "udp") && rule.ports && !/^\d+(-\d+)?$/.test(rule.ports.trim())))
-    if (invalid) {
-      setError("Every rule needs a valid source/destination, and ports must look like 22 or 8000-8100.")
+    const problem = draft.rules.map(ruleProblem).find(Boolean)
+    if (problem) {
+      setError(problem)
       return
     }
     setSaving(true)

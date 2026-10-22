@@ -82,6 +82,9 @@ const jsonPut = (body: unknown = {}): RequestInit => ({
 const resourceRefPath = (base: string, id: string, resource: { metadata: { namespace?: string; name: string } }) =>
   `${base}${resource.metadata.namespace ? `/namespaces/${resource.metadata.namespace}` : ""}/${id}/${resource.metadata.name}`;
 
+const poolVmSpec = (r: { spec?: Record<string, unknown> }) => getRecord(getRecord(r.spec).virtualMachineTemplate).spec as Record<string, unknown> | undefined;
+const poolDomain = (r: { spec?: Record<string, unknown> }) => getRecord(getRecord(getRecord(poolVmSpec(r)).template).spec).domain;
+
 const poolActions: ResourceAction[] = [
   {
     id: "start-pool",
@@ -113,11 +116,12 @@ const poolActions: ResourceAction[] = [
   {
     id: "resize-pool",
     label: "Resize",
+    description: "Set CPU topology and memory on the pool VM template. Not allowed when the pool uses an instance type.",
     fields: [
-      { name: "sockets", label: "Sockets", type: "number", defaultValue: "1" },
-      { name: "cores", label: "Cores", type: "number", defaultValue: "1" },
-      { name: "threads", label: "Threads", type: "number", defaultValue: "1" },
-      { name: "memory", label: "Memory", defaultValue: "1Gi" },
+      { name: "sockets", label: "Sockets", type: "number", defaultValue: (r) => String(getRecord(getRecord(poolDomain(r)).cpu).sockets || 1) },
+      { name: "cores", label: "Cores", type: "number", defaultValue: (r) => String(getRecord(getRecord(poolDomain(r)).cpu).cores || 1) },
+      { name: "threads", label: "Threads", type: "number", defaultValue: (r) => String(getRecord(getRecord(poolDomain(r)).cpu).threads || 1) },
+      { name: "memory", label: "Memory", defaultValue: (r) => String(getRecord(getRecord(getRecord(poolDomain(r)).resources).requests).memory || getRecord(getRecord(poolDomain(r)).memory).guest || "1Gi") },
     ],
     buildRequest: (resource, values) => ({
       url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
@@ -146,7 +150,7 @@ const poolActions: ResourceAction[] = [
   {
     id: "pool-run-strategy",
     label: "Run Strategy",
-    fields: [{ name: "runStrategy", label: "Run Strategy", type: "select", defaultValue: "Always", options: [{ label: "Always", value: "Always" }, { label: "Halted", value: "Halted" }, { label: "Manual", value: "Manual" }] }],
+    fields: [{ name: "runStrategy", label: "Run Strategy", type: "select", defaultValue: (r) => String(getRecord(poolVmSpec(r)).runStrategy || "Always"), options: [{ label: "Always", value: "Always" }, { label: "Halted", value: "Halted" }, { label: "RerunOnFailure", value: "RerunOnFailure" }, { label: "Manual", value: "Manual" }] }],
     buildRequest: (resource, values) => ({
       url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
       options: mergePatch({ spec: { virtualMachineTemplate: { spec: { runStrategy: stringValue(values.runStrategy, "Always") } } } }),
@@ -155,19 +159,27 @@ const poolActions: ResourceAction[] = [
   {
     id: "pool-instance-type",
     label: "Instance Type",
-    fields: [{ name: "instanceType", label: "Cluster Instance Type", defaultValue: "" }],
-    buildRequest: (resource, values) => ({
-      url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
-      options: mergePatch({ spec: { virtualMachineTemplate: { spec: { instancetype: { name: stringValue(values.instanceType) } } } } }),
-    }),
+    description: "Use a cluster instance type for CPU and memory. Leave empty to go back to the template's own sizing.",
+    fields: [{ name: "instanceType", label: "Cluster Instance Type", defaultValue: (r) => String(getRecord(getRecord(poolVmSpec(r)).instancetype).name || "") }],
+    buildRequest: (resource, values) => {
+      const name = stringValue(values.instanceType);
+      // An instance type and template CPU/memory are mutually exclusive in KubeVirt.
+      const spec = name
+        ? { instancetype: { kind: "VirtualMachineClusterInstancetype", name }, template: { spec: { domain: { cpu: null, resources: { requests: { memory: null } }, memory: null } } } }
+        : { instancetype: null };
+      return {
+        url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
+        options: mergePatch({ spec: { virtualMachineTemplate: { spec } } }),
+      };
+    },
   },
   {
     id: "pool-priority-class",
     label: "Priority Class",
-    fields: [{ name: "priorityClassName", label: "Priority Class Name", defaultValue: "" }],
+    fields: [{ name: "priorityClassName", label: "Priority Class Name", defaultValue: (r) => String(getRecord(getRecord(getRecord(poolVmSpec(r)).template).spec).priorityClassName || "") }],
     buildRequest: (resource, values) => ({
       url: resourceRefPath("/apis/pool.kubevirt.io/v1alpha1", "virtualmachinepools", resource),
-      options: mergePatch({ spec: { virtualMachineTemplate: { spec: { template: { spec: { priorityClassName: stringValue(values.priorityClassName) } } } } } }),
+      options: mergePatch({ spec: { virtualMachineTemplate: { spec: { template: { spec: { priorityClassName: stringValue(values.priorityClassName) || null } } } } } }),
     }),
   },
   {
@@ -254,21 +266,26 @@ const hpaActions: ResourceAction[] = [
   {
     id: "scale-bounds",
     label: "Scale Bounds",
+    description: "Set replica bounds and the CPU utilization target. Other metrics are kept.",
     fields: [
       { name: "minReplicas", label: "Min Replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).minReplicas || 1) },
       { name: "maxReplicas", label: "Max Replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).maxReplicas || 3) },
-      { name: "cpu", label: "CPU Utilization", type: "number", defaultValue: "80" },
+      { name: "cpu", label: "CPU Utilization %", type: "number", placeholder: "leave empty to keep metrics unchanged", defaultValue: (r) => {
+        const cpu = (getRecord(r.spec).metrics as Array<Record<string, unknown>> | undefined || []).find((metric) => getRecord(metric.resource).name === "cpu");
+        return String(getRecord(getRecord(getRecord(cpu).resource).target).averageUtilization || "");
+      } },
     ],
-    buildRequest: (resource, values) => ({
-      url: resourceRefPath("/apis/autoscaling/v2", "horizontalpodautoscalers", resource),
-      options: mergePatch({
-        spec: {
-          minReplicas: numberValue(values.minReplicas, 1),
-          maxReplicas: numberValue(values.maxReplicas, 3),
-          metrics: [{ type: "Resource", resource: { name: "cpu", target: { type: "Utilization", averageUtilization: numberValue(values.cpu, 80) } } }],
-        },
-      }),
-    }),
+    buildRequest: (resource, values) => {
+      const current = (getRecord(resource.spec).metrics as Array<Record<string, unknown>> | undefined) || [];
+      const cpu = stringValue(values.cpu);
+      const cpuMetric = { type: "Resource", resource: { name: "cpu", target: { type: "Utilization", averageUtilization: numberValue(cpu, 80) } } };
+      // Merge patch replaces arrays, so rebuild the list keeping every non-CPU metric.
+      const metrics = cpu ? [...current.filter((metric) => getRecord(metric.resource).name !== "cpu"), cpuMetric] : undefined;
+      return {
+        url: resourceRefPath("/apis/autoscaling/v2", "horizontalpodautoscalers", resource),
+        options: mergePatch({ spec: { minReplicas: numberValue(values.minReplicas, 1), maxReplicas: numberValue(values.maxReplicas, 3), ...(metrics ? { metrics } : {}) } }),
+      };
+    },
   },
 ];
 
@@ -276,7 +293,7 @@ const networkPolicyActions: ResourceAction[] = [
   {
     id: "set-rules",
     label: "Set Rules",
-    description: "Replace simple ingress/egress rules using optional CIDR and TCP ports.",
+    description: "Replace the policy rules. For a direction, leaving both port and CIDR empty denies all traffic in that direction.",
     fields: [
       { name: "policyType", label: "Policy Type", type: "select", defaultValue: "Ingress", options: [{ label: "Ingress", value: "Ingress" }, { label: "Egress", value: "Egress" }, { label: "Ingress and Egress", value: "Both" }] },
       { name: "ingressPort", label: "Ingress TCP Port", defaultValue: "", placeholder: "optional" },
@@ -296,17 +313,18 @@ const networkPolicyActions: ResourceAction[] = [
         options: mergePatch({
           spec: {
             policyTypes,
+            // An empty rule object would allow everything; with no peer or port, send no rules (deny).
             ...(policyTypes.includes("Ingress") ? {
-              ingress: [{
+              ingress: ingressCidr || ingressPort ? [{
                 ...(ingressCidr ? { from: [{ ipBlock: { cidr: ingressCidr } }] } : {}),
                 ...(ingressPort ? { ports: [{ protocol: "TCP", port: numberValue(ingressPort, 1) }] } : {}),
-              }],
+              }] : [],
             } : { ingress: null }),
             ...(policyTypes.includes("Egress") ? {
-              egress: [{
+              egress: egressCidr || egressPort ? [{
                 ...(egressCidr ? { to: [{ ipBlock: { cidr: egressCidr } }] } : {}),
                 ...(egressPort ? { ports: [{ protocol: "TCP", port: numberValue(egressPort, 1) }] } : {}),
-              }],
+              }] : [],
             } : { egress: null }),
           },
         }),

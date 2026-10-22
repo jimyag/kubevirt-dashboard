@@ -15,6 +15,7 @@ import { ResourceCreateDialog, ResourceDetail, ResourceList, ResourceManifest, t
 import { SiteHeader } from "./components/site-header";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
 import { Toaster } from "./components/ui/sonner";
+import { toast } from "sonner";
 import { Button } from "./components/ui/button";
 import { dvCreateConfig, jsonPost, jsonPut, keyValueText, mergePatch, numberValue, parseKeyValueText, resourceConfigs, stringValue } from "./resources/configs";
 import { DataTable, EmptyState, KeyValueGrid, LoadingState, NativeSelect, PageHeader, Panel, StatusDot, Toolbar } from "./components/console";
@@ -26,7 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
-import { kubeOvnAnnotations, relativeTime, useNetworkProfile, type KubeObject } from "./lib/kube";
+import { kubeOvnAnnotations, relativeTime, replaceMap, useNetworkProfile, type KubeObject } from "./lib/kube";
 import { engineLabel, sgDetailPath, useSgProvider, vmSecurityGroupRefs } from "./lib/security-groups";
 import { CreateInstancePage, InstanceListPage } from "./pages/instances";
 import { OverviewPage } from "./pages/overview";
@@ -313,23 +314,27 @@ function VMDetailContent() {
   }, [mStrategy, name, namespace]);
   useEffect(() => { fetchData(); const t = setInterval(fetchData, 5000); return () => clearInterval(t); }, [fetchData]);
   const handleAction = async (a:string) => {
+    let res: Response;
     if (a === "pause" || a === "unpause") {
-      await apiFetch(`/apis/subresources.kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}/${a}`, jsonPut());
+      res = await apiFetch(`/apis/subresources.kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}/${a}`, jsonPut());
     } else if (a === "poweroff") {
-      await apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ gracePeriodSeconds: 0 }),
-      });
+      // Deleting the VMI would be undone immediately for runStrategy Always; stop with no grace period instead.
+      res = await apiFetch(`/apis/subresources.kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}/stop`, jsonPut({ gracePeriod: 0 }));
     } else if (a === "migrate") {
-      await apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstancemigrations`, jsonPost({
+      res = await apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstancemigrations`, jsonPost({
         apiVersion: "kubevirt.io/v1",
         kind: "VirtualMachineInstanceMigration",
         metadata: { generateName: `${name}-migration-`, namespace },
         spec: { vmiName: name },
       }));
     } else {
-      await apiFetch(`/apis/subresources.kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}/${a}`, jsonPut());
+      res = await apiFetch(`/apis/subresources.kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}/${a}`, jsonPut());
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text;
+      try { message = (JSON.parse(text) as { message?: string }).message || text; } catch { /* plain text error */ }
+      toast.error(`${a} failed`, { description: message || res.statusText });
     }
     fetchData();
   };
@@ -410,14 +415,16 @@ function VMDetailContent() {
             label="Resize"
             open={dialog === "Resize"}
             onOpenChange={(next) => setDialog(next ? "Resize" : null)}
-            description="Patch CPU sockets, cores, threads, and requested memory on this VM template."
+            description={vm.spec.instancetype?.name ? `CPU and memory come from instance type ${vm.spec.instancetype.name}. Change the instance type instead.` : "Set CPU topology and memory. Takes effect on the next restart unless CPU/memory hotplug is enabled."}
             fields={[
               { name: "sockets", label: "Sockets", type: "number", defaultValue: String(currentCpu.sockets || 1) },
               { name: "cores", label: "Cores", type: "number", defaultValue: String(currentCpu.cores || 1) },
               { name: "threads", label: "Threads", type: "number", defaultValue: String(currentCpu.threads || 1) },
               { name: "memory", label: "Memory", defaultValue: currentMemory },
             ]}
-            buildRequest={(values) => ({
+            buildRequest={(values) => {
+              if (vm.spec.instancetype?.name) throw new Error("This VM uses an instance type; change the instance type to resize it.");
+              return {
               url: vmPatchUrl,
               options: mergePatch({
                 spec: {
@@ -435,25 +442,34 @@ function VMDetailContent() {
                   },
                 },
               }),
-            })}
+            };
+            }}
             onDone={fetchData}
           />
           <VmActionDialog
             label="Run Strategy"
             open={dialog === "Run Strategy"}
             onOpenChange={(next) => setDialog(next ? "Run Strategy" : null)}
-            description="Patch spec.runStrategy on this VirtualMachine."
-            fields={[{ name: "runStrategy", label: "Run Strategy", type: "select", defaultValue: vm.spec.runStrategy || "Halted", options: [{ label: "Always", value: "Always" }, { label: "Halted", value: "Halted" }, { label: "Manual", value: "Manual" }] }]}
-            buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { runStrategy: stringValue(values.runStrategy, "Halted") } }) })}
+            description="How KubeVirt keeps this VM running."
+            fields={[{ name: "runStrategy", label: "Run Strategy", type: "select", defaultValue: vm.spec.runStrategy || (vm.spec.running ? "Always" : "Halted"), options: [{ label: "Always", value: "Always" }, { label: "RerunOnFailure", value: "RerunOnFailure" }, { label: "Halted", value: "Halted" }, { label: "Manual", value: "Manual" }] }]}
+            // runStrategy and the legacy spec.running field are mutually exclusive.
+            buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { runStrategy: stringValue(values.runStrategy, "Halted"), running: null } }) })}
             onDone={fetchData}
           />
           <VmActionDialog
             label="Instance Type"
             open={dialog === "Instance Type"}
             onOpenChange={(next) => setDialog(next ? "Instance Type" : null)}
-            description="Patch spec.instancetype.name on this VirtualMachine."
+            description="CPU and memory come from the instance type, replacing the template's own sizing. Leave empty to remove it, then set CPU and memory with Change spec."
             fields={[{ name: "instanceType", label: "Cluster Instance Type", defaultValue: String(vm.spec.instancetype?.name || "") }]}
-            buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { instancetype: { name: stringValue(values.instanceType) } } }) })}
+            buildRequest={(values) => {
+              const instanceType = stringValue(values.instanceType);
+              // KubeVirt rejects template CPU/memory alongside an instance type, so clear them when setting one.
+              const spec = instanceType
+                ? { instancetype: { kind: "VirtualMachineClusterInstancetype", name: instanceType }, template: { spec: { domain: { cpu: null, memory: null, resources: { requests: { memory: null } } } } } }
+                : { instancetype: null, template: { spec: { domain: { cpu: { sockets: 1, cores: 1, threads: 1 }, resources: { requests: { memory: "1Gi" } } } } } };
+              return { url: vmPatchUrl, options: mergePatch({ spec }) };
+            }}
             onDone={fetchData}
           />
           <VmActionDialog
@@ -462,26 +478,27 @@ function VMDetailContent() {
             onOpenChange={(next) => setDialog(next ? "Priority Class" : null)}
             description="Patch template priorityClassName on this VirtualMachine."
             fields={[{ name: "priorityClassName", label: "Priority Class Name", defaultValue: String(vm.spec.template?.spec?.priorityClassName || "") }]}
-            buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { template: { spec: { priorityClassName: stringValue(values.priorityClassName) } } } }) })}
+            buildRequest={(values) => ({ url: vmPatchUrl, options: mergePatch({ spec: { template: { spec: { priorityClassName: stringValue(values.priorityClassName) || null } } } }) })}
             onDone={fetchData}
           />
           <VmActionDialog
             label="Metadata"
             open={dialog === "Metadata"}
             onOpenChange={(next) => setDialog(next ? "Metadata" : null)}
-            description="Patch VM and VM template labels/annotations from key=value lines."
+            description="Labels and annotations on the VirtualMachine object. One key=value per line; removed lines are deleted."
             fields={[
               { name: "labels", label: "Labels", type: "textarea", defaultValue: keyValueText(vm.metadata.labels) },
               { name: "annotations", label: "Annotations", type: "textarea", defaultValue: keyValueText(vm.metadata.annotations) },
             ]}
             buildRequest={(values) => {
-              const labels = parseKeyValueText(values.labels || "");
-              const annotations = parseKeyValueText(values.annotations || "");
+              // Only the VM object: template labels drive the launcher pod (domain, security groups) and must not be overwritten here.
               return {
                 url: vmPatchUrl,
                 options: mergePatch({
-                  metadata: { labels, annotations },
-                  spec: { template: { metadata: { labels, annotations } } },
+                  metadata: {
+                    labels: replaceMap(vm.metadata.labels, parseKeyValueText(values.labels || "")),
+                    annotations: replaceMap(vm.metadata.annotations, parseKeyValueText(values.annotations || "")),
+                  },
                 }),
               };
             }}
@@ -891,7 +908,7 @@ function DVDetailContent() {
               ]}
               buildRequest={(values) => ({
                 url: `/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`,
-                options: mergePatch({ metadata: { labels: parseKeyValueText(values.labels || ""), annotations: parseKeyValueText(values.annotations || "") } }),
+                options: mergePatch({ metadata: { labels: replaceMap(dv.metadata.labels, parseKeyValueText(values.labels || "")), annotations: replaceMap(dv.metadata.annotations, parseKeyValueText(values.annotations || "")) } }),
               })}
               onDone={loadDv}
             />

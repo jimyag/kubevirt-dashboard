@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 import * as YAML from "js-yaml"
 import {
   Check,
@@ -59,6 +60,7 @@ import {
   type KubeObject,
 } from "@/lib/kube"
 import { engineLabel, listSecurityGroups, useSgProvider, vmSecurityGroupRefs, type SecurityGroup } from "@/lib/security-groups"
+import { cidrContains, ipv4Cidr, isDnsLabel, isQuantity } from "@/lib/validate"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
 
 const VM_API = "/apis/kubevirt.io/v1"
@@ -141,7 +143,9 @@ export function InstanceListPage() {
   const runBatch = async (action: "start" | "stop" | "restart") => {
     setBusy(true)
     try {
-      await Promise.allSettled(selectedVms.map((vm) => vmAction(vm, action)))
+      const results = await Promise.allSettled(selectedVms.map((vm) => vmAction(vm, action)))
+      const failed = results.flatMap((result, index) => result.status === "rejected" ? [`${selectedVms[index].metadata.name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`] : [])
+      if (failed.length) toast.error(`${action} failed for ${failed.length} of ${selectedVms.length}`, { description: failed.slice(0, 5).join("\n") })
       setSelected({})
       reload()
     } finally {
@@ -309,7 +313,9 @@ export function InstanceListPage() {
 
 function InstanceRowMenu({ vm, running, onChanged, onDelete }: { vm: KubeObject; running: boolean; onChanged: () => void; onDelete: () => void }) {
   const navigate = useNavigate()
-  const run = (action: "start" | "stop" | "restart") => vmAction(vm, action).catch(() => null).then(onChanged)
+  const run = (action: "start" | "stop" | "restart") => vmAction(vm, action)
+    .catch((err) => toast.error(`${action} ${vm.metadata.name} failed`, { description: err instanceof Error ? err.message : String(err) }))
+    .then(onChanged)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -350,8 +356,6 @@ const steps = [
 ] as const
 
 type StepId = (typeof steps)[number]["id"]
-
-const dnsName = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
 
 const readLocal = (key: string) => {
   try {
@@ -440,20 +444,35 @@ export function CreateInstancePage() {
     if (profile.vpc) setState((current) => ({ ...current, binding: "bridge" }))
   }, [profile.vpc])
 
+  // Kube-OVN refuses pods from namespaces outside a custom VPC's spec.namespaces list.
+  const vpcAllowsNamespace = (vpc: KubeObject) => {
+    const allowed = (asRecord(vpc.spec).namespaces as string[] | undefined) || []
+    return asRecord(vpc.status).default === true || allowed.length === 0 || allowed.includes(state.namespace)
+  }
+  const usableVpcs = catalog.vpcs.filter(vpcAllowsNamespace)
   const vpcSubnets = catalog.subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === state.vpc && !["join"].includes(subnet.metadata.name))
+  const selectedSubnet = catalog.subnets.find((subnet) => subnet.metadata.name === state.subnet)
+  const subnetCidr = ipv4Cidr(str(asRecord(selectedSubnet?.spec).cidrBlock))
   const defaultStorageClass = catalog.storageClasses.find((sc) => sc.metadata.annotations?.["storageclass.kubernetes.io/is-default-class"] === "true")?.metadata.name
   const vm = useMemo(() => buildVirtualMachine({ ...state, sgEngine: aclProvider }, profile.vpc), [state, aclProvider, profile.vpc])
 
   const problems: Partial<Record<StepId, string>> = {}
-  if (!dnsName.test(state.name)) problems.basics = "Name must be lowercase letters, digits and dashes."
+  if (!isDnsLabel(state.name)) problems.basics = "Name must be at most 63 lowercase letters, digits and dashes, starting and ending with a letter or digit."
   else if (!state.namespace) problems.basics = "Choose a namespace."
   else if (state.specMode === "instancetype" && !state.instanceType) problems.basics = "Choose an instance type."
+  else if (state.specMode === "custom" && (!Number.isInteger(state.cpu) || state.cpu < 1)) problems.basics = "vCPU must be a whole number of at least 1."
+  else if (state.specMode === "custom" && !isQuantity(state.memory)) problems.basics = "Memory must be a quantity such as 4Gi."
   if (state.imageSource === "datasource" && !state.dataSource) problems.image = "Choose an image."
   if (state.imageSource === "registry" && !state.registryUrl.trim()) problems.image = "Enter a registry image."
   if (state.imageSource === "http" && !/^https?:\/\//.test(state.httpUrl)) problems.image = "Enter an http(s) URL."
   if (state.imageSource === "containerdisk" && !state.containerDisk.trim()) problems.image = "Enter a container disk image."
   if (state.imageSource === "pvc" && !state.pvcName) problems.image = "Choose a volume to clone."
+  if (!problems.image && state.imageSource !== "containerdisk" && !isQuantity(state.rootSize)) problems.image = "System disk size must be a quantity such as 20Gi."
+  if (!problems.image && state.dataDisks.some((size) => !isQuantity(size))) problems.image = "Data disk sizes must be quantities such as 50Gi."
   if (profile.vpc && !state.subnet) problems.network = "Choose a subnet."
+  else if (profile.vpc && catalog.vpcs.length > 0 && !usableVpcs.some((vpc) => vpc.metadata.name === state.vpc)) problems.network = `VPC ${state.vpc} does not allow namespace ${state.namespace}.`
+  else if (profile.vpc && state.fixedIp.trim() && subnetCidr && !cidrContains(subnetCidr, state.fixedIp)) problems.network = `${state.fixedIp.trim()} is not inside ${subnetCidr}.`
+  else if (profile.vpc && state.fixedIp.trim() && state.fixedIp.trim() === str(asRecord(selectedSubnet?.spec).gateway)) problems.network = "The private IP cannot be the subnet gateway."
   if (!state.password && !state.sshKey.trim()) problems.access = "Set a password or an SSH key so you can log in."
 
   const stepIndex = steps.findIndex((item) => item.id === step)
@@ -533,7 +552,7 @@ export function CreateInstancePage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FieldRow label="Name" hint="Lowercase letters, digits and dashes."><Input value={state.name} onChange={(e) => set({ name: e.target.value.toLowerCase() })} /></FieldRow>
                   <FieldRow label="Namespace (project)">
-                    <NativeSelect value={state.namespace} onChange={(e) => set({ namespace: e.target.value, securityGroups: [] })}>
+                    <NativeSelect value={state.namespace} onChange={(e) => set({ namespace: e.target.value, securityGroups: [], pvcName: "" })}>
                       {Array.from(new Set([state.namespace, ...namespaces])).map((ns) => <option key={ns} value={ns}>{ns}</option>)}
                     </NativeSelect>
                   </FieldRow>
@@ -639,11 +658,15 @@ export function CreateInstancePage() {
                   <>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <FieldRow label="VPC">
-                        <NativeSelect value={state.vpc} onChange={(e) => set({ vpc: e.target.value, subnet: "" })}>
-                          {catalog.vpcs.map((vpc) => <option key={vpc.metadata.name} value={vpc.metadata.name}>{vpc.metadata.name}</option>)}
+                        <NativeSelect value={state.vpc} onChange={(e) => set({ vpc: e.target.value, subnet: "", fixedIp: "" })}>
+                          {catalog.vpcs.map((vpc) => (
+                            <option key={vpc.metadata.name} value={vpc.metadata.name} disabled={!vpcAllowsNamespace(vpc)}>
+                              {vpc.metadata.name}{vpcAllowsNamespace(vpc) ? "" : ` (not open to ${state.namespace})`}
+                            </option>
+                          ))}
                         </NativeSelect>
                       </FieldRow>
-                      <FieldRow label="Private IP" hint="Leave empty to allocate automatically."><Input value={state.fixedIp} onChange={(e) => set({ fixedIp: e.target.value })} placeholder="Auto" /></FieldRow>
+                      <FieldRow label="Private IP" hint={subnetCidr ? `Inside ${subnetCidr}. Leave empty to allocate automatically.` : "Leave empty to allocate automatically."}><Input value={state.fixedIp} onChange={(e) => set({ fixedIp: e.target.value })} placeholder="Auto" /></FieldRow>
                     </div>
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Subnet</div>
@@ -656,7 +679,7 @@ export function CreateInstancePage() {
                             <ChoiceCard
                               key={subnet.metadata.name}
                               selected={state.subnet === subnet.metadata.name}
-                              onClick={() => set({ subnet: subnet.metadata.name })}
+                              onClick={() => set({ subnet: subnet.metadata.name, fixedIp: subnet.metadata.name === state.subnet ? state.fixedIp : "" })}
                               title={<span className="flex items-center gap-2">{subnet.metadata.name}<span className="font-mono text-xs font-normal text-muted-foreground">{str(asRecord(subnet.spec).cidrBlock)}</span></span>}
                               description={`${Math.max(0, usage.total - usage.used)} IPs available${namespacesBound.length ? ` / bound to ${namespacesBound.join(", ")}` : ""}`}
                             />
