@@ -3,7 +3,6 @@ import { Link, useLocation } from "react-router-dom"
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -13,7 +12,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { useNetworkProfile } from "@/lib/kube"
 import { findActiveNav, toneClasses, useNavSections } from "@/lib/navigation"
 import { BrandMark, productName } from "@/components/brand"
 import { t } from "@/lib/i18n"
@@ -25,7 +23,6 @@ const navButtonClass = [
 
 export function AppSidebar() {
   const location = useLocation()
-  const profile = useNetworkProfile()
   const sections = useNavSections()
   const active = findActiveNav(location.pathname)?.item.path
 
@@ -66,16 +63,6 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border group-data-[collapsible=icon]:hidden">
-        <Link to="/settings" className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-accent">
-          <span className={profile.loaded ? "size-2 shrink-0 rounded-full bg-green-600" : "size-2 shrink-0 rounded-full bg-muted-foreground/40"} />
-          <div className="min-w-0">
-            <div className="truncate text-xs font-medium text-sidebar-accent-foreground">{profile.loaded ? t(profile.label) : t("Detecting...")}</div>
-            <div className="truncate text-xs text-muted-foreground">{t("ACL")} {profile.aclEngines.length ? profile.aclEngines.map((engine) => engine === "cilium" ? "Cilium" : "Kube-OVN").join(" / ") : t("NetworkPolicy")}
-            </div>
-          </div>
-        </Link>
-      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )

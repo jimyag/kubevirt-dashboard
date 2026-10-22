@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChoiceCard, ErrorNote, FieldRow, NativeSelect, PageHeader, Panel } from "@/components/console"
-import { prometheusBase, prometheusPresets, testPrometheus, usePrometheusConfig, writePrometheusConfig, type PrometheusConfig } from "@/lib/metrics"
+import { detectBackends, prometheusBase, testPrometheus, usePrometheusConfig, writePrometheusConfig, type PrometheusConfig } from "@/lib/metrics"
 import {
   networkProfiles,
   useDiscovery,
@@ -31,24 +31,36 @@ const components: Array<{ name: string; description: string; check: [string, str
 
 const stackOrder: NetworkProfileId[] = ["kube-ovn-cilium", "kube-ovn", "cilium", "pod"]
 
-export function SettingsPage() {
+/**
+ * Networking capabilities detected on the cluster. The component stack behind them only shows up
+ * under "Advanced", where detection can be overridden.
+ */
+function NetworkingSettings() {
   const profile = useNetworkProfile()
-  const discovery = useDiscovery()
-  const locale = useLocale()
-
+  const [advanced, setAdvanced] = useState(profile.override !== "auto")
+  const engines = profile.aclEngines
   return (
-    <div className="space-y-6">
-      <PageHeader title={t("Settings")} />
-
-      <Panel title={t("Language")}>
-        <div className="grid gap-3 sm:grid-cols-2 md:max-w-xl">
-          {locales.map((item) => (
-            <ChoiceCard key={item.id} selected={locale === item.id} onClick={() => setLocale(item.id)} icon={Languages} title={item.label} />
-          ))}
+    <Panel
+      title={t("Networking")}
+      bodyClassName="space-y-4"
+      actions={<Button size="sm" variant="ghost" onClick={() => setAdvanced((current) => !current)}>{advanced ? t("Hide advanced") : t("Advanced")}</Button>}
+    >
+      <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 text-sm sm:grid-cols-3">
+        <div>
+          <div className="text-xs text-muted-foreground">{t("Instance networking")}</div>
+          <div className="font-semibold">{profile.vpc ? t("VPCs and subnets") : t("Pod network")}</div>
         </div>
-      </Panel>
-
-      <Panel title={t("Network stack")} bodyClassName="space-y-4">
+        <div>
+          <div className="text-xs text-muted-foreground">{t("Access control")}</div>
+          <div className="font-semibold">{engines.length ? t("Security groups") : t("Network policies")}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">{t("Elastic IPs and NAT")}</div>
+          <div className="font-semibold">{profile.vpc ? t("Available") : t("Not available")}</div>
+        </div>
+      </div>
+      {advanced && (
+        <div className="space-y-3">
           <ChoiceCard
             selected={profile.override === "auto"}
             onClick={() => writeProfileOverride("auto")}
@@ -66,32 +78,40 @@ export function SettingsPage() {
                   selected={profile.override === id}
                   onClick={() => writeProfileOverride(id)}
                   icon={Network}
-                  title={<span className="flex flex-wrap items-center gap-2">{t(item.label)}{item.recommended && <Badge variant="success">{t("Recommended")}</Badge>}{missing && profile.loaded && <Badge variant="warning">{t("Not installed")}</Badge>}</span>}
+                  title={<span className="flex flex-wrap items-center gap-2">{t(item.label)}{missing && profile.loaded && <Badge variant="warning">{t("Not installed")}</Badge>}</span>}
                   description={t(item.description)}
                 />
               )
             })}
           </div>
-          <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 text-sm sm:grid-cols-3">
-            <div>
-              <div className="text-xs text-muted-foreground">{t("Active stack")}</div>
-              <div className="font-semibold">{t(profile.label)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t("Instance networking")}</div>
-              <div className="font-semibold">{profile.vpc ? t("Kube-OVN VPC and subnet") : t("Pod network")}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t("Security groups")}</div>
-              <div className="font-semibold">
-                {profile.aclEngines.length === 0
-                  ? t("Kubernetes NetworkPolicy")
-                  : profile.aclEngines.map((engine, index) => `${engineResource[engine]}${index === 0 && profile.aclEngines.length > 1 ? ` (${t("default")})` : ""}`).join(t(" or "))}
-              </div>
-              {profile.aclEngines.length > 1 && <div className="text-xs text-muted-foreground">{t("Choose the engine per security group and per instance.")}</div>}
-            </div>
-          </div>
-        </Panel>
+          {engines.length > 1 && (
+            <p className="text-xs text-muted-foreground">
+              {t("Security groups use {engine} by default; {other} can be chosen per group and per instance.", { engine: engineResource[engines[0]], other: engines.slice(1).map((engine) => engineResource[engine]).join(", ") })}
+            </p>
+          )}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+export function SettingsPage() {
+  const discovery = useDiscovery()
+  const locale = useLocale()
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title={t("Settings")} />
+
+      <Panel title={t("Language")}>
+        <div className="grid gap-3 sm:grid-cols-2 md:max-w-xl">
+          {locales.map((item) => (
+            <ChoiceCard key={item.id} selected={locale === item.id} onClick={() => setLocale(item.id)} icon={Languages} title={item.label} />
+          ))}
+        </div>
+      </Panel>
+
+      <NetworkingSettings />
 
       <MonitoringSettings />
 
@@ -131,9 +151,11 @@ const catalog = [
 
 function MonitoringSettings() {
   const saved = usePrometheusConfig()
-  const [form, setForm] = useState<PrometheusConfig>(() => saved || prometheusPresets[0].config)
+  const [form, setForm] = useState<PrometheusConfig>(() => saved || { namespace: "monitoring", service: "prometheus-operated", port: "9090", scheme: "http", path: "" })
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
   const [testing, setTesting] = useState(false)
+  const [found, setFound] = useState<Awaited<ReturnType<typeof detectBackends>> | null>(null)
+  const [detecting, setDetecting] = useState(false)
   const set = (patch: Partial<PrometheusConfig>) => {
     setForm((current) => ({ ...current, ...patch }))
     setStatus(null)
@@ -141,29 +163,51 @@ function MonitoringSettings() {
   const test = async () => {
     setTesting(true)
     try {
-      const version = await testPrometheus(form)
-      setStatus({ ok: true, text: t("Connected to Prometheus {version}", { version }) })
+      const result = await testPrometheus(form)
+      setStatus({ ok: true, text: result.backend ? t("Connected to {backend} {version}", { backend: result.backend, version: result.version }).trim() : t("Connected. Prometheus API {version}", { version: result.version || "?" }) })
     } catch (err) {
       setStatus({ ok: false, text: err instanceof Error ? err.message : t("Connection failed") })
     } finally {
       setTesting(false)
     }
   }
-  const dirty = !saved || saved.namespace !== form.namespace || saved.service !== form.service || saved.port !== form.port || saved.scheme !== form.scheme
+  const detect = async () => {
+    setDetecting(true)
+    try {
+      setFound(await detectBackends())
+    } catch {
+      setFound([])
+    } finally {
+      setDetecting(false)
+    }
+  }
+  const valid = Boolean(form.namespace && form.service && form.port)
+  const dirty = !saved || (["namespace", "service", "port", "scheme", "path"] as const).some((key) => saved[key] !== form[key])
 
   return (
     <Panel
       title={t("Monitoring")}
-      description={t("Prometheus is reached through the Kubernetes API service proxy, so it does not need to be exposed. Stored per cluster in this browser.")}
+      description={t("Any Prometheus-compatible query API: Prometheus, VictoriaMetrics or Thanos. Reached through the Kubernetes API service proxy and stored per cluster in this browser.")}
       bodyClassName="space-y-4"
     >
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-muted-foreground">{t("Presets:")}</span>
-        {prometheusPresets.map((preset) => (
-          <Button key={preset.label} size="sm" variant="outline" className="h-7 text-xs" onClick={() => set(preset.config)}>{t(preset.label)}</Button>
-        ))}
+      <div className="space-y-2">
+        <Button size="sm" variant="outline" onClick={detect} disabled={detecting}>{detecting ? t("Detecting...") : t("Detect in cluster")}</Button>
+        {found && found.length === 0 && <p className="text-sm text-muted-foreground">{t("No Prometheus-compatible service found. Enter it below.")}</p>}
+        {found && found.length > 0 && (
+          <div className="divide-y rounded-lg border">
+            {found.map((item) => (
+              <div key={`${item.config.namespace}/${item.config.service}:${item.config.port}`} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <div className="font-medium">{item.kind}</div>
+                  <div className="font-mono text-xs text-muted-foreground break-all">{item.config.namespace}/{item.config.service}:{item.config.port}{item.config.path}</div>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => set(item.config)}>{t("Use")}</Button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-5">
         <FieldRow label={t("Namespace")}><Input value={form.namespace} onChange={(e) => set({ namespace: e.target.value.trim() })} /></FieldRow>
         <FieldRow label={t("Service")}><Input value={form.service} onChange={(e) => set({ service: e.target.value.trim() })} /></FieldRow>
         <FieldRow label={t("Port")}><Input value={form.port} onChange={(e) => set({ port: e.target.value.trim() })} placeholder={t("9090 or web")} /></FieldRow>
@@ -173,6 +217,7 @@ function MonitoringSettings() {
             <option value="https">https</option>
           </NativeSelect>
         </FieldRow>
+        <FieldRow label={t("Path prefix")}><Input value={form.path} onChange={(e) => set({ path: e.target.value.trim() })} placeholder={t("None")} /></FieldRow>
       </div>
       <p className="font-mono text-xs text-muted-foreground break-all">{prometheusBase(form)}/api/v1/query_range</p>
       {status && (
@@ -181,10 +226,10 @@ function MonitoringSettings() {
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={test} disabled={testing || !form.namespace || !form.service || !form.port}>{testing ? t("Testing...") : t("Test connection")}</Button>
-        <Button size="sm" onClick={() => writePrometheusConfig(form)} disabled={!dirty || !form.namespace || !form.service || !form.port}>{saved ? t("Save") : t("Enable Prometheus")}</Button>
+        <Button size="sm" variant="outline" onClick={test} disabled={testing || !valid}>{testing ? t("Testing...") : t("Test connection")}</Button>
+        <Button size="sm" onClick={() => writePrometheusConfig(form)} disabled={!dirty || !valid}>{saved ? t("Save") : t("Enable")}</Button>
         {saved && <Button size="sm" variant="ghost" onClick={() => writePrometheusConfig(null)}>{t("Disable")}</Button>}
-        <span className="text-xs text-muted-foreground">{saved ? t("In use: {target}", { target: `${saved.namespace}/${saved.service}:${saved.port}` }) : t("Not configured: instance pages show live metrics-server samples only.")}</span>
+        <span className="text-xs text-muted-foreground">{saved ? t("In use: {target}", { target: `${saved.namespace}/${saved.service}:${saved.port}${saved.path}` }) : t("Not configured: instance pages show live metrics-server samples only.")}</span>
       </div>
     </Panel>
   )

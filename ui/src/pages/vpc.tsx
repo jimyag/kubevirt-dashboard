@@ -79,7 +79,7 @@ export function KubeOvnMissing() {
         <EmptyState
           icon={Network}
           title={t("VPC networking is not enabled")}
-          description={profile.kubeOvnInstalled ? t("The selected network stack does not use VPCs.") : t("Requires Kube-OVN.")}
+          description={profile.kubeOvnInstalled ? t("VPC networking is turned off in Settings.") : t("Requires Kube-OVN.")}
           action={<Button asChild variant="outline" size="sm"><Link to="/settings">{t("Open settings")}</Link></Button>}
         />
     </div>
@@ -157,7 +157,7 @@ export function CreateSubnetDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("Create subnet")}</DialogTitle>
-          <DialogDescription>{t("A Kube-OVN logical switch inside a VPC. Instances placed in this subnet get an address from its CIDR.")}</DialogDescription>
+          <DialogDescription>{t("Instances placed in this subnet get an address from its CIDR.")}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 sm:grid-cols-2">
           <FieldRow label={t("Name")}><Input value={values.name} onChange={(e) => set({ name: e.target.value })} placeholder="subnet-web" /></FieldRow>

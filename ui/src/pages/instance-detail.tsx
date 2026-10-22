@@ -507,7 +507,6 @@ export function VMDetailContent() {
             <BandwidthDialog open={dialog === "Bandwidth"} onOpenChange={(open) => setDialog(open ? "Bandwidth" : null)} vm={vm as unknown as KubeObject} onChanged={fetchData} />
             <Panel
               title={t("Security groups")}
-              description={sgProviders.length ? sgProviders.map((engine) => engineLabel[engine]).join(" / ") : t("Not available on this network stack")}
               actions={sgProvider && <Button size="sm" variant="outline" onClick={() => setDialog("Security Groups")}>{t("Change")}</Button>}
               bodyClassName="space-y-1.5"
             >

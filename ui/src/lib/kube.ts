@@ -176,7 +176,7 @@ export type NetworkProfile = {
   loaded: boolean
 }
 
-export const networkProfiles: Record<NetworkProfileId, { label: string; description: string; vpc: boolean; acl: AclProvider; engines: AclEngine[]; recommended?: boolean }> = {
+export const networkProfiles: Record<NetworkProfileId, { label: string; description: string; vpc: boolean; acl: AclProvider; engines: AclEngine[] }> = {
   pod: {
     label: "KubeVirt",
     description: "VMs use the default pod network. Access control uses Kubernetes NetworkPolicy.",
@@ -197,7 +197,6 @@ export const networkProfiles: Record<NetworkProfileId, { label: string; descript
     vpc: true,
     acl: "cilium",
     engines: ["cilium", "kube-ovn"],
-    recommended: true,
   },
   cilium: {
     label: "KubeVirt + Cilium",

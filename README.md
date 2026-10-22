@@ -14,7 +14,7 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 - **VPC networking** (Kube-OVN): static and policy routes, VPC peering, reserved private IPs (`Vip`), IP pools per subnet, per-instance bandwidth limits, and extra NICs on Kube-OVN subnets or other networks through Multus.
 - **Cilium security groups**: per namespace (`CiliumNetworkPolicy`) or cluster wide (`CiliumClusterwideNetworkPolicy`), with address groups (`CiliumCIDRGroup`) as rule sources and destinations.
 - **Manifests**: `kubectl get -o yaml` output with highlighting, search and folding; edits are saved after a diff review and rejected if someone else changed the object meanwhile.
-- **Events and monitoring**: a cluster-wide event browser, events on every resource detail page, live CPU and memory from metrics-server, and VM history charts from Prometheus when one is configured.
+- **Events and monitoring**: a cluster-wide event browser, events on every resource detail page, live CPU and memory from metrics-server, and VM history charts from any Prometheus-compatible backend (Prometheus, VictoriaMetrics, Thanos) when one is configured.
 - **Languages**: English and Simplified Chinese, switched from the header or Settings; the browser language is used by default.
 - **Discovery aware**: the UI checks which API groups and versions the selected cluster serves and hides resources it does not serve.
 - **Multi-cluster**: switch between kubeconfig contexts from the header.
@@ -33,13 +33,13 @@ A single-binary web console for KubeVirt clusters, organized like a public cloud
 
 ## Network Stacks
 
-The stack is detected from the CRDs the cluster serves and can be overridden per cluster in **Settings**.
+The stack is detected from the CRDs the cluster serves; the console shows the resulting capabilities (VPCs, security groups, elastic IPs) rather than component names. Detection can be overridden per cluster under **Settings → Networking → Advanced**.
 
 | Stack | Instance networking | Security groups |
 |-------|---------------------|-----------------|
 | KubeVirt | Pod network | Not available; use Kubernetes NetworkPolicy |
 | KubeVirt + Kube-OVN | Kube-OVN VPC and subnet (`ovn.kubernetes.io/logical_switch`) | Kube-OVN `SecurityGroup` (`ovn.kubernetes.io/security_groups`) |
-| KubeVirt + Kube-OVN + Cilium (recommended) | Kube-OVN VPC and subnet | `CiliumNetworkPolicy` by default; Kube-OVN `SecurityGroup` can be chosen per group and per instance |
+| KubeVirt + Kube-OVN + Cilium | Kube-OVN VPC and subnet | `CiliumNetworkPolicy` by default; Kube-OVN `SecurityGroup` can be chosen per group and per instance |
 | KubeVirt + Cilium | Pod network | `CiliumNetworkPolicy` |
 
 Cilium security groups are `CiliumNetworkPolicy` objects in the instance namespace that select the label `sg.kubevirt-dashboard.io/<name>=true`; the console sets that label on the VM template. Cluster-wide groups are `CiliumClusterwideNetworkPolicy` objects selecting `global.sg.kubevirt-dashboard.io/<name>=true`, so instances in any namespace can join them. Kube-OVN security groups are cluster scoped and attached through the `ovn.kubernetes.io/security_groups` annotation with port security enabled. Subnets in Kube-OVN mode also have a subnet-level network ACL editor.
@@ -49,7 +49,8 @@ Attaching or detaching a security group updates the VM template and the running 
 ## Monitoring
 
 - **metrics-server** (`metrics.k8s.io`): when installed, host CPU and memory usage appear on the overview and live usage on instance pages.
-- **Prometheus**: configure the Prometheus service in **Settings → Monitoring** (namespace, service and port). Queries go through the Kubernetes API service proxy, so Prometheus does not need to be exposed outside the cluster. VM charts use the metrics KubeVirt exports (`kubevirt_vmi_*`).
+- **History** (Prometheus API): in **Settings → Monitoring**, **Detect in cluster** finds the query services that kube-prometheus-stack, the prometheus chart, the VictoriaMetrics operator (`VMSingle`, `VMCluster` vmselect) and the victoria-metrics-single chart create, or enter namespace, service, port and an optional path prefix (`/select/0/prometheus` for a VictoriaMetrics cluster). Queries go through the Kubernetes API service proxy, so the backend does not need to be exposed outside the cluster. VM charts use the metrics KubeVirt exports (`kubevirt_vmi_*`) and match the VMI namespace whether the scrape kept it as `namespace` or renamed it to `exported_namespace`.
+- Verified on a k3s cluster with kube-prometheus-stack (Prometheus 3.7), the VictoriaMetrics operator with a `VMSingle`, and the victoria-metrics-single chart (VictoriaMetrics 1.128), each installed from its chart.
 
 ## API Versions
 
@@ -61,7 +62,7 @@ The console talks to the cluster through the Kubernetes API and uses these API v
 | CDI | `cdi.kubevirt.io/v1beta1` |
 | Kube-OVN | `kubeovn.io/v1` |
 | Cilium | `cilium.io/v2`; `v2alpha1` for kinds that have not graduated, and as a fallback for BGP and LB IP pool resources on older releases |
-| Metrics | `metrics.k8s.io/v1beta1` (metrics-server), Prometheus HTTP API |
+| Metrics | `metrics.k8s.io/v1beta1` (metrics-server), Prometheus HTTP query API (Prometheus, VictoriaMetrics, Thanos) |
 
 ## Security
 

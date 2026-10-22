@@ -101,6 +101,7 @@ type InstanceRow = {
   node: string
   shape: ReturnType<typeof vmShape>
   network: ReturnType<typeof vmNetworkLabel>
+  vpc: string
   groups: ReturnType<typeof vmSecurityGroupRefs>
 }
 
@@ -111,6 +112,7 @@ const instanceFields: FilterField<InstanceRow>[] = [
   { key: "ip", label: "IP address", value: (row) => row.ips },
   { key: "spec", label: "Spec", value: (row) => [row.shape.label, row.shape.detail] },
   { key: "network", label: "Network", aliases: ["subnet"], value: (row) => row.network.label },
+  { key: "vpc", label: "VPC", value: (row) => row.vpc },
   { key: "sg", label: "Security groups", value: (row) => row.groups.map((group) => group.name) },
   { key: "host", label: "Host", aliases: ["node"], value: (row) => row.node },
   { key: "label", label: "Labels", value: (row) => Object.entries(row.vm.metadata.labels || {}).map(([name, value]) => `${name}=${value}`) },
@@ -142,14 +144,16 @@ export function InstanceListPage() {
   }, [namespace])
 
   const { data, loading, reload } = useAsync(async () => {
-    const [vms, vmis, types] = await Promise.all([
+    const [vms, vmis, types, subnets] = await Promise.all([
       listItems(namespacedPath(VM_API, "virtualmachines", scope)),
       listItems(namespacedPath(VM_API, "virtualmachineinstances", scope)),
       listItems("/apis/instancetype.kubevirt.io/v1beta1/virtualmachineclusterinstancetypes"),
+      profile.vpc ? listItems("/apis/kubeovn.io/v1/subnets").catch(() => [] as KubeObject[]) : Promise.resolve([] as KubeObject[]),
     ])
     const instanceTypes = Object.fromEntries(types.map((type) => [type.metadata.name, { cpu: Number(asRecord(asRecord(type.spec).cpu).guest || 0), memory: str(asRecord(asRecord(type.spec).memory).guest) }]))
-    return { vms, vmis, instanceTypes }
-  }, { vms: [] as KubeObject[], vmis: [] as KubeObject[], instanceTypes: {} as Record<string, { cpu: number; memory: string }> }, [scope])
+    const vpcBySubnet = Object.fromEntries(subnets.map((subnet) => [subnet.metadata.name, str(asRecord(subnet.spec).vpc, "ovn-cluster")]))
+    return { vms, vmis, instanceTypes, vpcBySubnet }
+  }, { vms: [] as KubeObject[], vmis: [] as KubeObject[], instanceTypes: {} as Record<string, { cpu: number; memory: string }>, vpcBySubnet: {} as Record<string, string> }, [scope, profile.vpc])
 
   usePolling(reload, 15000)
 
@@ -172,6 +176,7 @@ export function InstanceListPage() {
           node: str(vmiStatus.nodeName),
           shape: vmShape(vm, data.instanceTypes),
           network: vmNetworkLabel(vm),
+          vpc: data.vpcBySubnet[vmNetworkLabel(vm).label] || "",
           groups: vmSecurityGroupRefs(vm, providers),
         }
       })
@@ -274,7 +279,7 @@ export function InstanceListPage() {
                     />
                   </td>
                 </tr>
-              ) : pageRows.map(({ vm, ips, shape, network, status, groups, node }) => {
+              ) : pageRows.map(({ vm, ips, shape, network, vpc, status, groups, node }) => {
                 return (
                   <tr key={key(vm)} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                     <td className="px-3 py-2">
@@ -306,14 +311,14 @@ export function InstanceListPage() {
                       ) : (
                         <span className={cn("text-sm", network.kind === "pod" && "text-muted-foreground")}>{network.label}</span>
                       )}
-                      {profile.vpc && network.kind === "subnet" && <div className="text-xs text-muted-foreground">{t("Kube-OVN subnet")}</div>}
+                      {vpc && <div className="text-xs text-muted-foreground">{t("VPC {vpc}", { vpc })}</div>}
                     </td>
                     {provider && (
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
                           {groups.length ? groups.map((group) => (
                             <Badge key={sgRefKey(group)} variant="outline" title={group.global ? t("Cluster wide") : engineLabel[group.provider]}>
-                              {group.name}{providers.length > 1 && <span className="text-muted-foreground">{group.provider === "cilium" ? "cil" : "ovn"}</span>}
+                              {group.name}
                             </Badge>
                           )) : <span className="text-sm text-muted-foreground">-</span>}
                         </div>
@@ -739,7 +744,7 @@ export function CreateInstancePage() {
 
           {step === "network" && (
             <>
-              <StepSection title={t("Network")} description={profile.vpc ? t("Kube-OVN") : t("Pod network")}>
+              <StepSection title={t("Network")} description={profile.vpc ? t("VPC network") : t("Pod network")}>
                 {profile.vpc ? (
                   <>
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -797,7 +802,7 @@ export function CreateInstancePage() {
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">{t("The instance gets an address from the pod CIDR.")} {profile.kubeOvnInstalled ? t("Kube-OVN is installed: switch the network stack in Settings to choose VPCs and subnets.") : t("Install Kube-OVN to place instances in VPCs and subnets.")}</div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">{t("The instance gets an address from the pod CIDR.")} {profile.kubeOvnInstalled ? t("VPC networking can be turned on under Settings, Networking.") : t("Install Kube-OVN to place instances in VPCs and subnets.")}</div>
                 )}
                 <div className="space-y-2">
                   <div className="text-sm font-medium">{t("Interface binding")}</div>
@@ -834,7 +839,7 @@ export function CreateInstancePage() {
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => set({ extraNics: [...state.extraNics, { name: nextNicName(state.extraNics.map((nic) => nic.name)), network: catalog.networks[0] }] })}><Plus className="size-4" />{t("Add interface")}</Button>
                 )}
               </StepSection>
-              <StepSection title={t("Security groups")} description={aclProvider === "kube-ovn" ? t("Enforced by Kube-OVN port ACLs.") : aclProvider === "cilium" ? t("Enforced by Cilium. Groups from namespace {namespace} and cluster-wide groups.", { namespace: state.namespace }) : t("Security groups require Kube-OVN or Cilium.")}>
+              <StepSection title={t("Security groups")} description={aclProvider === "cilium" ? t("Groups from namespace {namespace} and cluster-wide groups.", { namespace: state.namespace }) : undefined}>
                 {aclProvider ? (
                   <>
                     {engines.length > 1 && (
@@ -848,7 +853,7 @@ export function CreateInstancePage() {
                               onClick={() => set({ sgEngine: engine, securityGroups: [] })}
                               icon={ShieldCheck}
                               title={<span className="flex items-center gap-2">{engineLabel[engine]}{engine === defaultEngine && <Badge variant="outline">{t("Default")}</Badge>}</span>}
-                              description={engine === "cilium" ? t("CiliumNetworkPolicy, per namespace") : t("Kube-OVN SecurityGroup, cluster wide")}
+                              description={engine === "cilium" ? t("Deny rules and address groups") : t("Port ACLs with rule priorities")}
                             />
                           ))}
                         </div>

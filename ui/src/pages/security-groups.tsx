@@ -78,20 +78,8 @@ import { t } from "@/lib/i18n"
 const providerLabel = engineResource
 
 const engineDescription: Record<SgProvider, string> = {
-  cilium: "eBPF policy per namespace. Supports deny rules and cross-group references. Default on Kube-OVN + Cilium.",
-  "kube-ovn": "OVN port ACLs, cluster wide, with explicit rule priorities. Requires port security on the instance.",
-}
-
-function ProviderNote({ provider }: { provider: SgProvider }) {
-  return (
-    <p className="text-xs text-muted-foreground">
-      {provider === "kube-ovn" ? (
-        <>{t("OVN port ACLs, cluster wide. Attached via")} <code className="font-mono">ovn.kubernetes.io/security_groups</code>{t(". Lower priority runs first.")}</>
-      ) : (
-        <>{t("CiliumNetworkPolicy per namespace, or CiliumClusterwideNetworkPolicy for cluster-wide groups. Attached via label")} <code className="font-mono">sg.kubevirt-dashboard.io/&lt;name&gt;</code>{t(". Inbound is denied unless allowed; deny wins.")}</>
-      )}
-    </p>
-  )
+  cilium: "Deny rules, address groups and cluster-wide groups.",
+  "kube-ovn": "Port ACLs with explicit rule priorities. Turns on port security for attached instances.",
 }
 
 // --- Rule editor ---
@@ -259,7 +247,7 @@ function CreateSecurityGroupDialog({
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("Create security group")}</DialogTitle>
-          <DialogDescription>{t("A stateful firewall for instances. Backed by")} {providerLabel[provider]}.</DialogDescription>
+          <DialogDescription>{t("A stateful firewall for instances.")}</DialogDescription>
         </DialogHeader>
         {providers.length > 1 && (
           <div className="space-y-2">
@@ -280,7 +268,7 @@ function CreateSecurityGroupDialog({
         <div className="grid gap-4 sm:grid-cols-2">
           <FieldRow label={t("Name")}><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="sg-web" /></FieldRow>
           {provider === "cilium" ? (
-            <FieldRow label={t("Namespace")} hint={clusterWide ? t("Instances in any namespace can join a cluster-wide group.") : t("Cilium groups apply to instances in this namespace.")}>
+            <FieldRow label={t("Namespace")} hint={clusterWide ? t("Instances in any namespace can join a cluster-wide group.") : t("The group applies to instances in this namespace.")}>
               <NativeSelect value={clusterWide ? "" : namespace} disabled={clusterWide} onChange={(e) => setNamespace(e.target.value)}>
                 {clusterWide && <option value="">{t("All namespaces")}</option>}
                 {Array.from(new Set([namespace, ...namespaces])).map((ns) => <option key={ns} value={ns}>{ns}</option>)}
@@ -295,8 +283,8 @@ function CreateSecurityGroupDialog({
         </div>
         {provider === "cilium" && (
           <div className="grid gap-2 sm:grid-cols-2">
-            <ChoiceCard selected={!clusterWide} onClick={() => setClusterWide(false)} title={t("Namespace")} description="CiliumNetworkPolicy" />
-            <ChoiceCard selected={clusterWide} onClick={() => setClusterWide(true)} title={t("Cluster wide")} description="CiliumClusterwideNetworkPolicy" />
+            <ChoiceCard selected={!clusterWide} onClick={() => setClusterWide(false)} title={t("Namespace")} description={t("Instances in one namespace")} />
+            <ChoiceCard selected={clusterWide} onClick={() => setClusterWide(true)} title={t("Cluster wide")} description={t("Instances in any namespace")} />
           </div>
         )}
         <div className="space-y-2">
@@ -374,7 +362,7 @@ export function SecurityGroupListPage() {
             <EmptyState
               icon={ShieldCheck}
               title={t("Security groups need Kube-OVN or Cilium")}
-              description={t("The current network stack enforces access control with Kubernetes NetworkPolicy. Install Kube-OVN or Cilium, or pick a different network stack in Settings.")}
+              description={t("Access control on this cluster uses Kubernetes network policies. Install Kube-OVN or Cilium to use security groups.")}
               action={
                 <div className="flex gap-2">
                   <Button asChild size="sm" variant="outline"><Link to="/networks/kubernetes/network-policies">{t("Network policies")}</Link></Button>
@@ -391,7 +379,6 @@ export function SecurityGroupListPage() {
     <div className="space-y-4">
       <PageHeader
         title={t("Security Groups")}
-        badge={providers.length === 1 ? <Badge variant="outline">{providerLabel[provider]}</Badge> : undefined}
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />{t("Create security group")}</Button>}
       />
       {providers.length > 1 && (
@@ -407,13 +394,11 @@ export function SecurityGroupListPage() {
               )}
             >
               {engineLabel[item]}
-              <span className="text-xs font-normal text-muted-foreground">{engineResource[item]}</span>
               {item === defaultProvider && <Badge variant="outline">{t("Default")}</Badge>}
             </button>
           ))}
         </div>
       )}
-      <ProviderNote provider={provider} />
       <Toolbar
         right={<FilterInput value={search} onChange={setSearch} fields={provider === "cilium" ? groupFields : groupFields.filter((field) => field.key !== "namespace")} rows={allRows} />}
       >
@@ -547,7 +532,6 @@ export function SecurityGroupDetailPage() {
         breadcrumbs={[{ label: t("Security Groups"), to: provider === "kube-ovn" ? "/vpc/security-groups?engine=kube-ovn" : "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
         title={sg.name}
         subtitle={sg.description || undefined}
-        badge={<Badge variant="outline">{global ? "CiliumClusterwideNetworkPolicy" : providerLabel[provider]}</Badge>}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
@@ -565,7 +549,6 @@ export function SecurityGroupDetailPage() {
             { label: t("Created"), value: relativeTime(sg.raw.metadata.creationTimestamp) },
           ]} />
         </Panel>
-      <ProviderNote provider={provider} />
       {!editable && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">{t("This policy contains")} {sg.unsupported} rule{sg.unsupported > 1 ? "s" : ""} {t("this editor cannot represent (L7, FQDN or custom selectors). Edit it from the")} <Link className="underline" to={global ? `/networks/cilium/clusterwide-network-policies/_cluster/${sg.name}/manifest` : `/networks/cilium/network-policies/${sg.namespace}/${sg.name}/manifest`}>{t("manifest")}</Link>.
         </div>
@@ -750,7 +733,7 @@ export function InstanceSecurityGroupsDialog({ open, onOpenChange, vm, onDone }:
       open={open}
       onOpenChange={onOpenChange}
       title={t("Change security groups")}
-      description={providers.length > 1 ? t("Pick groups from either engine. Cilium and Kube-OVN rules both apply when an instance uses groups from both.") : t("Updates the instance template and its running pod.")}
+      description={providers.length > 1 ? t("Rules of every selected group apply.") : t("Updates the instance template and its running pod.")}
       confirmLabel={t("Save")}
       onConfirm={async () => {
         const refs = groups.filter((sg) => selected.includes(sgRefKey(sgRefOf(sg)))).map(sgRefOf)
