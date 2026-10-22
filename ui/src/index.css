@@ -71,6 +71,10 @@ samp {
   --color-tone-network: var(--tone-network);
   --color-tone-security: var(--tone-security);
   --color-tone-platform: var(--tone-platform);
+  --color-code-key: var(--code-key);
+  --color-code-string: var(--code-string);
+  --color-code-literal: var(--code-literal);
+  --color-code-comment: var(--code-comment);
 }
 
 /*
@@ -123,6 +127,11 @@ samp {
   --tone-compute: oklch(0.56 0.11 255);
   --tone-platform: oklch(0.56 0.11 285);
   --tone-security: oklch(0.56 0.11 315);
+  /* YAML / code highlighting (manifest viewer and editor only). */
+  --code-key: oklch(0.45 0.12 255);
+  --code-string: oklch(0.47 0.11 160);
+  --code-literal: oklch(0.52 0.13 50);
+  --code-comment: oklch(0.58 0.01 258);
 }
 
 .dark {
@@ -164,6 +173,10 @@ samp {
   --tone-compute: oklch(0.74 0.1 255);
   --tone-platform: oklch(0.74 0.1 285);
   --tone-security: oklch(0.74 0.1 315);
+  --code-key: oklch(0.78 0.1 255);
+  --code-string: oklch(0.78 0.1 160);
+  --code-literal: oklch(0.8 0.11 60);
+  --code-comment: oklch(0.62 0.01 258);
 }
 
 @layer base {

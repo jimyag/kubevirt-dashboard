@@ -595,6 +595,7 @@ export function SubnetDetailPage() {
   const { name = "" } = useParams()
   const [rules, setRules] = useState<AclRule[] | null>(null)
   const [saving, setSaving] = useState(false)
+  const [confirmSave, setConfirmSave] = useState(false)
   const [error, setError] = useState("")
   const { data, loading, reload } = useAsync(async () => {
     const [subnetRes, ips, vms] = await Promise.all([
@@ -663,7 +664,7 @@ export function SubnetDetailPage() {
               {editing ? (
                 <>
                   <Button size="sm" variant="outline" onClick={() => { setRules(null); setError("") }}>{t("Cancel")}</Button>
-                  <Button size="sm" onClick={save} disabled={saving}>{saving ? t("Saving...") : t("Save rules")}</Button>
+                  <Button size="sm" onClick={() => setConfirmSave(true)} disabled={saving}>{saving ? t("Saving...") : t("Save rules")}</Button>
                 </>
               ) : (
                 <Button size="sm" variant="outline" onClick={() => setRules(savedRules)}>{t("Edit rules")}</Button>
@@ -713,6 +714,14 @@ export function SubnetDetailPage() {
           )}
           {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm break-all">{error}</div>}
       </Panel>
+      <ConfirmDialog
+        open={confirmSave}
+        onOpenChange={setConfirmSave}
+        title={t("Save network ACL for subnet {name}?", { name })}
+        description={t("The rules apply to every instance in this subnet immediately.")}
+        confirmLabel={t("Save rules")}
+        onConfirm={save}
+      />
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold">{t("Allocated addresses")}</h2>

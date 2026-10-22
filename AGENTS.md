@@ -34,10 +34,11 @@ kubevirt-console/
 
 只使用语义化 Tailwind token，禁止硬编码颜色。主题为冷灰画布 + 白色表面 + 钴蓝主色（`--primary`）。
 
-颜色有三种用途，不要用于其他装饰：
+颜色有四种用途，不要用于其他装饰：
 - 主色：主操作按钮、选中项、链接悬停
 - 状态色：绿 / 琥珀 / 红，只通过 `StatusDot` 等共享组件使用
 - 分区色：每个导航分区一个色相，由 `ui/src/index.css` 中的 `--tone-*` token 定义（同一亮度与彩度，色相在主色附近的冷色区间：Networking 190、Storage 222、Compute 255、Platform 285、Security 315），通过 `ui/src/lib/navigation.ts` 的 `toneClasses` 使用（`text-tone-*` / `bg-tone-*`），用于侧边栏图标、面包屑、页面标题图标和总览指标；不要改用 Tailwind 调色板颜色，新增分区时保持相同亮度与彩度
+- 代码高亮：只用于 YAML 清单查看 / 编辑器（`components/yaml-editor.tsx`），通过 `--code-key`、`--code-string`、`--code-literal`、`--code-comment`（`text-code-*`）使用
 
 禁止使用的 class：`bg-white`、`text-zinc-*`、`bg-zinc-*`、`border-zinc-*`、`text-gray-*`、`bg-gray-*`
 
@@ -79,7 +80,8 @@ kubevirt-console/
 - 选择型输入（规格、镜像、引擎等）使用 `ChoiceCard`，而不是长下拉框
 - IP、CIDR、ID、Kind、apiVersion 等技术值使用 `font-mono`
 - 时间统一显示相对时间（`relativeTime`），完整时间放在 `title` 里
-- 删除操作必须经过 `ConfirmDialog` 确认
+- 删除操作必须经过 `ConfirmDialog` 确认；其他会立即修改集群的操作（开关机、保存规则、解绑等）同样先用 `ConfirmDialog` 二次确认，带表单和预览的对话框本身即视为确认
+- 清单页统一用 `components/manifest.tsx` 的 `ManifestPanel`：`kubectl get -o yaml` 格式、高亮、编辑，保存前展示 diff 并确认，用 PUT 携带 `resourceVersion` 防止覆盖他人修改
 
 ### 5. 圆角与排版
 

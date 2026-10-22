@@ -238,6 +238,7 @@ export function ConfirmDialog({
   destructive,
   onConfirm,
   children,
+  className,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -247,6 +248,8 @@ export function ConfirmDialog({
   destructive?: boolean
   onConfirm: () => Promise<void> | void
   children?: ReactNode
+  /** Extra classes for the dialog, e.g. a wider max width for diffs. */
+  className?: string
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -264,7 +267,7 @@ export function ConfirmDialog({
   }
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!busy) { setError(""); onOpenChange(next) } }}>
-      <DialogContent>
+      <DialogContent className={className}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}

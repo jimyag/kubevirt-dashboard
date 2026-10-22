@@ -17,7 +17,7 @@ import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import { Button } from "./components/ui/button";
 import { dvCreateConfig, jsonPost, jsonPut, keyValueText, mergePatch, numberValue, parseKeyValueText, resourceConfigs, stringValue } from "./resources/configs";
-import { Combobox, DataTable, EmptyState, FilterInput, KeyValueGrid, LoadingState, PageHeader, Panel, StatusDot, Toolbar } from "./components/console";
+import { Combobox, ConfirmDialog, DataTable, EmptyState, FilterInput, KeyValueGrid, LoadingState, PageHeader, Panel, StatusDot, Toolbar } from "./components/console";
 import { namespaceScope, useFilteredRows, type FilterField } from "./lib/filter";
 import {
   DropdownMenu,
@@ -35,7 +35,7 @@ import { EventsPage } from "./pages/events";
 import { EventList } from "./components/events";
 import { VmMonitoring } from "./components/monitoring";
 import { eventsUrl } from "./lib/events";
-import { toKubectlYaml } from "./lib/manifest";
+import { ManifestPanel } from "./components/manifest";
 import { InstanceSecurityGroupsDialog, SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
 import { CatalogPage, SettingsPage } from "./pages/settings";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
@@ -296,8 +296,21 @@ function DVList() {
   );
 }
 
+type VmPowerAction = "start" | "stop" | "restart" | "pause" | "unpause" | "poweroff" | "migrate";
+
+// Titles and labels stay English here and are translated where they render.
+const vmPowerText: Record<VmPowerAction, { title: string; label: string; description?: string }> = {
+  start: { title: "Start instance {name}?", label: "Start" },
+  stop: { title: "Stop instance {name}?", label: "Stop", description: "The guest OS is asked to shut down." },
+  restart: { title: "Restart instance {name}?", label: "Restart", description: "The guest OS is restarted." },
+  pause: { title: "Pause instance {name}?", label: "Pause", description: "The guest is frozen in memory until resumed." },
+  unpause: { title: "Resume instance {name}?", label: "Resume" },
+  poweroff: { title: "Force power off {name}?", label: "Force power off", description: "Like pulling the power cord: the guest stops immediately and unsaved data is lost." },
+  migrate: { title: "Live migrate {name}?", label: "Live migrate", description: "The instance moves to another host while it keeps running." },
+};
+
 function VMDetailContent() {
-  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [loading, setLoading] = useState(true); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider, providers: sgProviders } = useSgProvider(); const profile = useNetworkProfile();
+  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [loading, setLoading] = useState(true); const [dialog, setDialog] = useState<string | null>(null); const [powerAction, setPowerAction] = useState<VmPowerAction | null>(null); const { provider: sgProvider, providers: sgProviders } = useSgProvider(); const profile = useNetworkProfile();
   const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
   const fetchData = useCallback(async () => {
     try {
@@ -370,11 +383,11 @@ function VMDetailContent() {
         actions={
           <>
             {isRunning ? (
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => handleAction("stop")}><Square className="size-3.5" />{t("Stop")}</Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setPowerAction("stop")}><Square className="size-3.5" />{t("Stop")}</Button>
             ) : (
-              <Button size="sm" className="gap-1.5" onClick={() => handleAction("start")}><Play className="size-3.5" />{t("Start")}</Button>
+              <Button size="sm" className="gap-1.5" onClick={() => setPowerAction("start")}><Play className="size-3.5" />{t("Start")}</Button>
             )}
-            <Button size="sm" variant="outline" className="gap-1.5" disabled={!isRunning} onClick={() => handleAction("restart")}><RotateCcw className="size-3.5" />{t("Restart")}</Button>
+            <Button size="sm" variant="outline" className="gap-1.5" disabled={!isRunning} onClick={() => setPowerAction("restart")}><RotateCcw className="size-3.5" />{t("Restart")}</Button>
             <Button size="sm" variant="outline" className="gap-1.5" disabled={!isRunning} onClick={() => navigate(`/kubevirt/virtualization/virtual-machines/${namespace}/${name}/vnc`)}><MonitorPlay className="size-3.5" />{t("Connect")}</Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -382,10 +395,10 @@ function VMDetailContent() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuLabel>{t("Power")}</DropdownMenuLabel>
-                <DropdownMenuItem disabled={!isRunning} onClick={() => handleAction("pause")}>{t("Pause")}</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleAction("unpause")}>{t("Resume")}</DropdownMenuItem>
-                <DropdownMenuItem disabled={!isRunning} onClick={() => handleAction("poweroff")}>{t("Force power off")}</DropdownMenuItem>
-                <DropdownMenuItem disabled={!isRunning} onClick={() => handleAction("migrate")}>{t("Live migrate")}</DropdownMenuItem>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => setPowerAction("pause")}>{t("Pause")}</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setPowerAction("unpause")}>{t("Resume")}</DropdownMenuItem>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => setPowerAction("poweroff")}>{t("Force power off")}</DropdownMenuItem>
+                <DropdownMenuItem disabled={!isRunning} onClick={() => setPowerAction("migrate")}>{t("Live migrate")}</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>{t("Configuration")}</DropdownMenuLabel>
                 <DropdownMenuItem onClick={() => setDialog("Resize")}>{t("Change spec")}</DropdownMenuItem>
@@ -787,9 +800,20 @@ function VMDetailContent() {
         {activeTab === "vnc" && <VncConsole namespace={namespace!} name={name!} />}
 
         {activeTab === "manifest" && (
-          <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{toKubectlYaml(vm)}</pre>
+          <ManifestPanel object={vm} url={vmPatchUrl} onSaved={fetchData} />
         )}
       </div>
+      <ConfirmDialog
+        open={powerAction !== null}
+        onOpenChange={(open) => !open && setPowerAction(null)}
+        title={powerAction ? t(vmPowerText[powerAction].title, { name: vm.metadata.name }) : ""}
+        description={powerAction && vmPowerText[powerAction].description ? t(vmPowerText[powerAction].description!) : undefined}
+        confirmLabel={powerAction ? t(vmPowerText[powerAction].label) : ""}
+        destructive={powerAction === "poweroff"}
+        onConfirm={async () => {
+          if (powerAction) await handleAction(powerAction)
+        }}
+      />
     </div>
   );
 }
@@ -928,7 +952,7 @@ function DVDetailContent() {
         // Import, upload and clone progress is reported on both the DataVolume and its PVC, which share the name.
         <EventList url={eventsUrl({ namespace, name })} />
       ) : (
-        <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{toKubectlYaml(dv)}</pre>
+        <ManifestPanel object={dv} url={`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`} onSaved={loadDv} />
       )}
     </div>
   );
