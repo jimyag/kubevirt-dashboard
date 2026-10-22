@@ -1,110 +1,117 @@
 # KubeVirt Dashboard
 
-A lightweight, single-binary, and modern web-based management console for KubeVirt clusters.
+A single-binary web console for KubeVirt clusters, organized like a public cloud console: instances, disks, VPCs, subnets and security groups on top of KubeVirt, CDI, Kube-OVN and Cilium.
 
-![Dashboard Overview](images/dashboard.png)
+![Overview](images/dashboard.png)
 
 ## Features
 
-- **Multi-Cluster Support**: Manage multiple Kubernetes clusters by switching contexts directly from the UI.
-- **Discovery-Aware Resource Management**: The backend exposes Kubernetes API versions and resources, and the UI only calls APIs served by the selected cluster.
-- **Kubernetes Management**: Manage workloads, config, RBAC, policy, admission, flow control, certificates, leases, runtime classes, priority classes, API services, and CRDs.
-- **KubeVirt Management**: Manage VirtualMachines, VMIs, pools, replica sets, migrations, snapshots, restores, instance types, preferences, and KubeVirt installation resources.
-- **CDI And Storage Management**: Manage DataVolumes, DataSources, StorageProfiles, import/upload/clone sources, ObjectTransfers, PV/PVC, StorageClasses, CSI resources, and VolumeSnapshot resources.
-- **Network Management**: Manage Kubernetes networking, Gateway API resources, NetworkAttachmentDefinitions, Calico, Cilium, and Kube-OVN resources such as subnets, VPCs, NAT gateways, SNAT/DNAT/FIP rules, EIPs, VIPs, and security groups.
-- **Structured Creation Flows**: Resource creation uses human-friendly forms with generated YAML preview and an advanced YAML editor when direct edits are needed.
-- **Resource-Specific Details**: Details are rendered by resource domain instead of raw YAML dumps: Pods, workloads, networks, storage, nodes, KubeVirt/CDI, and remaining resources each get structured overview sections.
-- **Pod Access**: Related Pods are shown from owning resources such as Deployments, Services, NetworkPolicies, and KubeVirt VMs. Pod logs and interactive shell access are available from the details UI.
-- **VM Console**: Serial console and VNC access are available for VirtualMachines.
-- **Clean Manifests**: Manifest routes show YAML separately from the overview pages.
-- **Single Binary**: All static assets are embedded into the Go binary for easy deployment.
+- **Cloud console layout**: Compute (instances, instance types, images, pools, snapshots, migrations, hosts), Storage (disks, volumes, storage classes, volume snapshots), Networking (VPCs, subnets, elastic IPs, NAT gateways, load balancers, Multus networks) and Security (security groups, network policies). Every other API resource is reachable from the **Resource Catalog**.
+- **Instance wizard**: create a VM step by step (spec or instance type, image and disks, VPC/subnet and security groups, cloud-init login) and review the exact manifest before submitting.
+- **Network stacks**: detects Kube-OVN and Cilium and adapts instance networking and security groups (see below).
+- **Events and monitoring**: a cluster-wide event browser, events on every resource detail page, live CPU and memory from metrics-server, and VM history charts from Prometheus when one is configured.
+- **Discovery aware**: the UI checks which API groups and versions the selected cluster serves and hides resources it does not serve.
+- **Multi-cluster**: switch between kubeconfig contexts from the header.
+- **Consoles and pod access**: serial console and VNC for VMs; logs and an interactive shell for related pods.
+- **Single binary**: the UI is embedded in the Go binary.
 
-## Cloud Console Layout
+## Screenshots
 
-The UI is organized like a public cloud console: **Compute** (instances, instance types, images, snapshots, migrations, hosts), **Storage** (disks, volumes, storage classes, volume snapshots), **Networking** (VPCs, subnets, elastic IPs, NAT gateways, load balancers) and **Security** (security groups, network policies). Every raw API resource remains reachable from the **Resource Catalog**.
+| Instances | Instance detail |
+|-----------|-----------------|
+| ![Instances](images/machines.png) | ![Instance detail](images/vm-detail.png) |
+| **Subnet detail** | **Create instance** |
+| ![Subnet detail](images/resource-detail.png) | ![Create instance](images/resource-create.png) |
 
-Instances are created with a step-by-step wizard (spec, image and disks, network and security groups, login, review with the generated manifest).
+## Network Stacks
 
-### Network Stacks
+The stack is detected from the CRDs the cluster serves and can be overridden per cluster in **Settings**.
 
-The console detects the installed CNI components and adapts networking and access control. The detected stack can be overridden per cluster in **Settings**.
-
-| Stack | Instance networking | Security groups enforced by |
-|-------|---------------------|-----------------------------|
-| KubeVirt | Pod network | Kubernetes NetworkPolicy |
+| Stack | Instance networking | Security groups |
+|-------|---------------------|-----------------|
+| KubeVirt | Pod network | Not available; use Kubernetes NetworkPolicy |
 | KubeVirt + Kube-OVN | Kube-OVN VPC and subnet (`ovn.kubernetes.io/logical_switch`) | Kube-OVN `SecurityGroup` (`ovn.kubernetes.io/security_groups`) |
-| KubeVirt + Kube-OVN + Cilium | Kube-OVN VPC and subnet | `CiliumNetworkPolicy` selecting `sg.kubevirt-dashboard.io/<name>` |
-| KubeVirt + Cilium | Pod network | `CiliumNetworkPolicy` selecting `sg.kubevirt-dashboard.io/<name>` |
+| KubeVirt + Kube-OVN + Cilium (recommended) | Kube-OVN VPC and subnet | `CiliumNetworkPolicy` by default; Kube-OVN `SecurityGroup` can be chosen per group and per instance |
+| KubeVirt + Cilium | Pod network | `CiliumNetworkPolicy` |
 
-Security groups use the same inbound/outbound rule editor for both engines. With Kube-OVN, subnets also expose a subnet-level network ACL editor.
+Cilium security groups are `CiliumNetworkPolicy` objects in the instance namespace that select the label `sg.kubevirt-dashboard.io/<name>=true`; the console sets that label on the VM template. Kube-OVN security groups are cluster scoped and attached through the `ovn.kubernetes.io/security_groups` annotation with port security enabled. Subnets in Kube-OVN mode also have a subnet-level network ACL editor.
 
-## UI Preview
+Attaching or detaching a security group updates the VM template and the running virt-launcher pod. If the CNI does not apply pod changes live, the change takes effect on the next restart.
 
-### Dashboard Overview
-![Dashboard Overview](images/dashboard.png)
+## Monitoring
 
-### Virtual Machine List
-![Virtual Machine List](images/machines.png)
+- **metrics-server** (`metrics.k8s.io`): when installed, host CPU and memory usage appear on the overview and live usage on instance pages.
+- **Prometheus**: configure the Prometheus service in **Settings → Monitoring** (namespace, service and port). Queries go through the Kubernetes API service proxy, so Prometheus does not need to be exposed outside the cluster. VM charts use the metrics KubeVirt exports (`kubevirt_vmi_*`).
 
-### Virtual Machine Details
-![Virtual Machine Details](images/vm-detail.png)
+## API Versions
 
-### Resource Details
-![Resource Details](images/resource-detail.png)
+The console talks to the cluster through the Kubernetes API and uses these API versions, falling back to older ones when the cluster does not serve the preferred version. The CRD lists were checked against KubeVirt 1.9.1, Cilium 1.20.3 and Kube-OVN 1.16.15.
 
-### Resource Creation Flow
-![Resource Creation Flow](images/resource-create.png)
+| Component | API versions used |
+|-----------|-------------------|
+| KubeVirt | `kubevirt.io/v1`, `instancetype.kubevirt.io/v1beta1`, `snapshot.kubevirt.io/v1beta1`, `pool.kubevirt.io/v1beta1` (KubeVirt 1.7+, falls back to `v1alpha1`) |
+| CDI | `cdi.kubevirt.io/v1beta1` |
+| Kube-OVN | `kubeovn.io/v1` |
+| Cilium | `cilium.io/v2`; `v2alpha1` for kinds that have not graduated, and as a fallback for BGP and LB IP pool resources on older releases |
+| Metrics | `metrics.k8s.io/v1beta1` (metrics-server), Prometheus HTTP API |
+
+## Security
+
+The dashboard has **no authentication of its own**. Every request runs with the credentials of the kubeconfig context (local mode) or of the `kubevirt-dashboard` service account (in-cluster mode), and the bundled ClusterRole allows creating, updating and deleting any resource. Anyone who can reach the dashboard can therefore administer the cluster.
+
+- Prefer `kubectl port-forward` or binding to `127.0.0.1`.
+- Do not apply `manifest/nodeport.yaml` or `manifest/ingress.yaml` without putting an authenticating proxy (for example oauth2-proxy) in front, and restricting who can reach it.
+- Narrow the ClusterRole in `manifest/deploy.yaml` if you only need part of the console.
 
 ## Installation
 
-### From Binary
+### Binary
 
-Download the latest binary from the [Releases](https://github.com/jimyag/kubevirt-dashboard/releases) page.
+Download a release from the [Releases](https://github.com/jimyag/kubevirt-dashboard/releases) page and run it against your current kubeconfig:
 
 ```bash
-# Run the dashboard (uses your local kubeconfig)
 ./kubevirt-dashboard --listen 127.0.0.1:11111
 ```
 
-### In-Cluster Deployment
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--listen` | `127.0.0.1:11111` | Address to serve the console on |
+| `--kubeconfig` | `$KUBECONFIG` or `~/.kube/config` | Kubeconfig file |
+| `--context` | current context | Context selected when the browser has none stored |
 
-The dashboard can be deployed directly into your Kubernetes cluster:
+### In cluster
 
 ```bash
 kubectl apply -f manifest/deploy.yaml
-```
-
-After deployment, expose it locally:
-
-```bash
 kubectl port-forward -n kubevirt-dashboard svc/kubevirt-dashboard 8080:80
 ```
 
+Then open http://127.0.0.1:8080. Read [Security](#security) before exposing it any other way.
+
 ## Development
 
-### Prerequisites
+Prerequisites:
 
 - Go 1.27+
-
-The KubeVirt client SDK and its Kubernetes dependencies are updated together.
-KubeVirt SDK 1.9 uses Kubernetes 0.34; OpenShift and kube-openapi replacements
-follow the SDK's own `go.mod`. Review those compatibility pins when upgrading the
-SDK instead of updating the replacement modules independently.
-- Node.js & Bun (for frontend build)
-
-### Build from source
+- Bun (frontend package manager and build)
 
 ```bash
-# Build both UI and Go binary
-make
+cd ui && bun install && cd ..
+make                      # builds ui/dist, then the Go binary with the UI embedded
+./kubevirt-dashboard --listen 127.0.0.1:11111
 ```
 
-### Running locally
+For UI work, run the Go binary on port 11111 and start the Vite dev server, which proxies `/api` and `/apis` to it:
 
 ```bash
-# Build and start the embedded dashboard
-make && ./kubevirt-dashboard --listen 127.0.0.1:11111
+cd ui && bun run dev
 ```
+
+UI conventions (theme tokens, shared components, copy style) are in [AGENTS.md](AGENTS.md).
+
+### Dependency notes
+
+`kubevirt.io/client-go` 1.9 imports client-go packages that Kubernetes removed in 0.35, so `k8s.io/*` stays on 0.34.x until a KubeVirt SDK release supports newer clients. The `github.com/openshift/*` and `k8s.io/kube-openapi` replacements in `go.mod` follow the SDK's own `go.mod`; update them together with the SDK.
 
 ## License
 
