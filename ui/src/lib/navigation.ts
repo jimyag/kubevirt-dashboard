@@ -1,5 +1,6 @@
 import type { ComponentType } from "react"
 import {
+  Bell,
   Boxes,
   Camera,
   Cpu,
@@ -56,7 +57,10 @@ export const navSections: NavSection[] = [
   {
     label: "Home",
     tone: "home",
-    items: [{ name: "Overview", path: "/", icon: LayoutDashboard }],
+    items: [
+      { name: "Overview", path: "/", icon: LayoutDashboard },
+      { name: "Events", path: "/events", icon: Bell },
+    ],
   },
   {
     label: "Compute",

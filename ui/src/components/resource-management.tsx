@@ -47,6 +47,8 @@ import {
   resourcePathFromListPath,
 } from "@/resources/api-paths"
 import { RelatedPodsCard, type PodSummary } from "@/components/pod-access"
+import { EventList } from "@/components/events"
+import { eventsUrl } from "@/lib/events"
 
 type KubeResource = {
   apiVersion?: string
@@ -488,10 +490,11 @@ function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   )
 }
 
-function DetailTabs({ config, namespace, name, active }: { config: ResourceConfig; namespace?: string; name?: string; active: "overview" | "manifest" }) {
+function DetailTabs({ config, namespace, name, active }: { config: ResourceConfig; namespace?: string; name?: string; active: "overview" | "events" | "manifest" }) {
   const scopedNamespace = namespace || "_cluster"
   const tabs = [
     { id: "overview", label: "Overview", to: `${config.path}/${scopedNamespace}/${name}` },
+    { id: "events", label: "Events", to: `${config.path}/${scopedNamespace}/${name}/events` },
     { id: "manifest", label: "Manifest", to: `${config.path}/${scopedNamespace}/${name}/manifest` },
   ] as const
 
@@ -2549,6 +2552,22 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
           </div>
         </SectionCard>
       )}
+    </div>
+  )
+}
+
+export function ResourceEvents({ config }: { config: ResourceConfig }) {
+  const { namespace, name } = useParams()
+  const scopedNamespace = namespace && namespace !== "_cluster" ? namespace : undefined
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        breadcrumbs={[{ label: config.title, to: config.path }, ...(scopedNamespace ? [{ label: scopedNamespace }] : []), { label: name || "" }]}
+        title={name}
+        subtitle={<span className="font-mono text-xs">{config.kind}</span>}
+      />
+      <DetailTabs config={config} namespace={namespace} name={name} active="events" />
+      <EventList url={eventsUrl({ namespace: scopedNamespace, kind: config.kind, name })} showObject={false} />
     </div>
   )
 }

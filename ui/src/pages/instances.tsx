@@ -60,6 +60,7 @@ import {
   type KubeObject,
 } from "@/lib/kube"
 import { engineLabel, listSecurityGroups, useSgProvider, vmSecurityGroupRefs, type SecurityGroup } from "@/lib/security-groups"
+import { fetchInstanceUsage, formatBytes, useMetricsPoll } from "@/lib/metrics"
 import { cidrContains, ipv4Cidr, isDnsLabel, isQuantity } from "@/lib/validate"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
 
@@ -117,6 +118,8 @@ export function InstanceListPage() {
     return () => clearInterval(timer)
   }, [reload])
 
+  // Live CPU and memory of virt-launcher pods; null when metrics-server is not installed.
+  const usage = useMetricsPoll(() => fetchInstanceUsage(namespace), [namespace])
   const vmiByKey = useMemo(() => Object.fromEntries(data.vmis.map((vmi) => [`${vmi.metadata.namespace}/${vmi.metadata.name}`, vmi])), [data.vmis])
   const key = (vm: KubeObject) => `${vm.metadata.namespace}/${vm.metadata.name}`
   const counts = useMemo(() => {
@@ -213,17 +216,17 @@ export function InstanceListPage() {
                 <th className="h-9 w-10 px-3 text-left">
                   <input type="checkbox" className="size-4 accent-primary" aria-label="Select all instances" checked={allSelected} onChange={(e) => setSelected(e.target.checked ? Object.fromEntries(rows.map((vm) => [key(vm), true])) : {})} />
                 </th>
-                {["Name", "Status", "IP address", "Spec", "Network", provider ? "Security groups" : null, "Host", "Created", ""].filter((header) => header !== null).map((header, index) => (
+                {["Name", "Status", "IP address", "Spec", usage ? "Usage" : null, "Network", provider ? "Security groups" : null, "Host", "Created", ""].filter((header) => header !== null).map((header, index) => (
                   <th key={index} className={cn("h-10 px-3 text-left text-xs font-medium text-muted-foreground", header === "Created" && "text-right")}>{header}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading && data.vms.length === 0 ? (
-                <tr><td colSpan={10}><LoadingState /></td></tr>
+                <tr><td colSpan={11}><LoadingState /></td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <EmptyState
                       icon={Cpu}
                       title={data.vms.length === 0 ? "No instances yet" : "No matching instances"}
@@ -254,6 +257,16 @@ export function InstanceListPage() {
                       <div className="text-sm">{shape.label}</div>
                       <div className="text-xs text-muted-foreground">{shape.detail}</div>
                     </td>
+                    {usage && (
+                      <td className="px-3 py-2 text-xs tabular-nums">
+                        {usage[key(vm)] ? (
+                          <>
+                            <div>{usage[key(vm)].cpuCores.toFixed(2)} cores</div>
+                            <div className="text-muted-foreground">{formatBytes(usage[key(vm)].memoryBytes)}</div>
+                          </>
+                        ) : <span className="text-muted-foreground">-</span>}
+                      </td>
+                    )}
                     <td className="px-3 py-2">
                       {network.kind === "subnet" ? (
                         <Link to={`/vpc/subnets/${network.label}`} className="text-sm hover:text-primary transition-colors">{network.label}</Link>

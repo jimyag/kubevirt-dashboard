@@ -1,17 +1,16 @@
 import { useCallback, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate, Navigate } from "react-router-dom";
 import {
-  Terminal, FileCode, Info, ShieldCheck, Bell,
+  Terminal, FileCode, Info, ShieldCheck, Bell, Activity,
   Search, Check, Copy, MousePointer2, RefreshCw, Play, Square, RotateCcw, MonitorPlay, ChevronDown
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 
 import { VncConsole } from "./components/VncConsole";
 import { SerialConsole } from "./components/SerialConsole";
 import { AppSidebar } from "./components/app-sidebar";
 import { RelatedPodsCard } from "./components/pod-access";
-import { ResourceCreateDialog, ResourceDetail, ResourceList, ResourceManifest, type ResourceConfig } from "./components/resource-management";
+import { ResourceCreateDialog, ResourceDetail, ResourceEvents, ResourceList, ResourceManifest, type ResourceConfig } from "./components/resource-management";
 import { SiteHeader } from "./components/site-header";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
 import { Toaster } from "./components/ui/sonner";
@@ -31,6 +30,10 @@ import { kubeOvnAnnotations, relativeTime, replaceMap, useNetworkProfile, type K
 import { engineLabel, sgDetailPath, useSgProvider, vmSecurityGroupRefs } from "./lib/security-groups";
 import { CreateInstancePage, InstanceListPage } from "./pages/instances";
 import { OverviewPage } from "./pages/overview";
+import { EventsPage } from "./pages/events";
+import { EventList } from "./components/events";
+import { VmMonitoring } from "./components/monitoring";
+import { eventsUrl } from "./lib/events";
 import { InstanceSecurityGroupsDialog, SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
 import { CatalogPage, SettingsPage } from "./pages/settings";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
@@ -54,8 +57,6 @@ interface VM { metadata: ResourceMetadata; spec: { running?: boolean; runStrateg
 interface VMI { metadata: ResourceMetadata; status: { phase: string; interfaces?: Array<{ ipAddress?: string; name: string }>; nodeName?: string }; }
 interface DVStorageSpec { storageClassName?: string; accessModes?: string[]; volumeMode?: string; resources?: { requests?: { storage?: string } } }
 interface DV { metadata: ResourceMetadata; status?: { phase: string; progress?: string; claimName?: string; conditions?: Array<{ type: string; status: string; message?: string; reason?: string }>; }; spec: { storage?: DVStorageSpec; pvc?: DVStorageSpec; source?: Record<string, unknown>; }; }
-interface K8sEvent { metadata: ResourceMetadata; involvedObject: { kind: string; name: string; namespace: string; uid: string; }; reason: string; message: string; type: string; lastTimestamp: string; count: number; }
-interface MetricPoint { time: string; timestamp: number; cpuUsage: number; memoryUsage: number; }
 
 // --- Utils ---
 const getContext = () => localStorage.getItem("kube-context") || "";
@@ -65,7 +66,6 @@ const apiFetch = (url: string, options: RequestInit = {}) => {
   return fetch(url, { ...options, headers });
 };
 const asRecord = (value: unknown): UnknownRecord => value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
-const namedApiGroup = (group: unknown): group is { name: string } => asRecord(group).name !== undefined;
 const isVm = (value: unknown): value is VM => Boolean(asRecord(value).metadata && asRecord(value).spec);
 const vmPodSelectors = (name: string): Array<Record<string, string>> => [
   { "vm.kubevirt.io/name": name },
@@ -73,16 +73,6 @@ const vmPodSelectors = (name: string): Array<Record<string, string>> => [
   { "las.qiniu.io/vm-id": name },
   { "kubevirt.io/domain": name },
 ];
-const findVmPod = async (namespace: string, name: string) => {
-  for (const selector of vmPodSelectors(name)) {
-    const labelSelector = Object.entries(selector).map(([key, value]) => `${key}=${value}`).join(",");
-    const ps = await apiFetch(`/api/v1/namespaces/${namespace}/pods?labelSelector=${encodeURIComponent(labelSelector)}`);
-    if (!ps.ok) continue;
-    const pod = (await ps.json()).items?.[0];
-    if (pod) return pod;
-  }
-  return null;
-};
 
 // --- Shared Components ---
 function StatusBadge({ status }: { status?: string }) {
@@ -300,18 +290,15 @@ function DVList() {
 }
 
 function VMDetailContent() {
-  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [vmYaml, setVmYaml] = useState(""); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [events, setEvents] = useState<K8sEvent[]>([]); const [metrics, setMetrics] = useState<MetricPoint[]>([]); const [loading, setLoading] = useState(true); const [mStrategy, setMStrategy] = useState<string | null>(null); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider, providers: sgProviders } = useSgProvider(); const profile = useNetworkProfile();
+  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [vm, setVm] = useState<VM | null>(null); const [vmi, setVmi] = useState<VMI | null>(null); const [vmYaml, setVmYaml] = useState(""); const [associatedDVs, setAssociatedDVs] = useState<DV[]>([]); const [loading, setLoading] = useState(true); const [dialog, setDialog] = useState<string | null>(null); const { provider: sgProvider, providers: sgProviders } = useSgProvider(); const profile = useNetworkProfile();
   const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
   const fetchData = useCallback(async () => {
     try {
-      const [vmRes, vmiRes, yamlRes, eventsRes] = await Promise.all([ apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}`), apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}`), apiFetch(`/api/v1/yaml/virtualmachines/${namespace}/${name}`), apiFetch(`/api/v1/namespaces/${namespace}/events?fieldSelector=involvedObject.name=${name}`) ]);
-      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null; setVm(vmData); setVmi(vmiRes.ok ? await vmiRes.json() : null); if (yamlRes.ok) setVmYaml(await yamlRes.text()); if (eventsRes.ok) setEvents((await eventsRes.json()).items || []);
-      let strat = mStrategy; if (strat === null) { const apisRes = await apiFetch("/apis"); if (apisRes.ok) { strat = (await apisRes.json()).groups?.some((g: unknown) => namedApiGroup(g) && g.name === "metrics.kubevirt.io") ? "vmi" : "pod"; setMStrategy(strat); } }
-      if (strat === "vmi") { const m = await apiFetch(`/apis/metrics.kubevirt.io/v1beta1/namespaces/${namespace}/virtualmachineinstances/${name}`); if (m.ok) { const d = await m.json(); setMetrics(p => [...p.slice(-19), { timestamp: Date.now(), time: new Date().toISOString(), cpuUsage: d.status?.cpu?.usageCores || 0, memoryUsage: (d.status?.memory?.usageBytes || 0) / (1024 * 1024) }]); } }
-      else if (strat === "pod") { const pod = await findVmPod(namespace!, name!); if (pod) { const pm = await apiFetch(`/apis/metrics.k8s.io/v1beta1/namespaces/${namespace}/pods/${pod.metadata.name}`); if (pm.ok) { const d = await pm.json(); const cpu = d.containers?.[0]?.usage?.cpu || "0n"; const mem = d.containers?.[0]?.usage?.memory || "0Ki"; const pCpu = (c:string) => c.endsWith("n") ? parseInt(c)/1e9 : c.endsWith("u") ? parseInt(c)/1e6 : c.endsWith("m") ? parseInt(c)/1e3 : parseInt(c); const pMem = (m:string) => m.endsWith("Ki") ? parseInt(m)/1024 : m.endsWith("Mi") ? parseInt(m) : m.endsWith("Gi") ? parseInt(m)*1024 : parseInt(m)/(1024*1024); setMetrics(p => [...p.slice(-19), { timestamp: Date.now(), time: new Date().toISOString(), cpuUsage: pCpu(cpu), memoryUsage: pMem(mem) }]); } } }
+      const [vmRes, vmiRes, yamlRes] = await Promise.all([ apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}`), apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}`), apiFetch(`/api/v1/yaml/virtualmachines/${namespace}/${name}`) ]);
+      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null; setVm(vmData); setVmi(vmiRes.ok ? await vmiRes.json() : null); if (yamlRes.ok) setVmYaml(await yamlRes.text());
       if (vmData?.spec.template?.spec?.volumes) { const dns = vmData.spec.template.spec.volumes.filter((v) => v.dataVolume).map((v) => v.dataVolume!.name); if (dns.length > 0) { const ds = await Promise.all(dns.map((dn:string) => apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${dn}`).then(r => r.ok ? r.json() : null))); setAssociatedDVs(ds.filter(d => d !== null)); } }
     } finally { setLoading(false); }
-  }, [mStrategy, name, namespace]);
+  }, [name, namespace]);
   useEffect(() => { fetchData(); const t = setInterval(fetchData, 5000); return () => clearInterval(t); }, [fetchData]);
   const handleAction = async (a:string) => {
     let res: Response;
@@ -360,6 +347,7 @@ function VMDetailContent() {
   const tabs = [
     { id: "overview", name: "Overview", icon: Info },
     { id: "network", name: "Network & Security", icon: ShieldCheck },
+    { id: "monitoring", name: "Monitoring", icon: Activity },
     { id: "events", name: "Events", icon: Bell },
     { id: "console", name: "Console", icon: Terminal },
     { id: "vnc", name: "VNC", icon: MousePointer2 },
@@ -630,51 +618,6 @@ function VMDetailContent() {
               </div>
             </div>
 
-            {/* Metrics charts */}
-            {vmi && metrics.length > 0 && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <Panel title="CPU Usage">
-                    <div className="h-[160px] w-full">
-                      <ResponsiveContainer>
-                        <AreaChart data={metrics}>
-                          <defs>
-                            <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.1} />
-                              <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted" />
-                          <XAxis dataKey="time" hide />
-                          <YAxis fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `${v.toFixed(2)}`} />
-                          <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border)', fontSize: '11px' }} />
-                          <Area type="monotone" dataKey="cpuUsage" stroke="var(--primary)" fill="url(#colorCpu)" animationDuration={300} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </Panel>
-
-                <Panel title="Memory Usage (MB)">
-                    <div className="h-[160px] w-full">
-                      <ResponsiveContainer>
-                        <AreaChart data={metrics}>
-                          <defs>
-                            <linearGradient id="colorMem" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.1} />
-                              <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted" />
-                          <XAxis dataKey="time" hide />
-                          <YAxis fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(v)}`} />
-                          <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border)', fontSize: '11px' }} />
-                          <Area type="monotone" dataKey="memoryUsage" stroke="var(--primary)" fill="url(#colorMem)" animationDuration={300} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </Panel>
-              </div>
-            )}
-
             {/* Metadata, Storage, Networking */}
             <div className="grid gap-4 lg:grid-cols-3">
               <RelatedPodsCard
@@ -829,20 +772,10 @@ function VMDetailContent() {
           </div>
         )}
 
-        {activeTab === "events" && (
-          <DataTable
-            minWidth={680}
-            rows={[...events].sort((a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime())}
-            rowKey={(e) => e.metadata.uid}
-            empty={<EmptyState title="No events" />}
-            columns={[
-              { header: "Type", cell: (e) => <StatusDot status={e.type === "Normal" ? "Ready" : "Error"} label={e.type} /> },
-              { header: "Reason", cell: (e) => <span className="text-sm font-medium">{e.reason}</span> },
-              { header: "Message", cell: (e) => <span className="text-sm text-muted-foreground">{e.message}</span> },
-              { header: "Age", className: "text-right", cell: (e) => <span className="text-sm text-muted-foreground tabular-nums" title={e.lastTimestamp}>{relativeTime(e.lastTimestamp)}</span> },
-            ]}
-          />
-        )}
+        {activeTab === "monitoring" && <VmMonitoring namespace={namespace!} name={name!} running={vmi?.status.phase === "Running"} />}
+
+        {/* VM, VMI and migration events share the VM name; launcher pod events appear under the pod. */}
+        {activeTab === "events" && <EventList url={eventsUrl({ namespace, name })} />}
 
         {activeTab === "console" && <SerialConsole namespace={namespace!} name={name!} />}
         {activeTab === "vnc" && <VncConsole namespace={namespace!} name={name!} />}
@@ -875,6 +808,7 @@ function DVDetailContent() {
 
   const tabs = [
     { id: "overview", name: "Overview", icon: Info },
+    { id: "events", name: "Events", icon: Bell },
     { id: "manifest", name: "Manifest", icon: FileCode },
   ];
   const conditions = dv.status?.conditions || [];
@@ -985,6 +919,9 @@ function DVDetailContent() {
             </Panel>
           )}
         </div>
+      ) : activeTab === "events" ? (
+        // Import, upload and clone progress is reported on both the DataVolume and its PVC, which share the name.
+        <EventList url={eventsUrl({ namespace, name })} />
       ) : (
         <pre className="min-h-[400px] overflow-x-auto rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed text-foreground whitespace-pre">{dvYaml || "Loading..."}</pre>
       )}
@@ -997,6 +934,7 @@ function resourceRoutes(config: ResourceConfig) {
     <Route key={`${config.path}-list`} path={config.path} element={<ResourceList config={config} />} />,
     <Route key={`${config.path}-detail`} path={`${config.path}/:namespace/:name`} element={<ResourceDetail config={config} />} />,
     <Route key={`${config.path}-manifest`} path={`${config.path}/:namespace/:name/manifest`} element={<ResourceManifest config={config} />} />,
+    <Route key={`${config.path}-events`} path={`${config.path}/:namespace/:name/events`} element={<ResourceEvents config={config} />} />,
   ];
 }
 
@@ -1011,6 +949,7 @@ function App() {
             <Routes>
               <Route path="/" element={<OverviewPage />} />
               <Route path="/catalog" element={<CatalogPage />} />
+              <Route path="/events" element={<EventsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/vpc/vpcs" element={<VpcListPage />} />
               <Route path="/vpc/vpcs/:name" element={<VpcDetailPage />} />

@@ -1,8 +1,12 @@
+import { useState } from "react"
 import { Link } from "react-router-dom"
 import { CheckCircle2, ChevronRight, Network, Sparkles, XCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { ChoiceCard, PageHeader, Panel } from "@/components/console"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { ChoiceCard, ErrorNote, FieldRow, NativeSelect, PageHeader, Panel } from "@/components/console"
+import { prometheusBase, prometheusPresets, testPrometheus, usePrometheusConfig, writePrometheusConfig, type PrometheusConfig } from "@/lib/metrics"
 import {
   networkProfiles,
   useDiscovery,
@@ -20,6 +24,7 @@ const components: Array<{ name: string; description: string; check: [string, str
   { name: "Cilium", description: "eBPF networking and network policy", check: ["cilium.io/v2", "ciliumnetworkpolicies"] },
   { name: "Multus", description: "Secondary networks for instances", check: ["k8s.cni.cncf.io/v1", "network-attachment-definitions"] },
   { name: "Volume snapshots", description: "CSI snapshot support", check: ["snapshot.storage.k8s.io/v1", "volumesnapshots"] },
+  { name: "metrics-server", description: "Live host and instance CPU / memory", check: ["metrics.k8s.io/v1beta1", "nodes"] },
 ]
 
 const stackOrder: NetworkProfileId[] = ["kube-ovn-cilium", "kube-ovn", "cilium", "pod"]
@@ -77,6 +82,8 @@ export function SettingsPage() {
           </div>
         </Panel>
 
+      <MonitoringSettings />
+
       <Panel title="Installed components">
           <div className="grid gap-2 md:grid-cols-2">
             {components.map((component) => {
@@ -110,6 +117,67 @@ const catalog = [
   { to: "/networks", title: "Networks", description: "Services, Gateway API, Multus, Calico, Cilium, Kube-OVN" },
   { to: "/kubernetes", title: "Kubernetes", description: "Workloads, config, RBAC, policy, admission, cluster" },
 ]
+
+function MonitoringSettings() {
+  const saved = usePrometheusConfig()
+  const [form, setForm] = useState<PrometheusConfig>(() => saved || prometheusPresets[0].config)
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const [testing, setTesting] = useState(false)
+  const set = (patch: Partial<PrometheusConfig>) => {
+    setForm((current) => ({ ...current, ...patch }))
+    setStatus(null)
+  }
+  const test = async () => {
+    setTesting(true)
+    try {
+      const version = await testPrometheus(form)
+      setStatus({ ok: true, text: `Connected to Prometheus ${version}` })
+    } catch (err) {
+      setStatus({ ok: false, text: err instanceof Error ? err.message : "Connection failed" })
+    } finally {
+      setTesting(false)
+    }
+  }
+  const dirty = !saved || saved.namespace !== form.namespace || saved.service !== form.service || saved.port !== form.port || saved.scheme !== form.scheme
+
+  return (
+    <Panel
+      title="Monitoring"
+      description="Prometheus is reached through the Kubernetes API service proxy, so it does not need to be exposed. Stored per cluster in this browser."
+      bodyClassName="space-y-4"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-muted-foreground">Presets:</span>
+        {prometheusPresets.map((preset) => (
+          <Button key={preset.label} size="sm" variant="outline" className="h-7 text-xs" onClick={() => set(preset.config)}>{preset.label}</Button>
+        ))}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-4">
+        <FieldRow label="Namespace"><Input value={form.namespace} onChange={(e) => set({ namespace: e.target.value.trim() })} /></FieldRow>
+        <FieldRow label="Service"><Input value={form.service} onChange={(e) => set({ service: e.target.value.trim() })} /></FieldRow>
+        <FieldRow label="Port"><Input value={form.port} onChange={(e) => set({ port: e.target.value.trim() })} placeholder="9090 or web" /></FieldRow>
+        <FieldRow label="Scheme">
+          <NativeSelect value={form.scheme} onChange={(e) => set({ scheme: e.target.value === "https" ? "https" : "http" })}>
+            <option value="http">http</option>
+            <option value="https">https</option>
+          </NativeSelect>
+        </FieldRow>
+      </div>
+      <p className="font-mono text-xs text-muted-foreground break-all">{prometheusBase(form)}/api/v1/query_range</p>
+      {status && (
+        <div className={status.ok ? "flex items-center gap-2 text-sm" : ""}>
+          {status.ok ? <><CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />{status.text}</> : <ErrorNote>{status.text}</ErrorNote>}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" onClick={test} disabled={testing || !form.namespace || !form.service || !form.port}>{testing ? "Testing..." : "Test connection"}</Button>
+        <Button size="sm" onClick={() => writePrometheusConfig(form)} disabled={!dirty || !form.namespace || !form.service || !form.port}>{saved ? "Save" : "Enable Prometheus"}</Button>
+        {saved && <Button size="sm" variant="ghost" onClick={() => writePrometheusConfig(null)}>Disable</Button>}
+        <span className="text-xs text-muted-foreground">{saved ? `In use: ${saved.namespace}/${saved.service}:${saved.port}` : "Not configured: instance pages show live metrics-server samples only."}</span>
+      </div>
+    </Panel>
+  )
+}
 
 export function CatalogPage() {
   return (

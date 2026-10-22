@@ -4,7 +4,8 @@ import { Plus } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { DataTable, EmptyState, LoadingState, PageHeader, Panel, StatusDot } from "@/components/console"
+import { DataTable, EmptyState, LoadingState, PageHeader, Panel, StatusDot, UsageBar } from "@/components/console"
+import { fetchNodeUsage, formatBytes, parseBytes, parseCpuCores, useMetricsPoll } from "@/lib/metrics"
 import {
   asList,
   asRecord,
@@ -66,6 +67,7 @@ function CountRow({ label, value, to, children }: { label: ReactNode; value: Rea
 export function OverviewPage() {
   const profile = useNetworkProfile()
   const { providers } = useSgProvider()
+  const nodeUsage = useMetricsPoll(fetchNodeUsage, [])
 
   const { data, loading } = useAsync(async () => {
     const [vms, vmis, dvs, nodes, kvPods, events, vpcs, subnets, eips] = await Promise.all([
@@ -153,8 +155,26 @@ export function OverviewPage() {
               { header: "Host", cell: (node) => <Link to={`/nodes/_cluster/${node.metadata.name}`} className="font-medium hover:text-primary transition-colors">{node.metadata.name}</Link> },
               { header: "Status", cell: (node) => <StatusDot status={asRecord(node.spec).unschedulable ? "Cordoned" : nodeReady(node) ? "Ready" : "NotReady"} /> },
               { header: "Instances", className: "text-right", cell: (node) => <span className="tabular-nums">{data.vmis.filter((vmi) => str(asRecord(vmi.status).nodeName) === node.metadata.name).length}</span> },
-              { header: "vCPU", className: "text-right", cell: (node) => <span className="tabular-nums">{str(asRecord(asRecord(node.status).allocatable).cpu)}</span> },
-              { header: "Memory", className: "text-right", cell: (node) => <span className="tabular-nums">{formatGi(Math.round(parseQuantityGi(asRecord(asRecord(node.status).allocatable).memory)))}</span> },
+              {
+                header: nodeUsage ? "CPU used" : "vCPU",
+                className: nodeUsage ? "w-44" : "text-right",
+                cell: (node) => {
+                  const allocatable = parseCpuCores(asRecord(asRecord(node.status).allocatable).cpu)
+                  const used = nodeUsage?.[node.metadata.name]?.cpuCores
+                  if (used === undefined) return <span className="tabular-nums">{str(asRecord(asRecord(node.status).allocatable).cpu)}</span>
+                  return <UsageBar used={used} total={allocatable} label={`${used.toFixed(1)} / ${allocatable} cores`} />
+                },
+              },
+              {
+                header: nodeUsage ? "Memory used" : "Memory",
+                className: nodeUsage ? "w-48" : "text-right",
+                cell: (node) => {
+                  const allocatable = parseBytes(asRecord(asRecord(node.status).allocatable).memory)
+                  const used = nodeUsage?.[node.metadata.name]?.memoryBytes
+                  if (used === undefined) return <span className="tabular-nums">{formatGi(Math.round(parseQuantityGi(asRecord(asRecord(node.status).allocatable).memory)))}</span>
+                  return <UsageBar used={used} total={allocatable} label={`${formatBytes(used)} / ${formatBytes(allocatable)}`} />
+                },
+              },
             ]}
           />
 
