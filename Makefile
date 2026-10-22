@@ -9,7 +9,7 @@ LDFLAGS=-s -w -X github.com/jimmicro/version.GitTag=$(GIT_TAG) -X github.com/jim
 build: build-ui build-go
 
 build-ui:
-	cd ui && bun run build
+	cd ui && bun install --frozen-lockfile && bun run build
 
 build-go:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) .
