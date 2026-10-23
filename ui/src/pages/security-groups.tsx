@@ -215,11 +215,14 @@ function CreateSecurityGroupDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    if (!open) return
-    setNamespace(defaultNamespace)
-    setProvider(defaultProvider)
-  }, [defaultNamespace, defaultProvider, open])
+  const [previous, setPrevious] = useState({ open, defaultNamespace, defaultProvider })
+  if (open !== previous.open || defaultNamespace !== previous.defaultNamespace || defaultProvider !== previous.defaultProvider) {
+    setPrevious({ open, defaultNamespace, defaultProvider })
+    if (open) {
+      setNamespace(defaultNamespace)
+      setProvider(defaultProvider)
+    }
+  }
 
   const submit = async () => {
     // The name also becomes a label key suffix (sg.kubevirt-dashboard.io/<name>) for Cilium.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { Network, Plus, RefreshCw, Split, Trash2 } from "lucide-react"
 
@@ -108,9 +108,11 @@ export function CreateSubnetDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const set = (patch: Partial<typeof values>) => setValues((current) => ({ ...current, ...patch }))
-  useEffect(() => {
+  const [previous, setPrevious] = useState({ open, defaultVpc })
+  if (open !== previous.open || defaultVpc !== previous.defaultVpc) {
+    setPrevious({ open, defaultVpc })
     if (open) setValues((current) => ({ ...current, vpc: defaultVpc || current.vpc || "ovn-cluster" }))
-  }, [defaultVpc, open])
+  }
   // natOutgoing only applies to subnets of the default VPC; custom VPCs egress through NAT gateways.
   const defaultVpcSelected = values.vpc === "ovn-cluster"
   const validate = () => {

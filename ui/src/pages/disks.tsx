@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import {
   FileCode,
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { dvCreateConfig, keyValueText, mergePatch, parseKeyValueText, stringValue } from "@/resources/configs";
 import { Combobox, DataTable, EmptyState, FilterInput, KeyValueGrid, LoadingState, PageHeader, Panel, StatusDot, Toolbar } from "@/components/console";
 import { namespaceScope, useFilteredRows, type FilterField } from "@/lib/filter";
-import { relativeTime, replaceMap, useNamespaces } from "@/lib/kube";
+import { relativeTime, replaceMap, useAsync, useNamespaces } from "@/lib/kube";
 import { EventList } from "@/components/events";
 import { eventsUrl } from "@/lib/events";
 import { ManifestPanel } from "@/components/manifest";
@@ -47,22 +47,17 @@ const diskFields: FilterField<DiskRow>[] = [
 ]
 
 export function DVList() {
-  const [dvs, setDvs] = useState<DV[]>([]); const [vms, setVms] = useState<VM[]>([]); const [loading, setLoading] = useState(true); const [searchTerm, setSearchTerm] = useState(""); const namespaces = useNamespaces(); const [namespaceFilter, setNamespaceFilter] = useState("");
+  const [searchTerm, setSearchTerm] = useState(""); const namespaces = useNamespaces(); const [namespaceFilter, setNamespaceFilter] = useState("");
   const ns = useMemo(() => namespaceScope(namespaceFilter, namespaces), [namespaceFilter, namespaces]);
   const scope = ns.scope;
-  const loadDvs = useCallback(async () => {
-    setLoading(true);
-    try {
-      const prefix = scope === "all" ? "" : `/namespaces/${scope}`;
-      const [dvData, vmData] = await Promise.all([
-        apiFetch(`/apis/cdi.kubevirt.io/v1beta1${prefix}/datavolumes`).then(r => r.ok ? r.json() : { items: [] }),
-        apiFetch(`/apis/kubevirt.io/v1${prefix}/virtualmachines`).then(r => r.ok ? r.json() : { items: [] }),
-      ]);
-      setDvs(dvData.items || []);
-      setVms(vmData.items || []);
-    } finally { setLoading(false); }
-  }, [scope]);
-  useEffect(() => { loadDvs(); }, [loadDvs]);
+  const { data: { dvs, vms }, loading, reload: loadDvs } = useAsync(async () => {
+    const prefix = scope === "all" ? "" : `/namespaces/${scope}`;
+    const [dvData, vmData] = await Promise.all([
+      apiFetch(`/apis/cdi.kubevirt.io/v1beta1${prefix}/datavolumes`).then(r => r.ok ? r.json() : { items: [] }),
+      apiFetch(`/apis/kubevirt.io/v1${prefix}/virtualmachines`).then(r => r.ok ? r.json() : { items: [] }),
+    ]);
+    return { dvs: (dvData.items || []) as DV[], vms: (vmData.items || []) as VM[] };
+  }, { dvs: [] as DV[], vms: [] as VM[] }, [scope]);
   // Import and clone progress changes on its own.
   usePolling(loadDvs, 15000);
   const rows = useMemo(() => {
@@ -115,15 +110,12 @@ export function DVList() {
 }
 
 export function DVDetailContent() {
-  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const [dv, setDv] = useState<DV | null>(null); const [loading, setLoading] = useState(true); const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
-  const loadDv = useCallback(async () => {
-    setLoading(true);
-    try {
-      const r = await apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`);
-      if (r.ok) setDv(await r.json());
-    } finally { setLoading(false); }
-  }, [name, namespace]);
-  useEffect(() => { loadDv(); }, [loadDv]);
+  const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
+  const { data: dv, loading, reload: loadDv } = useAsync<DV | null>(async () => {
+    const r = await apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }, null, [name, namespace]);
   usePolling(loadDv, 10000);
 
   if (loading && !dv) return <LoadingState />;

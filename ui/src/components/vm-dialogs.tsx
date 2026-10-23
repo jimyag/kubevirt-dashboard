@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Check,
   Copy,
@@ -75,9 +75,13 @@ export function VmActionDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (open) setValues(Object.fromEntries(fields.map((field) => [field.name, field.defaultValue])));
-  }, [fields, open]);
+  const defaults = Object.fromEntries(fields.map((field) => [field.name, field.defaultValue]));
+  const defaultsKey = JSON.stringify(defaults);
+  const [previous, setPrevious] = useState({ open, defaultsKey });
+  if (open !== previous.open || defaultsKey !== previous.defaultsKey) {
+    setPrevious({ open, defaultsKey });
+    if (open) setValues(defaults);
+  }
 
   const submit = async () => {
     setSaving(true);
