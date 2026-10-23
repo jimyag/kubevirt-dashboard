@@ -12,10 +12,10 @@ export const ciliumNetworkPoliciesConfig: ResourceConfig = {
     kind: "CiliumNetworkPolicy",
     createFields: [
       ...shared.namespaceNameFields("example-cilium-policy"),
-      { name: "selectorKey", label: "Endpoint Selector Key", section: "Selector", defaultValue: "app" },
-      { name: "selectorValue", label: "Endpoint Selector Value", section: "Selector", defaultValue: "example" },
+      { name: "selectorKey", label: "Endpoint selector key", section: "Selector", defaultValue: "app" },
+      { name: "selectorValue", label: "Endpoint selector value", section: "Selector", defaultValue: "example" },
       { name: "cidr", label: "Allowed CIDR", section: "Ingress", defaultValue: "0.0.0.0/0" },
-      { name: "port", label: "TCP Port", section: "Ingress", type: "number", defaultValue: "80" },
+      { name: "port", label: "TCP port", section: "Ingress", type: "number", defaultValue: "80" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "cilium.io/v2",

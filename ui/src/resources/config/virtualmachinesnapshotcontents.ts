@@ -8,7 +8,7 @@ export const virtualmachinesnapshotcontentsConfig: ResourceConfig = shared.snaps
     subtitle: "Manage KubeVirt VirtualMachineSnapshotContent resources",
     kind: "VirtualMachineSnapshotContent",
     namespaced: true,
-    createFields: [...shared.namespaceNameFields("example-snapshot-content"), { name: "snapshotName", label: "Snapshot Name", section: "Snapshot", defaultValue: "example-snapshot" }, { name: "sourceVm", label: "Source VM", section: "Source", defaultValue: "example-vm" }],
+    createFields: [...shared.namespaceNameFields("example-snapshot-content"), { name: "snapshotName", label: "Snapshot name", section: "Snapshot", defaultValue: "example-snapshot" }, { name: "sourceVm", label: "Source VM", section: "Source", defaultValue: "example-vm" }],
     buildSpec: (values) => ({ virtualMachineSnapshotName: shared.stringValue(values.snapshotName, "example-snapshot"), source: { apiGroup: "kubevirt.io", kind: "VirtualMachine", name: shared.stringValue(values.sourceVm, "example-vm") } }),
     statusPath: ["status", "readyToUse"],
   });

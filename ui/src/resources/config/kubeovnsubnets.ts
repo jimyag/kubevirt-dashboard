@@ -12,11 +12,11 @@ export const kubeOvnSubnetsConfig: ResourceConfig = {
     kind: "Subnet",
     createFields: [
       ...shared.nameOnlyFields("example-subnet"),
-      { name: "cidrBlock", label: "CIDR Block", section: "Subnet", defaultValue: "10.16.0.0/16" },
+      { name: "cidrBlock", label: "CIDR block", section: "Subnet", defaultValue: "10.16.0.0/16" },
       { name: "gateway", label: "Gateway", section: "Subnet", defaultValue: "10.16.0.1" },
       { name: "protocol", label: "Protocol", section: "Subnet", type: "select", defaultValue: "IPv4", options: [{ label: "IPv4", value: "IPv4" }, { label: "IPv6", value: "IPv6" }, { label: "Dual", value: "Dual" }] },
       { name: "vpc", label: "VPC", section: "Subnet", defaultValue: "ovn-cluster" },
-      { name: "natOutgoing", label: "NAT Outgoing", section: "Subnet", type: "checkbox", defaultValue: true },
+      { name: "natOutgoing", label: "NAT outgoing", section: "Subnet", type: "checkbox", defaultValue: true },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "kubeovn.io/v1",

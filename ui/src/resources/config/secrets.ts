@@ -6,13 +6,14 @@ export const secretsConfig: ResourceConfig = {
     path: "/kubevirt/operations/ssh-keys",
     title: "SSH Keys",
     subtitle: "Manage Secret resources used for SSH access",
-    listPath: "/api/v1/secrets?labelSelector=kubevirt-manager.io/managed%3Dtrue,kubevirt-manager.io/ssh%3Dtrue",
+    listPath: "/api/v1/secrets",
+    listQuery: "labelSelector=kubevirt-manager.io/managed%3Dtrue,kubevirt-manager.io/ssh%3Dtrue",
     namespaced: true,
     resourcePath: "/api/v1",
     kind: "Secret",
     createFields: [
       ...shared.namespaceNameFields("example-ssh-key"),
-      { name: "key", label: "SSH Public Key", type: "textarea", defaultValue: "ssh-rsa AAAA..." },
+      { name: "key", label: "SSH public key", type: "textarea", defaultValue: "ssh-rsa AAAA..." },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "v1",
@@ -31,7 +32,7 @@ export const secretsConfig: ResourceConfig = {
       items: [
         { label: "Type", value: r.type },
         { label: "Keys", value: Object.keys(shared.getRecord(r.data)) },
-        { label: "String Data Keys", value: Object.keys(shared.getRecord(r.stringData)) },
+        { label: "String data keys", value: Object.keys(shared.getRecord(r.stringData)) },
       ],
     }],
     extraColumns: [

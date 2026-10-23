@@ -13,10 +13,10 @@ export const kubernetesServicesConfig: ResourceConfig = {
     createFields: [
       ...shared.namespaceNameFields("example-service"),
       { name: "type", label: "Type", section: "Service", type: "select", defaultValue: "ClusterIP", options: [{ label: "ClusterIP", value: "ClusterIP" }, { label: "NodePort", value: "NodePort" }, { label: "LoadBalancer", value: "LoadBalancer" }] },
-      { name: "selectorKey", label: "Selector Key", section: "Selector", defaultValue: "app" },
-      { name: "selectorValue", label: "Selector Value", section: "Selector", defaultValue: "example" },
+      { name: "selectorKey", label: "Selector key", section: "Selector", defaultValue: "app" },
+      { name: "selectorValue", label: "Selector value", section: "Selector", defaultValue: "example" },
       { name: "port", label: "Port", section: "Ports", type: "number", defaultValue: "80" },
-      { name: "targetPort", label: "Target Port", section: "Ports", type: "number", defaultValue: "80" },
+      { name: "targetPort", label: "Target port", section: "Ports", type: "number", defaultValue: "80" },
       { name: "protocol", label: "Protocol", section: "Ports", type: "select", defaultValue: "TCP", options: [{ label: "TCP", value: "TCP" }, { label: "UDP", value: "UDP" }, { label: "SCTP", value: "SCTP" }] },
     ],
     buildCreateResource: (values) => ({

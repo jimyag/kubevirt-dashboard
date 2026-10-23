@@ -10,9 +10,9 @@ export const virtualmachineinstancesConfig: ResourceConfig = shared.kubevirtReso
     namespaced: true,
     createFields: [
       ...shared.namespaceNameFields("example-vmi"),
-      { name: "cpu", label: "CPU Cores", section: "Compute", type: "number", defaultValue: "1" },
+      { name: "cpu", label: "CPU cores", section: "Compute", type: "number", defaultValue: "1" },
       { name: "memory", label: "Memory", section: "Compute", defaultValue: "1Gi" },
-      { name: "containerImage", label: "Container Disk Image", section: "Storage", defaultValue: "quay.io/containerdisks/fedora:latest" },
+      { name: "containerImage", label: "Container disk image", section: "Storage", defaultValue: "quay.io/containerdisks/fedora:latest" },
     ],
     buildSpec: (values) => ({
       domain: {

@@ -14,7 +14,7 @@ export const endpointSlicesConfig: ResourceConfig = {
     allowDelete: false,
     statusPath: ["addressType"],
     detailSections: shared.kubernetesEndpointSliceDetailSections,
-    extraColumns: [{ label: "Address Type", value: (r) => String(shared.getRecord(r).addressType || "N/A") }, { label: "Endpoints", value: (r) => String((shared.getRecord(r).endpoints as unknown[] | undefined)?.length || 0) }],
+    extraColumns: [{ label: "Address type", value: (r) => String(shared.getRecord(r).addressType || "N/A") }, { label: "Endpoints", value: (r) => String((shared.getRecord(r).endpoints as unknown[] | undefined)?.length || 0) }],
     createTemplate: `apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:

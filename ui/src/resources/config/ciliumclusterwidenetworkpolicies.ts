@@ -12,8 +12,8 @@ export const ciliumClusterwideNetworkPoliciesConfig: ResourceConfig = {
     kind: "CiliumClusterwideNetworkPolicy",
     createFields: [
       ...shared.nameOnlyFields("example-cilium-cluster-policy"),
-      { name: "selectorKey", label: "Endpoint Selector Key", section: "Selector", defaultValue: "app" },
-      { name: "selectorValue", label: "Endpoint Selector Value", section: "Selector", defaultValue: "example" },
+      { name: "selectorKey", label: "Endpoint selector key", section: "Selector", defaultValue: "app" },
+      { name: "selectorValue", label: "Endpoint selector value", section: "Selector", defaultValue: "example" },
       { name: "cidr", label: "Allowed CIDR", section: "Ingress", defaultValue: "0.0.0.0/0" },
     ],
     buildCreateResource: (values) => ({

@@ -10,7 +10,7 @@ export const kubeOvnVipsConfig: ResourceConfig = shared.kubeOvnResourceConfig({
     createFields: [
       { name: "subnet", label: "Subnet", section: "VIP", defaultValue: "example-subnet" },
       { name: "v4ip", label: "IPv4", section: "VIP", defaultValue: "", placeholder: "optional" },
-      { name: "attachSubnets", label: "Attach Subnets", section: "VIP", defaultValue: "", placeholder: "comma separated" },
+      { name: "attachSubnets", label: "Attach subnets", section: "VIP", defaultValue: "", placeholder: "comma separated" },
     ],
     buildSpec: (values) => ({ subnet: shared.stringValue(values.subnet), ...(shared.stringValue(values.v4ip) ? { v4ip: shared.stringValue(values.v4ip) } : {}), attachSubnets: shared.csvList(values.attachSubnets) }),
     statusPath: ["spec", "subnet"],

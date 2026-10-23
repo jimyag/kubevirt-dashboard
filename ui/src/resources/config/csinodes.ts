@@ -14,10 +14,10 @@ export const csinodesConfig: ResourceConfig = {
     kind: "CSINode",
     createFields: [
       ...shared.nameOnlyFields("example-node"),
-      { name: "driverName", label: "Driver Name", section: "Driver", defaultValue: "example.csi.io" },
+      { name: "driverName", label: "Driver name", section: "Driver", defaultValue: "example.csi.io" },
       { name: "nodeID", label: "Node ID", section: "Driver", defaultValue: "example-node" },
-      { name: "topologyKeys", label: "Topology Keys", section: "Topology", defaultValue: "", placeholder: "topology.kubernetes.io/zone" },
-      { name: "allocatableCount", label: "Allocatable Count", section: "Driver", type: "number", defaultValue: "0" },
+      { name: "topologyKeys", label: "Topology keys", section: "Topology", defaultValue: "", placeholder: "topology.kubernetes.io/zone" },
+      { name: "allocatableCount", label: "Allocatable count", section: "Driver", type: "number", defaultValue: "0" },
     ],
     buildCreateResource: (values) => {
       const allocatableCount = shared.numberValue(values.allocatableCount, 0);
@@ -39,7 +39,7 @@ export const csinodesConfig: ResourceConfig = {
     detailSections: shared.csiNodeDetailSections,
     extraColumns: [
       { label: "Drivers", value: (r) => String((shared.getRecord(r.spec).drivers as unknown[] | undefined)?.length || 0) },
-      { label: "First Driver", value: (r) => String(((shared.getRecord(r.spec).drivers as Record<string, unknown>[] | undefined)?.[0]?.name) || "N/A") },
+      { label: "First driver", value: (r) => String(((shared.getRecord(r.spec).drivers as Record<string, unknown>[] | undefined)?.[0]?.name) || "N/A") },
     ],
     createTemplate: `apiVersion: storage.k8s.io/v1
 kind: CSINode

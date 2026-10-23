@@ -12,12 +12,12 @@ export const httproutesConfig: ResourceConfig = {
     kind: "HTTPRoute",
     createFields: [
       ...shared.namespaceNameFields("example-http-route"),
-      { name: "parentGateway", label: "Parent Gateway", section: "Parent", defaultValue: "example-gateway" },
-      { name: "sectionName", label: "Listener Section", section: "Parent", defaultValue: "http", placeholder: "optional" },
+      { name: "parentGateway", label: "Parent gateway", section: "Parent", defaultValue: "example-gateway" },
+      { name: "sectionName", label: "Listener section", section: "Parent", defaultValue: "http", placeholder: "optional" },
       { name: "host", label: "Hostname", section: "Match", defaultValue: "example.local" },
-      { name: "path", label: "Path Prefix", section: "Match", defaultValue: "/" },
-      { name: "serviceName", label: "Backend Service", section: "Backend", defaultValue: "example-service" },
-      { name: "servicePort", label: "Backend Port", section: "Backend", type: "number", defaultValue: "80" },
+      { name: "path", label: "Path prefix", section: "Match", defaultValue: "/" },
+      { name: "serviceName", label: "Backend service", section: "Backend", defaultValue: "example-service" },
+      { name: "servicePort", label: "Backend port", section: "Backend", type: "number", defaultValue: "80" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "gateway.networking.k8s.io/v1",

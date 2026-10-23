@@ -12,7 +12,7 @@ export const gatewayclassesConfig: ResourceConfig = {
     kind: "GatewayClass",
     createFields: [
       ...shared.nameOnlyFields("example-gateway-class"),
-      { name: "controllerName", label: "Controller Name", section: "Gateway", defaultValue: "example.com/gateway-controller" },
+      { name: "controllerName", label: "Controller name", section: "Gateway", defaultValue: "example.com/gateway-controller" },
       { name: "description", label: "Description", section: "Gateway", defaultValue: "" },
     ],
     buildCreateResource: (values) => ({

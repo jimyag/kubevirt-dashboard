@@ -14,7 +14,7 @@ export const calicoGlobalNetworkPoliciesConfig: ResourceConfig = {
       ...shared.nameOnlyFields("example-global-policy"),
       { name: "selector", label: "Selector", section: "Policy", defaultValue: "all()" },
       { name: "order", label: "Order", section: "Policy", type: "number", defaultValue: "100" },
-      { name: "types", label: "Types", section: "Policy", type: "select", defaultValue: "Ingress", options: [{ label: "Ingress", value: "Ingress" }, { label: "Egress", value: "Egress" }, { label: "Ingress and Egress", value: "Both" }] },
+      { name: "types", label: "Types", section: "Policy", type: "select", defaultValue: "Ingress", options: [{ label: "Ingress", value: "Ingress" }, { label: "Egress", value: "Egress" }, { label: "Ingress and egress", value: "Both" }] },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "crd.projectcalico.org/v1",

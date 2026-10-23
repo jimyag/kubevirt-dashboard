@@ -8,7 +8,7 @@ export const virtualmachineinstancemigrationsConfig: ResourceConfig = shared.kub
     subtitle: "Manage KubeVirt VirtualMachineInstanceMigration resources",
     kind: "VirtualMachineInstanceMigration",
     namespaced: true,
-    createFields: [...shared.namespaceNameFields("example-migration"), { name: "vmiName", label: "VMI Name", section: "Migration", defaultValue: "example-vm" }],
+    createFields: [...shared.namespaceNameFields("example-migration"), { name: "vmiName", label: "VMI name", section: "Migration", defaultValue: "example-vm" }],
     buildSpec: (values) => ({ vmiName: shared.stringValue(values.vmiName, "example-vm") }),
     statusPath: ["status", "phase"],
     extraColumns: [{ label: "Phase", value: (r) => String(shared.getRecord(r.status).phase || "N/A") }, { label: "VMI", value: (r) => String(shared.getRecord(r.spec).vmiName || "N/A") }],

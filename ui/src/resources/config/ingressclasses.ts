@@ -10,7 +10,7 @@ export const ingressClassesConfig: ResourceConfig = {
     namespaced: false,
     resourcePath: "/apis/networking.k8s.io/v1",
     kind: "IngressClass",
-    createFields: [...shared.nameOnlyFields("example-ingress-class"), { name: "controller", label: "Controller", section: "Controller", defaultValue: "k8s.io/ingress-nginx" }, { name: "isDefault", label: "Default Class", section: "Controller", type: "checkbox", defaultValue: false }],
+    createFields: [...shared.nameOnlyFields("example-ingress-class"), { name: "controller", label: "Controller", section: "Controller", defaultValue: "k8s.io/ingress-nginx" }, { name: "isDefault", label: "Default class", section: "Controller", type: "checkbox", defaultValue: false }],
     buildCreateResource: (values) => ({
       apiVersion: "networking.k8s.io/v1",
       kind: "IngressClass",

@@ -13,10 +13,10 @@ export const calicoNetworkPoliciesConfig: ResourceConfig = {
     createFields: [
       ...shared.namespaceNameFields("example-calico-policy"),
       { name: "selector", label: "Selector", section: "Policy", defaultValue: "all()" },
-      { name: "types", label: "Types", section: "Policy", type: "select", defaultValue: "Ingress", options: [{ label: "Ingress", value: "Ingress" }, { label: "Egress", value: "Egress" }, { label: "Ingress and Egress", value: "Both" }] },
+      { name: "types", label: "Types", section: "Policy", type: "select", defaultValue: "Ingress", options: [{ label: "Ingress", value: "Ingress" }, { label: "Egress", value: "Egress" }, { label: "Ingress and egress", value: "Both" }] },
       { name: "action", label: "Action", section: "Rule", type: "select", defaultValue: "Allow", options: [{ label: "Allow", value: "Allow" }, { label: "Deny", value: "Deny" }, { label: "Pass", value: "Pass" }, { label: "Log", value: "Log" }] },
       { name: "protocol", label: "Protocol", section: "Rule", defaultValue: "TCP" },
-      { name: "destinationPort", label: "Destination Port", section: "Rule", type: "number", defaultValue: "80" },
+      { name: "destinationPort", label: "Destination port", section: "Rule", type: "number", defaultValue: "80" },
     ],
     buildCreateResource: (values) => {
       const types = shared.stringValue(values.types, "Ingress") === "Both" ? ["Ingress", "Egress"] : [shared.stringValue(values.types, "Ingress")];

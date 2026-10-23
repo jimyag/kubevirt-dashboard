@@ -13,7 +13,7 @@ export const virtualmachinerestoresConfig: ResourceConfig = {
     createFields: [
       ...shared.namespaceNameFields("example-restore"),
       { name: "targetVm", label: "Target VM", defaultValue: "example-vm", required: true },
-      { name: "snapshotName", label: "Snapshot Name", defaultValue: "example-snapshot", required: true },
+      { name: "snapshotName", label: "Snapshot name", defaultValue: "example-snapshot", required: true },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "snapshot.kubevirt.io/v1beta1",
@@ -31,10 +31,10 @@ export const virtualmachinerestoresConfig: ResourceConfig = {
         title: "Restore",
         items: [
           { label: "Snapshot", value: spec.virtualMachineSnapshotName },
-          { label: "Target Kind", value: shared.getRecord(spec.target).kind },
+          { label: "Target kind", value: shared.getRecord(spec.target).kind },
           { label: "Target VM", value: shared.getRecord(spec.target).name },
           { label: "Complete", value: status.complete },
-          { label: "Restore Time", value: status.restoreTime },
+          { label: "Restore time", value: status.restoreTime },
         ],
       }];
     },

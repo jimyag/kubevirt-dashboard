@@ -1,73 +1,48 @@
-# React + TypeScript + Vite
+# KubeVirt Dashboard UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite frontend, embedded into the Go binary from `ui/dist`.
 
-Currently, two official plugins are available:
+## Commands
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+bun install        # install dependencies (bun.lock is the only lock file)
+bun run dev        # Vite dev server; proxies /api and /apis to 127.0.0.1:11111
+bun run build      # type-check and build into dist/
+bun run lint       # ESLint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Run the Go binary (`./kubevirt-dashboard --listen 127.0.0.1:11111`) for the dev server to proxy to.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Layout
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+| Path | Contents |
+|------|----------|
+| `src/App.tsx` | Routes |
+| `src/pages/` | Console pages: overview, instances and create wizard, VPCs and subnets, elastic IPs and NAT, security groups, events, settings |
+| `src/pages/instance-detail.tsx`, `src/pages/disks.tsx` | Instance detail tabs; disk list and detail |
+| `src/pages/reserved-ips.tsx`, `src/pages/address-groups.tsx` | Reserved IPs (Kube-OVN `Vip`); Cilium address groups (`CiliumCIDRGroup`) |
+| `src/components/console.tsx` | Shared console components (page header, tables, panels, status, dialogs) |
+| `src/components/resource-management.tsx` | Generic list, detail, manifest, create and edit views used by the Resource Catalog |
+| `src/components/resource-overviews.tsx`, `src/components/detail-parts.tsx` | Pod, workload and node detail layouts; shared detail tables and sections |
+| `src/components/instance-eip.tsx` | Elastic IP bindings on the instance network tab |
+| `src/components/instance-network.tsx`, `src/lib/vm-network.ts` | Instance NICs (Multus attachments) and bandwidth limits |
+| `src/components/vpc-routing.tsx`, `src/components/ip-pools.tsx`, `src/lib/vpc.ts` | Route table and peering editors, IP pool tables and dialogs, and their Kube-OVN helpers |
+| `src/pages/vpc-network.tsx` | Route table, peering connection and IP pool list pages |
+| `src/components/yaml-editor.tsx`, `src/components/manifest.tsx` | YAML viewer and editor (search, folding, diff) and the manifest tab |
+| `src/components/ui/` | shadcn/ui components; do not edit them directly |
+| `src/resources/config/` | One `ResourceConfig` per API resource: paths, columns, create form and actions |
+| `src/lib/kube.ts` | API fetch helpers, discovery and network stack detection |
+| `src/lib/navigation.ts` | Navigation sections and their second-level groups, shared by the sidebar, breadcrumbs and command palette |
+| `src/lib/security-groups.ts` | Security group model and its Kube-OVN / Cilium mappings |
+| `src/lib/metrics.ts` | metrics-server and Prometheus queries |
+| `src/lib/i18n.ts`, `src/lib/locales/` | `t()` translations (English keys, Simplified Chinese dictionary) |
+| `src/lib/filter.ts` | `field:value` list filtering, namespace scoping and paging |
+| `src/lib/polling.ts` | `usePolling`: interval refresh that pauses while the tab is hidden |
+| `src/lib/detail-values.ts`, `src/lib/vm-pages.ts` | Value helpers for detail views; VM types and helpers |
+| `src/pages/helm.tsx`, `src/lib/helm.ts` | Helm releases: list, detail, values editor, history and install; client for `/api/v1/helm` |
+| `src/pages/monitoring-settings.tsx`, `src/lib/monitoring-presets.ts` | Settings → Monitoring: deployed backends, metrics source and Helm deploy presets |
+| `src/lib/nat.ts` | Kube-OVN NAT kinds (VPC NAT gateway and OVN native): columns, forms and specs |
+
+All requests go to the Kubernetes API through the Go backend proxy (`/api`, `/apis`) with the selected context in the `X-Kube-Context` header.
+
+Theme, components and copy rules are in [../AGENTS.md](../AGENTS.md).

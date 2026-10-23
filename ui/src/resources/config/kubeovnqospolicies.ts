@@ -8,7 +8,7 @@ export const kubeOvnQoSPoliciesConfig: ResourceConfig = shared.kubeOvnResourceCo
     subtitle: "Manage Kube-OVN QoSPolicy resources",
     kind: "QoSPolicy",
     createFields: [
-      { name: "bandwidthLimitRules", label: "Bandwidth Limit Rules", section: "QoS", type: "textarea", defaultValue: "", placeholder: "advanced YAML/JSON-like values can be edited in manifest after create" },
+      { name: "bandwidthLimitRules", label: "Bandwidth limit rules", section: "QoS", type: "textarea", defaultValue: "", placeholder: "advanced YAML/JSON-like values can be edited in manifest after create" },
     ],
     buildSpec: () => ({}),
     statusPath: ["status", "shared"],

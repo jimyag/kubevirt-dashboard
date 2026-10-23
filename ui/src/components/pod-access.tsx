@@ -6,9 +6,9 @@ import { FitAddon } from "xterm-addon-fit"
 import "xterm/css/xterm.css"
 
 import { cn } from "@/lib/utils"
+import { StatusDot } from "@/components/console"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
   Dialog,
@@ -18,6 +18,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { t } from "@/lib/i18n"
 
 type ContainerInfo = {
   name: string
@@ -70,14 +71,6 @@ const selectorText = (selector?: Record<string, string>) =>
     .map(([key, value]) => `${key}=${value}`)
     .join(",")
 
-const podStatusVariant = (phase?: string) => {
-  const lower = (phase || "").toLowerCase()
-  if (lower.includes("running") || lower.includes("succeeded")) return "success"
-  if (lower.includes("failed") || lower.includes("error")) return "danger"
-  if (lower.includes("pending") || lower.includes("unknown")) return "warning"
-  return "outline"
-}
-
 const containersForPod = (pod: PodSummary) => {
   const declared = pod.spec?.containers || []
   const statuses = pod.status?.containerStatuses || []
@@ -111,7 +104,7 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
       if (!response.ok) throw new Error(await response.text())
       setLogs(await response.text())
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load pod logs")
+      setError(err instanceof Error ? err.message : t("Failed to load pod logs"))
       setLogs("")
     } finally {
       setLoading(false)
@@ -126,13 +119,12 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="gap-2">
-          <ScrollText className="h-4 w-4" />
-          Logs
+          <ScrollText className="h-4 w-4" />{t("Logs")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Pod Logs</DialogTitle>
+          <DialogTitle>{t("Pod Logs")}</DialogTitle>
           <DialogDescription>{pod.metadata.namespace}/{pod.metadata.name}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -144,8 +136,7 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
             {containers.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
           </select>
           <Button size="sm" variant="outline" onClick={loadLogs} className="gap-2" disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}
           </Button>
         </div>
         {error ? (
@@ -155,7 +146,7 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
           </div>
         ) : (
           <pre className="max-h-[65vh] min-h-[420px] overflow-auto rounded-lg border bg-muted/30 p-4 font-mono text-xs text-foreground whitespace-pre-wrap">
-            {loading ? "Loading..." : logs || "No logs returned"}
+            {loading ? t("Loading...") : logs || t("No logs returned")}
           </pre>
         )}
       </DialogContent>
@@ -295,18 +286,17 @@ function PodShellDialog({ pod }: { pod: PodSummary }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="gap-2">
-          <TerminalIcon className="h-4 w-4" />
-          Shell
+          <TerminalIcon className="h-4 w-4" />{t("Shell")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Pod Shell</DialogTitle>
+          <DialogTitle>{t("Pod Shell")}</DialogTitle>
           <DialogDescription>{pod.metadata.namespace}/{pod.metadata.name}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:items-center">
           <label className="grid gap-1">
-            <span className="text-xs font-medium text-muted-foreground">Container</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("Container")}</span>
             <select
               value={selectedContainer}
               onChange={(event) => setContainer(event.target.value)}
@@ -316,18 +306,18 @@ function PodShellDialog({ pod }: { pod: PodSummary }) {
             </select>
           </label>
           <label className="grid gap-1">
-            <span className="text-xs font-medium text-muted-foreground">Command</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("Command")}</span>
             <Input
               value={command}
               onChange={(event) => setCommand(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") connectShell()
               }}
-              placeholder="sh, bash, ash, or /bin/sh"
+              placeholder={t("sh, bash, ash, or /bin/sh")}
             />
           </label>
           <Button type="button" size="sm" onClick={status === "connected" ? disconnectShell : connectShell} disabled={status === "connecting"}>
-            {status === "connected" ? "Disconnect" : "Connect"}
+            {status === "connected" ? t("Disconnect") : t("Connect")}
           </Button>
           <Badge variant={status === "connected" ? "success" : status === "error" ? "danger" : "outline"}>{status}</Badge>
         </div>
@@ -349,14 +339,14 @@ export function PodAccessButtons({ pod }: { pod: PodSummary }) {
   )
 }
 
-export function RelatedPodsCard({ title = "Related Pods", description, namespace, selector, selectors, podName, pods, className }: RelatedPodsCardProps) {
+export function RelatedPodsCard({ title, description, namespace, selector, selectors, podName, pods, className }: RelatedPodsCardProps) {
   const [items, setItems] = useState<PodSummary[]>(pods || [])
   const [loading, setLoading] = useState(!pods)
   const [error, setError] = useState("")
-  const selectorValues = useMemo(
-    () => (selectors && selectors.length > 0 ? selectors : selector ? [selector] : []).map(selectorText).filter(Boolean),
-    [selector, selectors]
-  )
+  // Callers often build selectors inline on every render (the VM page refreshes every 5s); key on
+  // the selector text so a new array with the same content does not reload the list.
+  const selectorKey = JSON.stringify((selectors && selectors.length > 0 ? selectors : selector ? [selector] : []).map(selectorText).filter(Boolean))
+  const selectorValues = useMemo(() => JSON.parse(selectorKey) as string[], [selectorKey])
   const load = useCallback(async () => {
     if (pods) {
       setItems(pods)
@@ -390,7 +380,7 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
       if (lastError) throw new Error(lastError)
       setItems([])
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load related pods")
+      setError(err instanceof Error ? err.message : t("Failed to load related pods"))
       setItems([])
     } finally {
       setLoading(false)
@@ -402,60 +392,51 @@ export function RelatedPodsCard({ title = "Related Pods", description, namespace
   }, [load])
 
   return (
-    <Card className={className}>
-      <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="text-sm">{title}</CardTitle>
-            {description && <CardDescription>{description}</CardDescription>}
-          </div>
-          <Button size="sm" variant="outline" onClick={load} className="gap-2" disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
+    <section className={cn("rounded-lg border bg-card", className)}>
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5">
+        <div>
+          <h2 className="text-sm font-semibold">{title ?? t("Related Pods")}</h2>
+          {description && <p className="text-xs text-muted-foreground">{description}</p>}
         </div>
-      </CardHeader>
-      <CardContent>
-        {error ? (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-foreground">
-            <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
-            <span className="break-words">{error}</span>
-          </div>
-        ) : loading ? (
-          <div className="flex h-24 items-center justify-center gap-2">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
-            <span className="text-sm text-muted-foreground">Loading...</span>
-          </div>
-        ) : items.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-            No related pods found
-          </div>
-        ) : (
-          <div className="grid gap-2">
-            {items.map((pod) => (
-              <div key={pod.metadata.uid || pod.metadata.name} className="grid gap-3 rounded-lg border bg-muted/30 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                <div className="grid gap-2 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-center">
-                  <div className="min-w-0">
-                    <Link to={`/kubernetes/workloads/pods/${pod.metadata.namespace}/${pod.metadata.name}`} className="font-semibold text-primary hover:underline">
-                      {pod.metadata.name}
-                    </Link>
-                    <div className="mt-1 text-xs text-muted-foreground">{pod.metadata.namespace}</div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={podStatusVariant(pod.status?.phase)}>{pod.status?.phase || "Unknown"}</Badge>
-                    {pod.status?.podIP && <span className="text-xs text-muted-foreground">{pod.status.podIP}</span>}
-                  </div>
-                  <div className="min-w-0 text-xs text-muted-foreground">
-                    <div className="break-words">Node: {pod.spec?.nodeName || "N/A"}</div>
-                    <div className="break-words">Containers: {containersForPod(pod).map((item) => item.name).join(", ") || "N/A"}</div>
-                  </div>
+        <Button size="sm" variant="ghost" onClick={load} className="gap-2" disabled={loading}>
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}
+        </Button>
+      </header>
+      {error ? (
+        <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm break-words text-destructive">{error}</div>
+      ) : loading && items.length === 0 ? (
+        // Keep the rows (and any open log or shell dialog) mounted while refreshing.
+        <div className="flex h-20 items-center justify-center gap-2">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
+          <span className="text-sm text-muted-foreground">{t("Loading...")}</span>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">{t("No pods")}</div>
+      ) : (
+        <div className="divide-y">
+          {items.map((pod) => (
+            <div key={pod.metadata.uid || pod.metadata.name} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-center">
+                <div className="min-w-0">
+                  <Link to={`/kubernetes/workloads/pods/${pod.metadata.namespace}/${pod.metadata.name}`} className="font-medium hover:text-primary transition-colors">
+                    {pod.metadata.name}
+                  </Link>
+                  <div className="text-xs text-muted-foreground">{pod.metadata.namespace}</div>
                 </div>
-                <PodAccessButtons pod={pod} />
+                <div className="flex flex-wrap items-center gap-3">
+                  <StatusDot status={pod.status?.phase} />
+                  {pod.status?.podIP && <span className="font-mono text-xs text-muted-foreground">{pod.status.podIP}</span>}
+                </div>
+                <div className="min-w-0 text-xs text-muted-foreground">
+                  <div className="break-words">{pod.spec?.nodeName || t("Unscheduled")}</div>
+                  <div className="break-words">{containersForPod(pod).map((item) => item.name).join(", ") || t("no containers")}</div>
+                </div>
               </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+              <PodAccessButtons pod={pod} />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

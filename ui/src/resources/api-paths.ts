@@ -3,7 +3,7 @@ import type { ResourceConfig } from "@/components/resource-management";
 const versionFallbacks: Record<string, string[]> = {
   autoscaling: ["v2", "v2beta2", "v2beta1", "v1"],
   "cdi.kubevirt.io": ["v1beta1", "v1alpha1"],
-  "cilium.io": ["v2", "v2alpha1", "v1"],
+  "cilium.io": ["v2", "v2alpha1"],
   "crd.projectcalico.org": ["v1"],
   "discovery.k8s.io": ["v1", "v1beta1"],
   "gateway.networking.k8s.io": ["v1", "v1beta1", "v1alpha2", "v1alpha1"],
@@ -12,7 +12,7 @@ const versionFallbacks: Record<string, string[]> = {
   "kubeovn.io": ["v1", "v1alpha1"],
   "kubevirt.io": ["v1", "v1alpha3", "v1alpha2", "v1alpha1"],
   "networking.k8s.io": ["v1", "v1beta1", "v1alpha1"],
-  "pool.kubevirt.io": ["v1alpha1"],
+  "pool.kubevirt.io": ["v1beta1", "v1alpha1"],
   "projectcalico.org": ["v3"],
   "snapshot.kubevirt.io": ["v1beta1", "v1alpha1"],
   "snapshot.storage.k8s.io": ["v1", "v1beta1", "v1alpha1"],

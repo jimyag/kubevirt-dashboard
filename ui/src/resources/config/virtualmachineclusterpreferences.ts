@@ -7,7 +7,7 @@ export const virtualmachineclusterpreferencesConfig: ResourceConfig = shared.ins
     title: "Cluster Preferences",
     subtitle: "Manage KubeVirt VirtualMachineClusterPreference resources",
     kind: "VirtualMachineClusterPreference",
-    createFields: [...shared.nameOnlyFields("example-preference"), { name: "machineType", label: "Machine Type", section: "Machine", defaultValue: "q35" }, { name: "cpuTopology", label: "Preferred CPU Topology", section: "CPU", type: "select", defaultValue: "preferSockets", options: [{ label: "Prefer Sockets", value: "preferSockets" }, { label: "Prefer Cores", value: "preferCores" }, { label: "Prefer Threads", value: "preferThreads" }] }],
+    createFields: [...shared.nameOnlyFields("example-preference"), { name: "machineType", label: "Machine type", section: "Machine", defaultValue: "q35" }, { name: "cpuTopology", label: "Preferred CPU topology", section: "CPU", type: "select", defaultValue: "preferSockets", options: [{ label: "Prefer sockets", value: "preferSockets" }, { label: "Prefer cores", value: "preferCores" }, { label: "Prefer threads", value: "preferThreads" }] }],
     buildSpec: (values) => ({ machine: { preferredMachineType: shared.stringValue(values.machineType, "q35") }, cpu: { preferredCPUTopology: shared.stringValue(values.cpuTopology, "preferSockets") } }),
     statusPath: ["metadata", "name"],
   });

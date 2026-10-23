@@ -13,14 +13,14 @@ export const dvCreateConfig: ResourceConfig = {
   createTemplate: "",
   createFields: [
     ...shared.namespaceNameFields("example-disk"),
-    { name: "storage", label: "Storage Size", section: "Storage", defaultValue: "10Gi" },
-    { name: "accessMode", label: "Access Mode", section: "Storage", type: "select", defaultValue: "ReadWriteOnce", options: [{ label: "ReadWriteOnce", value: "ReadWriteOnce" }, { label: "ReadWriteMany", value: "ReadWriteMany" }] },
-    { name: "volumeMode", label: "Volume Mode", section: "Storage", type: "select", defaultValue: "Filesystem", options: [{ label: "Filesystem", value: "Filesystem" }, { label: "Block", value: "Block" }] },
-    { name: "storageClassName", label: "Storage Class", section: "Storage", defaultValue: "", placeholder: "optional" },
-    { name: "sourceType", label: "Source", section: "Source", type: "select", defaultValue: "blank", options: [{ label: "Blank", value: "blank" }, { label: "HTTP Image", value: "http" }, { label: "Registry Image", value: "registry" }, { label: "PVC Clone", value: "pvc" }, { label: "Upload", value: "upload" }] },
-    { name: "sourceUrl", label: "HTTP / Registry Source", section: "Source", defaultValue: "", placeholder: "https://example.com/disk.qcow2 or docker://..." },
-    { name: "sourceNamespace", label: "Source PVC Namespace", section: "Source", defaultValue: "", placeholder: "for PVC clone" },
-    { name: "sourcePvc", label: "Source PVC Name", section: "Source", defaultValue: "", placeholder: "for PVC clone" },
+    { name: "storage", label: "Storage size", section: "Storage", defaultValue: "10Gi" },
+    { name: "accessMode", label: "Access mode", section: "Storage", type: "select", defaultValue: "ReadWriteOnce", options: [{ label: "ReadWriteOnce", value: "ReadWriteOnce" }, { label: "ReadWriteMany", value: "ReadWriteMany" }] },
+    { name: "volumeMode", label: "Volume mode", section: "Storage", type: "select", defaultValue: "Filesystem", options: [{ label: "Filesystem", value: "Filesystem" }, { label: "Block", value: "Block" }] },
+    { name: "storageClassName", label: "Storage class", section: "Storage", defaultValue: "", placeholder: "optional" },
+    { name: "sourceType", label: "Source", section: "Source", type: "select", defaultValue: "blank", options: [{ label: "Blank", value: "blank" }, { label: "HTTP image", value: "http" }, { label: "Registry image", value: "registry" }, { label: "PVC clone", value: "pvc" }, { label: "Upload", value: "upload" }] },
+    { name: "sourceUrl", label: "HTTP / registry source", section: "Source", defaultValue: "", placeholder: "https://example.com/disk.qcow2 or docker://..." },
+    { name: "sourceNamespace", label: "Source PVC namespace", section: "Source", defaultValue: "", placeholder: "for PVC clone" },
+    { name: "sourcePvc", label: "Source PVC name", section: "Source", defaultValue: "", placeholder: "for PVC clone" },
   ],
   buildCreateResource: (values) => {
     const storageClassName = shared.stringValue(values.storageClassName);

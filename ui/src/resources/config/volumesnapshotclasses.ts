@@ -15,7 +15,7 @@ export const volumesnapshotclassesConfig: ResourceConfig = {
     createFields: [
       ...shared.nameOnlyFields("example-snapshot-class"),
       { name: "driver", label: "Driver", section: "Driver", defaultValue: "example.csi.io" },
-      { name: "deletionPolicy", label: "Deletion Policy", section: "Policy", type: "select", defaultValue: "Delete", options: [{ label: "Delete", value: "Delete" }, { label: "Retain", value: "Retain" }] },
+      { name: "deletionPolicy", label: "Deletion policy", section: "Policy", type: "select", defaultValue: "Delete", options: [{ label: "Delete", value: "Delete" }, { label: "Retain", value: "Retain" }] },
       { name: "parameters", label: "Parameters", section: "Driver", type: "textarea", defaultValue: "", placeholder: "key=value" },
     ],
     buildCreateResource: (values) => ({

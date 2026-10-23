@@ -1,5 +1,7 @@
 # KubeVirt Manager Parity Plan
 
+> **Status (2026-10):** steps 1–4 and 6 are implemented; step 5 (CAPI/CAPK cluster flow) is not. The routes below predate the console redesign and no longer exist. Current equivalents: VMs `/kubevirt/virtualization/virtual-machines`, instance types `/kubevirt/templates/cluster-instance-types`, pools `/kubevirt/virtualization/vm-pools`, disks `/kubevirt/cdi/data-volumes`, load balancers `/networks/kubernetes/services`, firewalls `/vpc/security-groups` and `/networks/kubernetes/network-policies`, autoscaling `/kubevirt/operations/autoscaling`, images `/kubevirt/cdi/data-sources`, settings `/settings`. Page code now lives in `ui/src/pages/` and `ui/src/resources/config/`, not only `ui/src/App.tsx`. "YAML is allowed only as preview and advanced override" still holds.
+
 ## Goal
 
 Bring this dashboard to functional parity with `kubevirt-manager`, then extend it with structured field management for Kubernetes/KubeVirt resources instead of YAML-only workflows.

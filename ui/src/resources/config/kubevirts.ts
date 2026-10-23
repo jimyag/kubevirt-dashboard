@@ -8,7 +8,7 @@ export const kubevirtsConfig: ResourceConfig = shared.kubevirtResourceConfig({
     subtitle: "Manage KubeVirt operator KubeVirt resources",
     kind: "KubeVirt",
     namespaced: true,
-    createFields: [...shared.namespaceNameFields("kubevirt", "kubevirt"), { name: "useEmulation", label: "Use Emulation", section: "Configuration", type: "checkbox", defaultValue: false }],
+    createFields: [...shared.namespaceNameFields("kubevirt", "kubevirt"), { name: "useEmulation", label: "Use emulation", section: "Configuration", type: "checkbox", defaultValue: false }],
     buildSpec: (values) => ({ configuration: { developerConfiguration: { useEmulation: values.useEmulation === true } } }),
     statusPath: ["status", "phase"],
     extraColumns: [{ label: "Phase", value: (r) => String(shared.getRecord(r.status).phase || "N/A") }],

@@ -22,7 +22,6 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -33,7 +32,8 @@ import (
 	kvv1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	kvcorev1 "kubevirt.io/client-go/kubevirt/typed/core/v1"
-	"sigs.k8s.io/yaml"
+
+	"github.com/jimyag/kubevirt-dashboard/internal/helm"
 )
 
 var (
@@ -42,11 +42,39 @@ var (
 	kubeconfig  string
 	contextName string
 	statusFile  = "vm-statuses.txt"
+
+	// allowedOrigins are extra browser origins (scheme://host[:port]) allowed to open console
+	// and exec WebSockets, for reverse proxies that rewrite the Host header.
+	allowedOrigins []string
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin:  func(r *http.Request) bool { return true },
+	CheckOrigin:  checkOrigin,
 	Subprotocols: []string{"binary"},
+}
+
+// checkOrigin only lets pages served by this dashboard open serial console, VNC and pod exec
+// WebSockets, so another site open in the same browser cannot drive them (cross-site WebSocket
+// hijacking). Requests without an Origin header come from non-browser clients and are allowed.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	for _, allowed := range allowedOrigins {
+		if strings.EqualFold(strings.TrimSuffix(allowed, "/"), origin) {
+			return true
+		}
+	}
+	log.Printf("rejected websocket from origin %q (host %q); use --allowed-origin to allow it", origin, r.Host)
+	return false
 }
 
 var defaultStatuses = []string{
@@ -243,6 +271,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", "", "default namespace (optional)")
 	rootCmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	rootCmd.Flags().StringVar(&contextName, "context", "", "the name of the kubeconfig context to use")
+	rootCmd.Flags().StringSliceVar(&allowedOrigins, "allowed-origin", nil, "extra browser origin allowed to open console WebSockets, e.g. https://dash.example.com (repeatable)")
 }
 
 func main() {
@@ -384,47 +413,6 @@ func runServer(cm *ClusterManager, addr string) error {
 		handlePodExec(restConfig, w, r)
 	})
 
-	mux.HandleFunc("/api/v1/yaml/", func(w http.ResponseWriter, r *http.Request) {
-		_, dynClient, _, err := cm.getClient(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/yaml/"), "/")
-		if len(parts) < 3 {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-		resType, ns, name := parts[0], parts[1], parts[2]
-		var gvr schema.GroupVersionResource
-		var apiVersion, kind string
-		if resType == "virtualmachines" {
-			gvr = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"}
-			apiVersion, kind = "kubevirt.io/v1", "VirtualMachine"
-		} else if resType == "datavolumes" {
-			gvr = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"}
-			apiVersion, kind = "cdi.kubevirt.io/v1beta1", "DataVolume"
-		} else {
-			http.Error(w, "unsupported resource type", http.StatusBadRequest)
-			return
-		}
-		obj, err := dynClient.Resource(gvr).Namespace(ns).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		obj.SetManagedFields(nil)
-		obj.SetResourceVersion("")
-		obj.SetGeneration(0)
-		obj.SetUID("")
-		raw := obj.UnstructuredContent()
-		raw["apiVersion"] = apiVersion
-		raw["kind"] = kind
-		data, _ := yaml.Marshal(raw)
-		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-		w.Write(data)
-	})
-
 	mux.HandleFunc("/api/v1/namespaces-list", func(w http.ResponseWriter, r *http.Request) {
 		virtClient, _, _, err := cm.getClient(r)
 		if err != nil {
@@ -444,6 +432,8 @@ func runServer(cm *ClusterManager, addr string) error {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(nss)
 	})
+
+	helm.Register(mux, cm.getRESTConfig)
 
 	mux.HandleFunc("/apis/", func(w http.ResponseWriter, r *http.Request) {
 		_, _, proxy, err := cm.getClient(r)

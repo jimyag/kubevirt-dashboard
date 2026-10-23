@@ -9,9 +9,9 @@ export const kubeOvnIptablesDnatRulesConfig: ResourceConfig = shared.kubeOvnReso
     kind: "IptablesDnatRule",
     createFields: [
       { name: "eip", label: "EIP", section: "DNAT", defaultValue: "example-eip" },
-      { name: "externalPort", label: "External Port", section: "DNAT", defaultValue: "8080" },
+      { name: "externalPort", label: "External port", section: "DNAT", defaultValue: "8080" },
       { name: "internalIp", label: "Internal IP", section: "DNAT", defaultValue: "10.16.0.10" },
-      { name: "internalPort", label: "Internal Port", section: "DNAT", defaultValue: "80" },
+      { name: "internalPort", label: "Internal port", section: "DNAT", defaultValue: "80" },
       { name: "protocol", label: "Protocol", section: "DNAT", type: "select", defaultValue: "tcp", options: [{ label: "tcp", value: "tcp" }, { label: "udp", value: "udp" }] },
     ],
     buildSpec: (values) => ({ eip: shared.stringValue(values.eip), externalPort: shared.stringValue(values.externalPort), internalIp: shared.stringValue(values.internalIp), internalPort: shared.stringValue(values.internalPort), protocol: shared.stringValue(values.protocol, "tcp") }),

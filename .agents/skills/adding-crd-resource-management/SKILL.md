@@ -5,7 +5,7 @@ description: Use when adding Kubernetes built-in resources or extension CRDs to 
 
 # Adding CRD Resource Management
 
-Use this workflow before adding a new resource family, provider, or CRD category to kubevirt-console.
+Use this workflow before adding a new resource family, provider, or CRD category to kubevirt-dashboard.
 
 ## Rules
 
