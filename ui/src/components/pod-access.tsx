@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { AlertTriangle, RefreshCw, ScrollText, Terminal as TerminalIcon } from "lucide-react"
 import { Terminal as XTerm } from "xterm"
@@ -19,6 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { t } from "@/lib/i18n"
+import { useAsync } from "@/lib/kube"
 
 type ContainerInfo = {
   name: string
@@ -88,32 +89,16 @@ function PodLogDialog({ pod }: { pod: PodSummary }) {
   const containers = containersForPod(pod)
   const [open, setOpen] = useState(false)
   const [container, setContainer] = useState(containers[0]?.name || "")
-  const [logs, setLogs] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const selectedContainer = container || containers[0]?.name || ""
+  const selectedContainer = container || pod.spec?.containers?.[0]?.name || ""
 
-  const loadLogs = useCallback(async () => {
-    if (!pod.metadata.namespace || !pod.metadata.name) return
-    setLoading(true)
-    setError("")
-    try {
-      const params = new URLSearchParams({ tailLines: "500", timestamps: "true" })
-      if (selectedContainer) params.set("container", selectedContainer)
-      const response = await apiFetch(`/api/v1/namespaces/${pod.metadata.namespace}/pods/${pod.metadata.name}/log?${params.toString()}`)
-      if (!response.ok) throw new Error(await response.text())
-      setLogs(await response.text())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("Failed to load pod logs"))
-      setLogs("")
-    } finally {
-      setLoading(false)
-    }
-  }, [pod.metadata.name, pod.metadata.namespace, selectedContainer])
-
-  useEffect(() => {
-    if (open) loadLogs()
-  }, [loadLogs, open])
+  const { data: logs, loading, error, reload: loadLogs } = useAsync(async () => {
+    if (!open || !pod.metadata.namespace || !pod.metadata.name) return ""
+    const params = new URLSearchParams({ tailLines: "500", timestamps: "true" })
+    if (selectedContainer) params.set("container", selectedContainer)
+    const response = await apiFetch(`/api/v1/namespaces/${pod.metadata.namespace}/pods/${pod.metadata.name}/log?${params.toString()}`)
+    if (!response.ok) throw new Error(await response.text())
+    return response.text()
+  }, "", [open, pod.metadata.name, pod.metadata.namespace, selectedContainer])
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -340,56 +325,34 @@ export function PodAccessButtons({ pod }: { pod: PodSummary }) {
 }
 
 export function RelatedPodsCard({ title, description, namespace, selector, selectors, podName, pods, className }: RelatedPodsCardProps) {
-  const [items, setItems] = useState<PodSummary[]>(pods || [])
-  const [loading, setLoading] = useState(!pods)
-  const [error, setError] = useState("")
   // Callers often build selectors inline on every render (the VM page refreshes every 5s); key on
   // the selector text so a new array with the same content does not reload the list.
   const selectorKey = JSON.stringify((selectors && selectors.length > 0 ? selectors : selector ? [selector] : []).map(selectorText).filter(Boolean))
   const selectorValues = useMemo(() => JSON.parse(selectorKey) as string[], [selectorKey])
-  const load = useCallback(async () => {
-    if (pods) {
-      setItems(pods)
-      setLoading(false)
-      return
+  const { data, loading: fetching, error, reload: load } = useAsync(async () => {
+    if (pods) return pods
+    if (!namespace || (selectorValues.length === 0 && !podName)) return []
+    if (podName) {
+      const response = await apiFetch(`/api/v1/namespaces/${namespace}/pods/${podName}`)
+      if (!response.ok) throw new Error(await response.text())
+      return [await response.json()] as PodSummary[]
     }
-    if (!namespace || (selectorValues.length === 0 && !podName)) return
-    setLoading(true)
-    setError("")
-    try {
-      if (podName) {
-        const response = await apiFetch(`/api/v1/namespaces/${namespace}/pods/${podName}`)
-        if (!response.ok) throw new Error(await response.text())
-        setItems([await response.json()])
-        return
-      }
 
-      let lastError = ""
-      for (const nextSelector of selectorValues) {
-        const response = await apiFetch(`/api/v1/namespaces/${namespace}/pods?labelSelector=${encodeURIComponent(nextSelector)}`)
-        if (!response.ok) {
-          lastError = await response.text()
-          continue
-        }
-        const data = await response.json()
-        if ((data.items || []).length > 0) {
-          setItems(data.items || [])
-          return
-        }
+    let lastError = ""
+    for (const nextSelector of selectorValues) {
+      const response = await apiFetch(`/api/v1/namespaces/${namespace}/pods?labelSelector=${encodeURIComponent(nextSelector)}`)
+      if (!response.ok) {
+        lastError = await response.text()
+        continue
       }
-      if (lastError) throw new Error(lastError)
-      setItems([])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("Failed to load related pods"))
-      setItems([])
-    } finally {
-      setLoading(false)
+      const data = await response.json()
+      if ((data.items || []).length > 0) return data.items as PodSummary[]
     }
-  }, [namespace, podName, pods, selectorValues])
-
-  useEffect(() => {
-    load()
-  }, [load])
+    if (lastError) throw new Error(lastError)
+    return []
+  }, [] as PodSummary[], [namespace, podName, pods, selectorValues])
+  const items = pods || (error ? [] : data)
+  const loading = !pods && fetching
 
   return (
     <section className={cn("rounded-lg border bg-card", className)}>

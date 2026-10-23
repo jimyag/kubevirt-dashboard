@@ -473,7 +473,7 @@ export function CreateInstancePage() {
     reservedIp: "",
     bandwidth: { ingress: "", egress: "" },
     extraNics: [],
-    binding: "masquerade",
+    binding: profile.vpc ? "bridge" : "masquerade",
     sgEngine: null,
     securityGroups: [],
     username: "cloud-user",
@@ -506,20 +506,19 @@ export function CreateInstancePage() {
   )
 
   // Sensible defaults once catalog data arrives.
-  useEffect(() => {
+  const [defaults, setDefaults] = useState({ dataSources: catalog.dataSources, vpcs: catalog.vpcs, loading: catalogLoading, vpc: profile.vpc })
+  if (catalog.dataSources !== defaults.dataSources || catalog.vpcs !== defaults.vpcs || catalogLoading !== defaults.loading || profile.vpc !== defaults.vpc) {
+    setDefaults({ dataSources: catalog.dataSources, vpcs: catalog.vpcs, loading: catalogLoading, vpc: profile.vpc })
     setState((current) => {
       const next = { ...current }
       if (!current.dataSource && catalog.dataSources.length) next.dataSource = `${catalog.dataSources[0].metadata.namespace}/${catalog.dataSources[0].metadata.name}`
       if (!catalogLoading && !catalog.dataSources.length && current.imageSource === "datasource") next.imageSource = "registry"
       if (profile.vpc && !current.vpc && catalog.vpcs.length) next.vpc = catalog.vpcs.find((vpc) => asRecord(vpc.status).default === true)?.metadata.name || catalog.vpcs[0].metadata.name
+      // Kube-OVN subnets are routable, so let the guest own the subnet address by default.
+      if (profile.vpc && !defaults.vpc) next.binding = "bridge"
       return next
     })
-  }, [catalog.dataSources, catalog.vpcs, catalogLoading, profile.vpc])
-
-  // Kube-OVN subnets are routable, so let the guest own the subnet address by default.
-  useEffect(() => {
-    if (profile.vpc) setState((current) => ({ ...current, binding: "bridge" }))
-  }, [profile.vpc])
+  }
 
   // Kube-OVN refuses pods from namespaces outside a custom VPC's spec.namespaces list.
   const vpcAllowsNamespace = (vpc: KubeObject) => {

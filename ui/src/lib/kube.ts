@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useState } from "react"
 
 import { t } from "./i18n"
 
@@ -259,22 +259,33 @@ export function useAsync<T>(loader: () => Promise<T>, initial: T, deps: unknown[
   const [data, setData] = useState<T>(initial)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const run = useCallback(loader, deps)
-  const reload = useCallback(async () => {
+  const [request, setRequest] = useState({ deps, revision: 0 })
+  const run = useEffectEvent(loader)
+  if (deps.length !== request.deps.length || deps.some((value, index) => !Object.is(value, request.deps[index]))) {
+    setRequest({ deps, revision: request.revision })
     setLoading(true)
     setError("")
-    try {
-      setData(await run())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("Request failed"))
-    } finally {
-      setLoading(false)
-    }
-  }, [run])
+  }
+  const reload = useCallback(() => {
+    setLoading(true)
+    setError("")
+    setRequest((current) => ({ ...current, revision: current.revision + 1 }))
+  }, [])
   useEffect(() => {
-    reload()
-  }, [reload])
+    let cancelled = false
+    const load = async () => {
+      try {
+        const next = await run()
+        if (!cancelled) setData(next)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : t("Request failed"))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [request])
   return { data, loading, error, reload }
 }
 

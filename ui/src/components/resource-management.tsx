@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import * as YAML from "js-yaml"
 import {
@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { relativeTime, replaceMap } from "@/lib/kube"
+import { relativeTime, replaceMap, useAsync } from "@/lib/kube"
 import { Combobox, ConfirmDialog, EmptyState, ErrorNote, FilterInput, LoadingState, PageHeader, Pager, StatusDot, Toolbar } from "@/components/console"
 import { namespaceScope, useFilteredRows, usePaged, type FilterField } from "@/lib/filter"
 import {
@@ -1009,9 +1009,9 @@ function FormField({ field, value, onChange }: { field: CreateFormField; value: 
 
 export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { config: ResourceConfig; onCreated: () => void; defaultNamespace?: string }) {
   const createFields = useMemo(() => effectiveCreateFields(config), [config])
-  const [open, setOpen] = useState(false)
+  const [open, setDialogOpen] = useState(false)
   const [values, setValues] = useState<Record<string, string | boolean>>(() => createFieldDefaults(createFields, defaultNamespace))
-  const [content, setContent] = useState("")
+  const [editedContent, setContent] = useState("")
   const [advanced, setAdvanced] = useState(false)
   const [yamlEdited, setYamlEdited] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -1023,21 +1023,15 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
   )
   const fieldGroups = useMemo(() => groupFields(createFields), [createFields])
 
-  useEffect(() => {
-    if (!yamlEdited) {
-      const resources = Array.isArray(previewResource) ? previewResource : [previewResource]
-      setContent(resources.map((resource) => YAML.dump(resource, { noRefs: true, lineWidth: 120 })).join("---\n"))
-    }
-  }, [previewResource, yamlEdited])
-
-  useEffect(() => {
-    if (!open) {
-      setValues(createFieldDefaults(createFields, defaultNamespace))
-      setAdvanced(false)
-      setYamlEdited(false)
-      setError("")
-    }
-  }, [createFields, defaultNamespace, open])
+  const resources = Array.isArray(previewResource) ? previewResource : [previewResource]
+  const content = yamlEdited ? editedContent : resources.map((resource) => YAML.dump(resource, { noRefs: true, lineWidth: 120 })).join("---\n")
+  const setOpen = (next: boolean) => {
+    setDialogOpen(next)
+    setValues(createFieldDefaults(createFields, defaultNamespace))
+    setAdvanced(false)
+    setYamlEdited(false)
+    setError("")
+  }
 
   const createResource = async () => {
     setSaving(true)
@@ -1079,8 +1073,6 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
         if (!created) throw new Error(`${resource.kind || t("Resource")} ${resource.metadata.name}: ${lastError || t("Resource API is not served by this cluster")}`)
       }
       setOpen(false)
-      setValues(createFieldDefaults(createFields, defaultNamespace))
-      setYamlEdited(false)
       onCreated()
     } catch (err) {
       setError(err instanceof Error ? err.message : t("Failed to create resource"))
@@ -1203,10 +1195,14 @@ function ResourceActionDialog({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    if (open) setValues(resourceFieldDefaults(resource, action.fields))
+  const defaults = resourceFieldDefaults(resource, action.fields)
+  const defaultsKey = JSON.stringify(defaults)
+  const [previous, setPrevious] = useState({ open, defaultsKey })
+  if (open !== previous.open || defaultsKey !== previous.defaultsKey) {
+    setPrevious({ open, defaultsKey })
+    if (open) setValues(defaults)
     else setError("")
-  }, [action.fields, open, resource])
+  }
 
   const preview = useMemo(() => requestPreview(action, resource, values), [action, resource, values])
 
@@ -1277,14 +1273,11 @@ function ResourceActionDialog({
 }
 
 export function ResourceList({ config }: { config: ResourceConfig }) {
-  const [items, setItems] = useState<KubeResource[]>([])
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [namespaces, setNamespaces] = useState<string[]>([])
   const [namespaceFilter, setNamespaceFilter] = useState("default")
   const ns = useMemo(() => namespaceScope(namespaceFilter, namespaces), [namespaceFilter, namespaces])
   const scope = ns.scope
-  const [error, setError] = useState("")
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<KubeResource | null>(null)
 
@@ -1311,37 +1304,26 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
     }
   }, [config.id, config.namespaced])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError("")
-    try {
-      let loaded = false
-      let lastError = ""
-      const paths = await servedPaths(config)
-      for (const path of paths) {
-        const res = await apiFetch(resourceListUrl(config, path, scope))
-        if (res.ok) {
-          const data = await res.json()
-          setItems(data.items || [])
-          setSelected({})
-          loaded = true
-          break
-        }
-        lastError = await res.text()
-        if (res.status !== 404) break
+  const { data, loading, error, reload: load } = useAsync(async () => {
+    let lastError = ""
+    const paths = await servedPaths(config)
+    for (const path of paths) {
+      const res = await apiFetch(resourceListUrl(config, path, scope))
+      if (res.ok) {
+        const data = await res.json()
+        return (data.items || []) as KubeResource[]
       }
-      if (!loaded) throw new Error(lastError || t("Resource API is not served by this cluster"))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("Failed to load resources"))
-      setItems([])
-    } finally {
-      setLoading(false)
+      lastError = await res.text()
+      if (res.status !== 404) break
     }
-  }, [config, scope])
-
-  useEffect(() => {
-    load()
-  }, [load])
+    throw new Error(lastError || t("Resource API is not served by this cluster"))
+  }, [] as KubeResource[], [config, scope])
+  const items = useMemo(() => error ? [] : data, [data, error])
+  const [selectionRows, setSelectionRows] = useState(items)
+  if (items !== selectionRows) {
+    setSelectionRows(items)
+    setSelected({})
+  }
 
   const fields = useMemo(() => resourceFilterFields(config), [config])
   const inScope = useMemo(() => (config.namespaced ? items.filter((item) => ns.match(item.metadata.namespace)) : items), [items, ns, config.namespaced])
@@ -1679,41 +1661,21 @@ export function ResourceEvents({ config }: { config: ResourceConfig }) {
 
 export function ResourceManifest({ config }: { config: ResourceConfig }) {
   const { namespace, name } = useParams()
-  const [resource, setResource] = useState<KubeResource | null>(null)
-  const [url, setUrl] = useState("")
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError("")
-    try {
-      let loaded = false
-      let lastError = ""
-      for (const path of await servedPaths(config)) {
-        const resourceUrl = resourcePathUrl(config, path.resourcePath, name!, namespace)
-        const res = await apiFetch(resourceUrl)
-        if (res.ok) {
-          setResource(await res.json())
-          setUrl(resourceUrl)
-          loaded = true
-          break
-        }
-        lastError = await res.text()
-        if (res.status !== 404) break
+  const { data, loading, error, reload: load } = useAsync(async () => {
+    let lastError = ""
+    for (const path of await servedPaths(config)) {
+      const resourceUrl = resourcePathUrl(config, path.resourcePath, name!, namespace)
+      const res = await apiFetch(resourceUrl)
+      if (res.ok) {
+        return { resource: await res.json() as KubeResource, url: resourceUrl }
       }
-      if (!loaded) throw new Error(lastError || t("Resource API is not served by this cluster"))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("Failed to load manifest"))
-      setResource(null)
-    } finally {
-      setLoading(false)
+      lastError = await res.text()
+      if (res.status !== 404) break
     }
-  }, [config, name, namespace])
-
-  useEffect(() => {
-    load()
-  }, [load])
+    throw new Error(lastError || t("Resource API is not served by this cluster"))
+  }, { resource: null as KubeResource | null, url: "" }, [config, name, namespace])
+  const resource = error ? null : data.resource
+  const url = data.url
 
   // Keep the panel (and an in-progress edit) mounted during reloads.
   if (loading && !resource) {
