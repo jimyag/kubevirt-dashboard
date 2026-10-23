@@ -113,7 +113,8 @@ export function DVDetailContent() {
   const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
   const { data: dv, loading, reload: loadDv } = useAsync<DV | null>(async () => {
     const r = await apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`);
-    return r.ok ? r.json() : null;
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
   }, null, [name, namespace]);
   usePolling(loadDv, 10000);
 
