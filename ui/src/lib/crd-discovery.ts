@@ -1,5 +1,7 @@
-import { apiFetch, useAsync } from "@/lib/kube"
-import type { StructuralSchema } from "@/lib/crd-schema"
+import { apiFetch, useAsync } from "./kube"
+import type { StructuralSchema } from "./crd-schema"
+import { expandListPaths, apiVersionFromListPath, resourceNameFromListPath } from "../resources/api-paths"
+import type { ResourceConfig } from "../components/resource-management"
 
 export type CrdDefinition = {
   metadata: { name: string }
@@ -11,15 +13,32 @@ export type CrdDefinition = {
   }
 }
 
-export function useCrdSchema(apiVersion: string, plural: string) {
-  const { data: schema, error, loading } = useAsync(async () => {
-    const [group, version] = apiVersion.split("/")
-    if (!version) return undefined
-    const response = await apiFetch(`/apis/apiextensions.k8s.io/v1/customresourcedefinitions/${plural}.${group}`)
-    if (response.status === 404) return undefined
+export async function discoverCrdSchema(config: ResourceConfig) {
+  if (config.schema) return undefined
+  const paths = expandListPaths(config)
+  const checked = new Set<string>()
+  for (const candidate of paths) {
+    const [group, candidateVersion] = apiVersionFromListPath(candidate).split("/")
+    if (!candidateVersion) continue
+    const plural = resourceNameFromListPath(candidate, config.id)
+    const name = `${plural}.${group}`
+    if (checked.has(name)) continue
+    checked.add(name)
+    const response = await apiFetch(`/apis/apiextensions.k8s.io/v1/customresourcedefinitions/${name}`)
+    if (response.status === 404) continue
     if (!response.ok) throw new Error(await response.text())
     const definition = await response.json() as CrdDefinition
-    return definition.spec.versions.find((item) => item.name === version && item.served)?.schema?.openAPIV3Schema
-  }, undefined as StructuralSchema | undefined, [apiVersion, plural])
-  return { schema, error, loading }
+    for (const listPath of paths) {
+      const [pathGroup, version] = apiVersionFromListPath(listPath).split("/")
+      if (pathGroup !== group || resourceNameFromListPath(listPath, config.id) !== plural) continue
+      const schema = definition.spec.versions.find((item) => item.name === version && item.served)?.schema?.openAPIV3Schema
+      if (schema) return { schema, listPath, resourcePath: `/apis/${group}/${version}`, id: definition.spec.names.plural, kind: definition.spec.names.kind, namespaced: definition.spec.scope === "Namespaced" }
+    }
+  }
+  return undefined
+}
+
+export function useCrdSchema(config: ResourceConfig) {
+  const result = useAsync(() => discoverCrdSchema(config), undefined as Awaited<ReturnType<typeof discoverCrdSchema>>, [config])
+  return { ...result, schema: result.data?.schema }
 }

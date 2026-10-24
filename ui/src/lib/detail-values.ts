@@ -44,14 +44,14 @@ export const hasRenderableValue = (value: unknown): boolean => {
 }
 
 export const keyAcronyms: Record<string, string> = Object.fromEntries(
-  ["IP", "IPs", "VPC", "CIDR", "NAT", "EIP", "FIP", "QoS", "MAC", "DNS", "ID", "URL", "API", "CPU", "LAN", "TLS", "UID", "VLAN", "BGP", "ASN", "MTU", "OVN", "ACL", "ACLs", "PVC", "VM", "VMI"].map((word) => [word.toLowerCase(), word]),
+  ["IP", "IPs", "VPC", "CIDR", "CIDRs", "NAT", "EIP", "FIP", "QoS", "MAC", "DNS", "ID", "URL", "API", "CPU", "LAN", "TLS", "UID", "VLAN", "BGP", "ASN", "MTU", "OVN", "ACL", "ACLs", "PVC", "VM", "VMI"].map((word) => [word.toLowerCase(), word]),
 )
 
 /** "targetPort" -> "Target port", "podIPs" -> "Pod IPs", "lanIp" -> "LAN IP". */
 export const humanizeKey = (key: string) => {
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z](?!s(?:$|[A-Z _-]))[a-z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
     .trim()
     .split(/\s+/)

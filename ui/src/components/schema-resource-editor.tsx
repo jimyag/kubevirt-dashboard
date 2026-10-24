@@ -93,7 +93,7 @@ export function SchemaResourceEditor({ config, schema, resource, onSaved, defaul
           </section>
           <section className="space-y-3">
             <h3 className="text-sm font-semibold">{t("Resource fields")}</h3>
-            <SchemaField schema={fields} label="resource" unframed value={Object.fromEntries(Object.keys(fields.properties || {}).filter((key) => draft[key] !== undefined).map((key) => [key, draft[key]]))} required onChange={(next) => { let result = draft; for (const key of Object.keys(fields.properties || {})) result = withSchemaField(result, key, schemaRecord(next)[key]); setDraft(result) }} />
+            <SchemaField schema={fields} label="resource" unframed value={Object.fromEntries(Object.keys(fields.properties || {}).filter((key) => draft[key] !== undefined).map((key) => [key, draft[key]]))} originalValue={editing ? base : undefined} required onChange={(next) => { let result = draft; for (const key of Object.keys(fields.properties || {})) result = withSchemaField(result, key, schemaRecord(next)[key]); setDraft(result) }} />
           </section>
           {error && <ErrorNote>{error}</ErrorNote>}
         </div>

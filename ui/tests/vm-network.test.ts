@@ -2,10 +2,23 @@ import { expect, test } from "bun:test"
 import type { KubeObject } from "../src/lib/kube"
 
 Object.defineProperty(navigator, "language", { value: "en-US", configurable: true })
-const { extraNicSpec, vmOvnProviders, vmOvnAnnotationPatch, vmSubnets, removeVmNic } = await import("../src/lib/vm-network")
+const { extraNicSpec, vmOvnProviders, vmOvnAnnotationPatch, vmSubnets, removeVmNic, canUseReservedIp, reservedIpNamespace, reservedIpNamespaceAnnotation } = await import("../src/lib/vm-network")
 const { setVmSecurityGroups, setVmSecurityGroupRefs, vmSecurityGroups } = await import("../src/lib/security-groups")
 
 const vm: KubeObject = { metadata: { namespace: "test", name: "vm" }, spec: { template: { spec: { networks: [{ name: "default", pod: {} }, { name: "nic1", multus: { networkName: "attached" } }] } } } }
+
+test("VM reservations preserve wizard namespace scope without accepting AAP ports or occupied addresses", () => {
+  const vip: KubeObject = { metadata: { name: "reserved", annotations: { [reservedIpNamespaceAnnotation]: "test" } }, spec: { subnet: "private" } }
+  expect(reservedIpNamespace(vip)).toBe("test")
+  expect(canUseReservedIp(vip, "private", "test", new Set())).toBe(true)
+  expect(canUseReservedIp(vip, "private", "other", new Set())).toBe(false)
+  expect(canUseReservedIp(vip, "other", "test", new Set())).toBe(false)
+  expect(canUseReservedIp(vip, "private", "test", new Set(["reserved"]))).toBe(false)
+  expect(canUseReservedIp({ ...vip, metadata: { ...vip.metadata, labels: { "ovn.kubernetes.io/ip_reserved": "pod.test" } } }, "private", "test", new Set())).toBe(false)
+  expect(canUseReservedIp({ ...vip, spec: { ...vip.spec, namespace: "test" } }, "private", "test", new Set())).toBe(false)
+  expect(canUseReservedIp({ ...vip, spec: { ...vip.spec, type: "switch_lb_vip" } }, "private", "test", new Set())).toBe(false)
+  expect(canUseReservedIp({ ...vip, metadata: { name: "unrestricted" } }, "private", "other", new Set())).toBe(true)
+})
 const nads: KubeObject[] = [
   { metadata: { namespace: "test", name: "attached" }, spec: { config: JSON.stringify({ type: "kube-ovn", provider: "custom.test.ovn" }) } },
   { metadata: { namespace: "other", name: "attached" }, spec: { config: JSON.stringify({ type: "kube-ovn", provider: "unrelated.ovn" }) } },

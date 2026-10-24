@@ -11,6 +11,7 @@ export type KubeObject = {
     name: string
     namespace?: string
     uid?: string
+    resourceVersion?: string
     creationTimestamp?: string
     labels?: Record<string, string>
     annotations?: Record<string, string>

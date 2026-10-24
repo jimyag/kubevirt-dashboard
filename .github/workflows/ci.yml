@@ -45,6 +45,10 @@ jobs:
         working-directory: ui
         run: bun run lint
 
+      - name: Run frontend tests
+        working-directory: ui
+        run: bun test tests
+
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest

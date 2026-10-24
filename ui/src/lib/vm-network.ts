@@ -17,6 +17,16 @@ import { t } from "./i18n"
 
 const VM_API = "/apis/kubevirt.io/v1"
 export const NAD_API = "/apis/k8s.cni.cncf.io/v1"
+export const reservedIpNamespaceAnnotation = "kubevirt-dashboard.io/reserved-ip-namespace"
+export const reservedIpNamespace = (vip: KubeObject) => vip.metadata.annotations?.[reservedIpNamespaceAnnotation] ?? str(asRecord(vip.spec).namespace)
+
+export function canUseReservedIp(vip: KubeObject, subnet: string, namespace: string, usedNames: Set<string>): boolean {
+  const spec = asRecord(vip.spec)
+  const scope = reservedIpNamespace(vip)
+  // Namespaced Vip objects create AAP virtual ports, which conflict with a VM's real port.
+  return !str(spec.namespace) && !str(spec.type) && str(spec.subnet) === subnet &&
+    (!scope || scope === namespace) && !vip.metadata.labels?.["ovn.kubernetes.io/ip_reserved"] && !usedNames.has(vip.metadata.name)
+}
 
 /** A network an extra NIC can join: a Kube-OVN subnet behind a NAD, or any other NAD. */
 export type AttachableNetwork = {

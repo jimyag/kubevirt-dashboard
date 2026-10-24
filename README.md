@@ -47,6 +47,10 @@ Cilium security groups are `CiliumNetworkPolicy` objects in the instance namespa
 
 Attaching or detaching a security group updates the VM template and the running virt-launcher pod. If the CNI does not apply pod changes live, the change takes effect on the next restart.
 
+The instance wizard offers persistent image imports, cloning and new data disks when CDI is served; otherwise it defaults to an ephemeral container disk. Primary subnet choices exclude Multus-only providers, which remain available as extra interfaces.
+
+Reserved IPs use namespace-free Kube-OVN `Vip` objects, with the wizard's namespace scope stored in `kubevirt-dashboard.io/reserved-ip-namespace`. Setting `Vip.spec.namespace` invokes Kube-OVN's AAP virtual-port handling and can blackhole a VM that consumes the same address. Older namespaced reservations are marked **Needs recreation** and cannot be selected for a new VM; release an unused reservation and create it again through the console. An address referenced by an instance or reserved by the controller cannot be released until that use ends. The namespace annotation controls wizard choices; it is not a Kubernetes authorization policy.
+
 ## Monitoring
 
 - **metrics-server** (`metrics.k8s.io`): when installed, host CPU and memory usage appear on the overview and live usage on instance pages.
@@ -74,11 +78,11 @@ Custom resources are discovered from the cluster under Resource Catalog → Cust
 
 Catalog resource lists use the API server's Kubernetes Table response to display the CRD's printer columns. Those columns participate in filtering without modifying the resource objects used by the editor.
 
-Create and edit forms read the selected CRD's structural OpenAPI schema. Objects use flat sections, arrays use expandable rows, and primitive fields use typed controls. Labels and annotations share the same form as resource fields, with individual key/value rows for adding, renaming and deleting entries. System annotations can be expanded separately. Status and server-managed identity fields are not editable in this form.
+Create and edit forms read the selected CRD's structural OpenAPI schema. Named resource pages follow served group/version/plural fallbacks as well, including Calico's native v3 APIs. Objects use flat sections, arrays use expandable rows, and primitive fields use typed controls. Labels and annotations share the same form as resource fields, with individual key/value rows for adding, renaming and deleting entries. System annotations can be expanded separately. Status and server-managed identity fields are not editable in this form. Existing fields with an explicit CEL `self == oldSelf` rule are shown read-only; ancestors cannot be removed to bypass that guard. New resources and new keyed list entries remain editable.
 
 Saving validates the schema locally and runs an API server dry-run before showing a diff. Updates retain the original resourceVersion and untouched fields, so concurrent changes are rejected. CRD schemas do not always describe a controller's restrictions; admission success alone does not prove reconciliation or traffic behavior. The Manifest tab remains available for advanced edits.
 
-The console talks to the cluster through the Kubernetes API and uses these API versions, falling back to older ones when the cluster does not serve the preferred version. The CRD lists were checked against KubeVirt 1.9.1, Cilium 1.20.3 and Kube-OVN 1.16.15.
+The console talks to the cluster through the Kubernetes API and uses these API versions, falling back to older ones when the cluster does not serve the preferred version. The CRD lists were checked against KubeVirt 1.9.1, Cilium 1.20.4, Calico 3.33.0, Envoy Gateway 1.9.2 and Kube-OVN 1.16.15.
 
 | Component | API versions used |
 |-----------|-------------------|

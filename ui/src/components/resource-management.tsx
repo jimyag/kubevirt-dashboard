@@ -1212,13 +1212,13 @@ function ResourceActionDialog({
           <Button size="sm" variant={action.variant || "outline"}>{t(action.label)}</Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{t(action.label)} · {resource.metadata.name}</DialogTitle>
+      <DialogContent className="flex max-h-[90dvh] min-w-0 flex-col overflow-hidden sm:max-w-3xl">
+        <DialogHeader className="min-w-0 shrink-0">
+          <DialogTitle className="break-words">{t(action.label)} · {resource.metadata.name}</DialogTitle>
           {action.description && <DialogDescription>{t(action.description)}</DialogDescription>}
         </DialogHeader>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-4">
+        <div className="grid min-h-0 min-w-0 gap-4 overflow-y-auto md:grid-cols-2">
+          <div className="min-w-0 space-y-4">
             {(action.fields || []).length > 0 ? (action.fields || []).map((field) => (
               <FormField
                 key={field.name}
@@ -1231,9 +1231,9 @@ function ResourceActionDialog({
               </div>
             )}
           </div>
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <div className="text-sm font-semibold text-foreground">{t("Request Preview")}</div>
-            <pre className="min-h-[220px] overflow-x-auto rounded-lg border bg-muted/30 p-4 font-mono text-xs text-foreground whitespace-pre">
+            <pre className="max-h-[55dvh] min-h-[220px] overflow-auto rounded-lg border bg-muted/30 p-4 font-mono text-xs text-foreground whitespace-pre">
               {preview}
             </pre>
           </div>
@@ -1244,7 +1244,7 @@ function ResourceActionDialog({
             <span className="break-words">{error}</span>
           </div>
         )}
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
           <Button variant={action.variant === "destructive" ? "destructive" : "default"} onClick={submit} disabled={saving || preparing}>
             {saving ? t("Applying...") : t(action.confirmLabel || action.label)}
@@ -1255,8 +1255,9 @@ function ResourceActionDialog({
   )
 }
 
-export function ResourceList({ config }: { config: ResourceConfig }) {
-  const discoveredSchema = useCrdSchema(config.schema ? "" : apiVersionFromListPath(config.listPath), config.id)
+export function ResourceList({ config: baseConfig }: { config: ResourceConfig }) {
+  const discoveredSchema = useCrdSchema(baseConfig)
+  const config = useMemo(() => discoveredSchema.data ? { ...baseConfig, ...discoveredSchema.data } : baseConfig, [baseConfig, discoveredSchema.data])
   const schema = config.schema || discoveredSchema.schema
   const [search, setSearch] = useState("")
   const [namespaces, setNamespaces] = useState<string[]>([])
@@ -1475,8 +1476,9 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
 }
 
 /** Long annotation values (JSON, certificates) are clamped; JSON is pretty-printed when expanded. */
-export function ResourceDetail({ config }: { config: ResourceConfig }) {
-  const discoveredSchema = useCrdSchema(config.schema ? "" : apiVersionFromListPath(config.listPath), config.id)
+export function ResourceDetail({ config: baseConfig }: { config: ResourceConfig }) {
+  const discoveredSchema = useCrdSchema(baseConfig)
+  const config = useMemo(() => discoveredSchema.data ? { ...baseConfig, ...discoveredSchema.data } : baseConfig, [baseConfig, discoveredSchema.data])
   const schema = config.schema || discoveredSchema.schema
   const { namespace, name } = useParams()
   const navigate = useNavigate()

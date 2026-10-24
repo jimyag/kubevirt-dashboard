@@ -1,5 +1,44 @@
 import { expect, test } from "bun:test"
-import { initialSchemaValue, resolvedSchema, schemaIssues, withSchemaField, type StructuralSchema } from "../src/lib/crd-schema"
+import { hasReadOnlyValue, immutableSchema, originalArrayItem, initialSchemaValue, resolvedSchema, schemaIssues, withSchemaField, type StructuralSchema } from "../src/lib/crd-schema"
+import { humanizeKey } from "../src/lib/detail-values"
+
+test("generated field labels preserve acronym plurals and split following words", () => {
+  expect(humanizeKey("podIPs")).toBe("Pod IPs")
+  expect(humanizeKey("destinationCIDRs")).toBe("Destination CIDRs")
+  expect(humanizeKey("loadBalancerIPs")).toBe("Load balancer IPs")
+  expect(humanizeKey("allowedCIDRsList")).toBe("Allowed CIDRs list")
+  expect(humanizeKey("cidrs")).toBe("CIDRs")
+  expect(humanizeKey("HTTPRoute")).toBe("HTTP route")
+  expect(humanizeKey("lanIp")).toBe("LAN IP")
+})
+
+test("present read-only descendants protect ancestors including array and map entries", () => {
+  const schema: StructuralSchema = { properties: { spec: { allOf: [{ properties: { locked: { readOnly: true }, editable: { type: "string" } } }] } } }
+  for (const locked of [false, 0, "", null]) expect(hasReadOnlyValue(schema, { spec: { locked } })).toBe(true)
+  expect(hasReadOnlyValue(schema, { spec: { editable: "value" } })).toBe(false)
+  expect(hasReadOnlyValue(schema, {})).toBe(false)
+  expect(hasReadOnlyValue({ items: schema }, [{ spec: { locked: false } }])).toBe(true)
+  expect(hasReadOnlyValue({ additionalProperties: schema }, { entry: { spec: { locked: 0 } } })).toBe(true)
+  expect(hasReadOnlyValue({ readOnly: true }, undefined)).toBe(false)
+})
+
+test("CEL immutable fields lock existing values while creation and new keyed items stay editable", () => {
+  const field: StructuralSchema = { type: "string", "x-kubernetes-validations": [{ rule: " self == oldSelf ", message: "immutable" }] }
+  expect(immutableSchema(field)).toBe(true)
+  expect(immutableSchema({ allOf: [field, { "x-kubernetes-validations": [{ rule: "self.size() > 0" }] }] })).toBe(true)
+  expect(immutableSchema({ "x-kubernetes-validations": [{ rule: "self >= oldSelf" }] })).toBe(false)
+  for (const value of [false, 0, "", null]) expect(hasReadOnlyValue(field, value, value)).toBe(true)
+  expect(hasReadOnlyValue(field, "new")).toBe(false)
+  const schema: StructuralSchema = { type: "array", "x-kubernetes-list-map-keys": ["name"], items: { type: "object", properties: { token: field } } }
+  const original = [{ name: "one", token: "a" }, { name: "two", token: "b" }]
+  expect(originalArrayItem(schema, original, { name: "two" }, 0)).toEqual(original[1])
+  expect(originalArrayItem(schema, original, { name: "new" }, 0)).toBeUndefined()
+  expect(hasReadOnlyValue(schema, [{ name: "two", token: "b" }], original)).toBe(true)
+  expect(hasReadOnlyValue(schema, [{ name: "new", token: "c" }], original)).toBe(false)
+  expect(hasReadOnlyValue({ additionalProperties: field }, { saved: "a" }, { saved: "a" })).toBe(true)
+  expect(hasReadOnlyValue({ additionalProperties: field }, { added: "b" }, {})).toBe(false)
+  expect(hasReadOnlyValue({ additionalProperties: field }, { constructor: "new" }, {})).toBe(false)
+})
 
 test("schema defaults preserve zero/false and avoid materializing optional trees", () => {
   const schema: StructuralSchema = { type: "object", required: ["spec"], properties: { spec: { type: "object", required: ["name"], properties: { name: { type: "string" }, replicas: { type: "integer", default: 0 }, enabled: { type: "boolean", default: false }, optional: { type: "object", properties: { nested: { type: "string", default: "unused" } } }, status: { type: "string", default: "server", readOnly: true } } } } }

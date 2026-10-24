@@ -33,6 +33,7 @@ export type StructuralSchema = {
   "x-kubernetes-preserve-unknown-fields"?: boolean
   "x-kubernetes-list-type"?: string
   "x-kubernetes-list-map-keys"?: string[]
+  "x-kubernetes-validations"?: Array<{ rule: string; message?: string }>
 }
 
 export function resolvedSchema(schema: StructuralSchema): StructuralSchema {
@@ -71,6 +72,27 @@ export function withSchemaField(value: unknown, key: string, next: unknown): Rec
   const result = { ...schemaRecord(value), [key]: next }
   if (next === undefined) delete result[key]
   return result
+}
+
+/** Other CEL expressions remain authoritative on the API server. */
+export const immutableSchema = (schema: StructuralSchema): boolean => schema["x-kubernetes-validations"]?.some(({ rule }) => /^\s*self\s*==\s*oldSelf\s*$/.test(rule)) === true || schema.allOf?.some(immutableSchema) === true
+
+export function originalArrayItem(schema: StructuralSchema, original: unknown, value: unknown, index: number): unknown {
+  if (!Array.isArray(original)) return undefined
+  const keys = schema["x-kubernetes-list-map-keys"]
+  return keys?.length ? original.find((item) => keys.every((key) => JSON.stringify(schemaRecord(item)[key]) === JSON.stringify(schemaRecord(value)[key]))) : original[index]
+}
+
+/** Removing an ancestor must not bypass a descendant's read-only contract. */
+export function hasReadOnlyValue(input: StructuralSchema, value: unknown, original?: unknown): boolean {
+  if (value === undefined) return false
+  const schema = resolvedSchema(input)
+  if (schema.readOnly || (original !== undefined && immutableSchema(schema))) return true
+  if (Array.isArray(value)) return value.some((item, index) => hasReadOnlyValue(schema.items || {}, item, originalArrayItem(schema, original, item, index)))
+  const map = typeof schema.additionalProperties === "object" ? schema.additionalProperties : undefined
+  return Object.entries(schemaRecord(value)).some(([key, item]) => hasReadOnlyValue(
+    Object.prototype.hasOwnProperty.call(schema.properties || {}, key) ? schema.properties![key] : map || {}, item, Object.prototype.hasOwnProperty.call(schemaRecord(original), key) ? schemaRecord(original)[key] : undefined,
+  ))
 }
 
 export type SchemaIssue = { path: string; message: string; values?: Record<string, string | number> }

@@ -11,10 +11,11 @@ import { asList, asRecord, kubeOvnAnnotations, listItems, relativeTime, requestJ
 import { cidrContains, ipv4Cidr, isDnsLabel } from "@/lib/validate"
 import { KubeOvnMissing } from "@/pages/vpc"
 import { t } from "@/lib/i18n"
+import { reservedIpNamespace, reservedIpNamespaceAnnotation } from "@/lib/vm-network"
 
 const OVN = "/apis/kubeovn.io/v1"
 
-type Row = { vip: KubeObject; address: string; subnet: string; namespace: string; usedBy: KubeObject | undefined; status: string }
+type Row = { vip: KubeObject; address: string; subnet: string; namespace: string; usedBy: KubeObject | undefined; binding: string; status: string }
 
 const vipStatus = (vip: KubeObject) => {
   const ready = asList(asRecord(vip.status).conditions).find((condition) => condition.type === "Ready")
@@ -54,9 +55,10 @@ export function ReservedIpListPage() {
         vip,
         address: str(asRecord(vip.status).v4ip) || str(spec.v4ip),
         subnet: str(spec.subnet),
-        namespace: str(spec.namespace),
+        namespace: reservedIpNamespace(vip),
         usedBy: data.vms.find((vm) => str(asRecord(asRecord(asRecord(asRecord(vm.spec).template).metadata).annotations)[kubeOvnAnnotations.vip]) === vip.metadata.name),
-        status: vipStatus(vip),
+        binding: vip.metadata.labels?.["ovn.kubernetes.io/ip_reserved"] || "",
+        status: str(spec.namespace) ? "Needs recreation" : vipStatus(vip),
       }
     }), [data])
   const filtered = useFilteredRows(rows, fields, search)
@@ -94,11 +96,11 @@ export function ReservedIpListPage() {
             header: t("Used by"),
             cell: (row) => row.usedBy
               ? <Link to={`/kubevirt/virtualization/virtual-machines/${row.usedBy.metadata.namespace}/${row.usedBy.metadata.name}/network`} className="text-sm font-medium hover:text-primary transition-colors">{row.usedBy.metadata.name}</Link>
-              : <span className="text-sm text-muted-foreground">{t("Free")}</span>,
+              : <span className="text-sm text-muted-foreground">{row.binding || t("Free")}</span>,
           },
           { header: t("Status"), cell: (row) => <StatusDot status={row.status} /> },
           { header: t("Created"), className: "text-right", cell: (row) => <span className="text-sm text-muted-foreground tabular-nums" title={row.vip.metadata.creationTimestamp}>{relativeTime(row.vip.metadata.creationTimestamp)}</span> },
-          { header: "", className: "w-12 text-right", cell: (row) => <Button size="icon" variant="ghost" aria-label={t("Delete {v0}", { v0: row.vip.metadata.name })} onClick={() => setDeleting(row)}><Trash2 className="size-4 text-muted-foreground" /></Button> },
+          { header: "", className: "w-12 text-right", cell: (row) => <Button size="icon" variant="ghost" disabled={!!row.usedBy || !!row.binding} title={row.usedBy || row.binding ? t("Stop using this address before releasing it.") : undefined} aria-label={t("Delete {v0}", { v0: row.vip.metadata.name })} onClick={() => setDeleting(row)}><Trash2 className="size-4 text-muted-foreground" /></Button> },
         ]}
       />
       <ReserveIpDialog open={creating} onOpenChange={setCreating} subnets={data.subnets} vips={data.vips} onCreated={reload} />
@@ -106,13 +108,13 @@ export function ReservedIpListPage() {
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
         title={t("Release reserved IP {address}?", { address: deleting?.address || deleting?.vip.metadata.name })}
-        description={deleting?.usedBy
-          ? t("Instance {name} uses this address. It gets a new address the next time it starts.", { name: deleting.usedBy.metadata.name })
-          : t("The address returns to the subnet pool.")}
+        description={t("The address returns to the subnet pool.")}
         destructive
         confirmLabel={t("Release")}
         onConfirm={async () => {
-          await requestJson(`${OVN}/vips/${deleting?.vip.metadata.name}`, { method: "DELETE" })
+          const current = await requestJson(`${OVN}/vips/${deleting?.vip.metadata.name}`, { method: "GET" }) as KubeObject
+          if (deleting?.usedBy || current.metadata.labels?.["ovn.kubernetes.io/ip_reserved"]) throw new Error(t("Stop using this address before releasing it."))
+          await requestJson(`${OVN}/vips/${current.metadata.name}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiVersion: "v1", kind: "DeleteOptions", preconditions: { resourceVersion: current.metadata.resourceVersion } }) })
           reload()
         }}
       />
@@ -152,8 +154,8 @@ function ReserveIpDialog({ open, onOpenChange, subnets, vips, onCreated }: { ope
           body: JSON.stringify({
             apiVersion: "kubeovn.io/v1",
             kind: "Vip",
-            metadata: { name },
-            spec: { subnet: subnet.metadata.name, ...(values.namespace.trim() ? { namespace: values.namespace.trim() } : {}), ...(address ? { v4ip: address } : {}) },
+            metadata: { name, annotations: { [reservedIpNamespaceAnnotation]: values.namespace.trim() } },
+            spec: { subnet: subnet.metadata.name, ...(address ? { v4ip: address } : {}) },
           }),
         })
         onCreated()

@@ -59,6 +59,7 @@ import {
   str,
   subnetUsage,
   useAsync,
+  useDiscovery,
   useNamespaces,
   useNetworkProfile,
   type KubeObject,
@@ -66,7 +67,7 @@ import {
 import { engineLabel, isGlobalGroup, listSecurityGroups, parseSgSelection, sgRefKey, sgSelectionKey, useSgProvider, vmSecurityGroupRefs, type SecurityGroup } from "@/lib/security-groups"
 import { fetchInstanceUsage, formatBytes, useMetricsPoll } from "@/lib/metrics"
 import { cidrContains, ipv4Cidr, isDnsLabel, isQuantity } from "@/lib/validate"
-import { bandwidthProblem, bandwidthText, listAttachableNetworks, nextNicName, type AttachableNetwork } from "@/lib/vm-network"
+import { bandwidthProblem, bandwidthText, canUseReservedIp, listAttachableNetworks, nextNicName, type AttachableNetwork } from "@/lib/vm-network"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
 import { t } from "@/lib/i18n"
 import { usePolling } from "@/lib/polling"
@@ -445,6 +446,8 @@ export function CreateInstancePage() {
   const navigate = useNavigate()
   const namespaces = useNamespaces()
   const profile = useNetworkProfile()
+  const discovery = useDiscovery()
+  const cdiAvailable = discovery.hasResource("cdi.kubevirt.io/v1beta1", "datavolumes")
   const { provider: defaultEngine, providers: engines } = useSgProvider()
   const [step, setStep] = useState<StepId>("basics")
   const [creating, setCreating] = useState(false)
@@ -507,13 +510,14 @@ export function CreateInstancePage() {
   )
 
   // Sensible defaults once catalog data arrives.
-  const [defaults, setDefaults] = useState({ dataSources: catalog.dataSources, vpcs: catalog.vpcs, loading: catalogLoading, vpc: profile.vpc })
-  if (catalog.dataSources !== defaults.dataSources || catalog.vpcs !== defaults.vpcs || catalogLoading !== defaults.loading || profile.vpc !== defaults.vpc) {
-    setDefaults({ dataSources: catalog.dataSources, vpcs: catalog.vpcs, loading: catalogLoading, vpc: profile.vpc })
+  const [defaults, setDefaults] = useState({ dataSources: catalog.dataSources, vpcs: catalog.vpcs, loading: catalogLoading, vpc: profile.vpc, cdi: cdiAvailable, discoveryLoaded: discovery.loaded })
+  if (catalog.dataSources !== defaults.dataSources || catalog.vpcs !== defaults.vpcs || catalogLoading !== defaults.loading || profile.vpc !== defaults.vpc || cdiAvailable !== defaults.cdi || discovery.loaded !== defaults.discoveryLoaded) {
+    setDefaults({ dataSources: catalog.dataSources, vpcs: catalog.vpcs, loading: catalogLoading, vpc: profile.vpc, cdi: cdiAvailable, discoveryLoaded: discovery.loaded })
     setState((current) => {
       const next = { ...current }
       if (!current.dataSource && catalog.dataSources.length) next.dataSource = `${catalog.dataSources[0].metadata.namespace}/${catalog.dataSources[0].metadata.name}`
-      if (!catalogLoading && !catalog.dataSources.length && current.imageSource === "datasource") next.imageSource = "registry"
+      if (discovery.loaded && !catalogLoading && !catalog.dataSources.length && current.imageSource === "datasource") next.imageSource = cdiAvailable ? "registry" : "containerdisk"
+      if (discovery.loaded && !cdiAvailable) { next.imageSource = "containerdisk"; next.dataDisks = [] }
       if (profile.vpc && !current.vpc && catalog.vpcs.length) next.vpc = catalog.vpcs.find((vpc) => asRecord(vpc.status).default === true)?.metadata.name || catalog.vpcs[0].metadata.name
       // Kube-OVN subnets are routable, so let the guest own the subnet address by default.
       if (profile.vpc && !defaults.vpc) next.binding = "bridge"
@@ -527,15 +531,12 @@ export function CreateInstancePage() {
     return asRecord(vpc.status).default === true || allowed.length === 0 || allowed.includes(state.namespace)
   }
   const usableVpcs = catalog.vpcs.filter(vpcAllowsNamespace)
-  const vpcSubnets = catalog.subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === state.vpc && !["join"].includes(subnet.metadata.name))
+  const vpcSubnets = catalog.subnets.filter((subnet) => str(asRecord(subnet.spec).vpc, "ovn-cluster") === state.vpc && str(asRecord(subnet.spec).provider, "ovn") === "ovn" && subnet.metadata.name !== "join")
   const selectedSubnet = catalog.subnets.find((subnet) => subnet.metadata.name === state.subnet)
   const subnetCidr = ipv4Cidr(str(asRecord(selectedSubnet?.spec).cidrBlock))
   // Reserved IPs of the chosen subnet that this namespace may use and no other instance holds.
   const usedVips = new Set(catalog.vms.map((item) => str(asRecord(asRecord(asRecord(asRecord(item.spec).template).metadata).annotations)[kubeOvnAnnotations.vip])).filter(Boolean))
-  const freeVips = catalog.vips.filter((vip) => {
-    const spec = asRecord(vip.spec)
-    return str(spec.subnet) === state.subnet && (!str(spec.namespace) || str(spec.namespace) === state.namespace) && !str(spec.type) && !usedVips.has(vip.metadata.name)
-  })
+  const freeVips = catalog.vips.filter((vip) => canUseReservedIp(vip, state.subnet, state.namespace, usedVips))
   const vipAddress = (vip?: KubeObject) => str(asRecord(vip?.status).v4ip) || str(asRecord(vip?.spec).v4ip)
 
   const defaultStorageClass = catalog.storageClasses.find((sc) => sc.metadata.annotations?.["storageclass.kubernetes.io/is-default-class"] === "true")?.metadata.name
@@ -547,16 +548,17 @@ export function CreateInstancePage() {
   else if (state.specMode === "instancetype" && !state.instanceType) problems.basics = t("Choose an instance type.")
   else if (state.specMode === "custom" && (!Number.isInteger(state.cpu) || state.cpu < 1)) problems.basics = t("vCPU must be a whole number of at least 1.")
   else if (state.specMode === "custom" && !isQuantity(state.memory)) problems.basics = t("Memory must be a quantity such as 4Gi.")
-  if (state.imageSource === "datasource" && !state.dataSource) problems.image = t("Choose an image.")
+  if (discovery.loaded && !cdiAvailable && (state.imageSource !== "containerdisk" || state.dataDisks.length > 0)) problems.image = t("Persistent disks require CDI.")
+  else if (state.imageSource === "datasource" && !state.dataSource) problems.image = t("Choose an image.")
   if (state.imageSource === "registry" && !state.registryUrl.trim()) problems.image = t("Enter a registry image.")
   if (state.imageSource === "http" && !/^https?:\/\//.test(state.httpUrl)) problems.image = t("Enter an http(s) URL.")
   if (state.imageSource === "containerdisk" && !state.containerDisk.trim()) problems.image = t("Enter a container disk image.")
   if (state.imageSource === "pvc" && !state.pvcName) problems.image = t("Choose a volume to clone.")
   if (!problems.image && state.imageSource !== "containerdisk" && !isQuantity(state.rootSize)) problems.image = t("System disk size must be a quantity such as 20Gi.")
   if (!problems.image && state.dataDisks.some((size) => !isQuantity(size))) problems.image = t("Data disk sizes must be quantities such as 50Gi.")
-  if (profile.vpc && !state.subnet) problems.network = t("Choose a subnet.")
+  if (profile.vpc && !vpcSubnets.some((subnet) => subnet.metadata.name === state.subnet)) problems.network = t("Choose a subnet.")
   else if (profile.vpc && catalog.vpcs.length > 0 && !usableVpcs.some((vpc) => vpc.metadata.name === state.vpc)) problems.network = t("VPC {vpc} does not allow namespace {namespace}.", { vpc: state.vpc, namespace: state.namespace })
-  else if (profile.vpc && ipMode === "reserved" && !state.reservedIp) problems.network = t("Choose a reserved IP.")
+  else if (profile.vpc && ipMode === "reserved" && !freeVips.some((vip) => vip.metadata.name === state.reservedIp)) problems.network = t("Choose a reserved IP.")
   else if (profile.vpc && ipMode === "fixed" && !state.fixedIp.trim()) problems.network = t("Enter a private IP.")
   else if (profile.vpc && state.fixedIp.trim() && subnetCidr && !cidrContains(subnetCidr, state.fixedIp)) problems.network = t("{ip} is not inside {cidr}.", { ip: state.fixedIp.trim(), cidr: subnetCidr })
   else if (profile.vpc && state.fixedIp.trim() && state.fixedIp.trim() === str(asRecord(selectedSubnet?.spec).gateway)) problems.network = t("The private IP cannot be the subnet gateway.")
@@ -691,11 +693,12 @@ export function CreateInstancePage() {
               <StepSection title={t("Image")}>
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   <ChoiceCard selected={state.imageSource === "datasource"} onClick={() => set({ imageSource: "datasource" })} disabled={catalog.dataSources.length === 0} icon={ImageIcon} title={t("Public image")} description={catalog.dataSources.length ? t("Images published as DataSources") : t("No DataSources found")} />
-                  <ChoiceCard selected={state.imageSource === "registry"} onClick={() => set({ imageSource: "registry" })} icon={ImageIcon} title={t("Registry image")} description={t("Import a containerdisk into a persistent disk")} />
-                  <ChoiceCard selected={state.imageSource === "http"} onClick={() => set({ imageSource: "http" })} icon={ImageIcon} title={t("Image URL")} description={t("Import a qcow2/raw image over HTTP")} />
-                  <ChoiceCard selected={state.imageSource === "pvc"} onClick={() => set({ imageSource: "pvc" })} icon={HardDrive} title={t("Clone a volume")} description={t("Copy an existing disk in this namespace")} />
+                  <ChoiceCard selected={state.imageSource === "registry"} disabled={!cdiAvailable} onClick={() => set({ imageSource: "registry" })} icon={ImageIcon} title={t("Registry image")} description={t("Import a containerdisk into a persistent disk")} />
+                  <ChoiceCard selected={state.imageSource === "http"} disabled={!cdiAvailable} onClick={() => set({ imageSource: "http" })} icon={ImageIcon} title={t("Image URL")} description={t("Import a qcow2/raw image over HTTP")} />
+                  <ChoiceCard selected={state.imageSource === "pvc"} disabled={!cdiAvailable} onClick={() => set({ imageSource: "pvc" })} icon={HardDrive} title={t("Clone a volume")} description={t("Copy an existing disk in this namespace")} />
                   <ChoiceCard selected={state.imageSource === "containerdisk"} onClick={() => set({ imageSource: "containerdisk" })} icon={ImageIcon} title={t("Ephemeral")} description={t("Boot a containerdisk; changes are lost on stop")} />
                 </div>
+                {discovery.loaded && !cdiAvailable && <p className="text-sm text-muted-foreground">{t("Persistent disks require CDI.")}</p>}
                 {state.imageSource === "datasource" && (
                   <FieldRow label={t("Image")}>
                     <NativeSelect value={state.dataSource} onChange={(e) => set({ dataSource: e.target.value })}>
@@ -736,7 +739,7 @@ export function CreateInstancePage() {
                       <Button size="icon" variant="ghost" aria-label={t("Remove data disk")} onClick={() => set({ dataDisks: state.dataDisks.filter((_, i) => i !== index) })}><Trash2 className="size-4 text-muted-foreground" /></Button>
                     </div>
                   ))}
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => set({ dataDisks: [...state.dataDisks, "50Gi"] })}><Plus className="size-4" />{t("Add data disk")}</Button>
+                  <Button size="sm" variant="outline" disabled={!cdiAvailable} className="gap-1.5" onClick={() => set({ dataDisks: [...state.dataDisks, "50Gi"] })}><Plus className="size-4" />{t("Add data disk")}</Button>
                 </div>
               </StepSection>
             </>
