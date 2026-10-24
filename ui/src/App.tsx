@@ -22,6 +22,7 @@ import { KubernetesCategoryPage, KubernetesManagementPage, KubeVirtCategoryPage,
 import { t, useLocale } from "@/lib/i18n";
 import { VMDetailContent } from "./pages/instance-detail";
 import { DVDetailContent, DVList } from "./pages/disks";
+import { CustomResourceCatalog, CustomResourcePage } from "./pages/custom-resources";
 
 function resourceRoutes(config: ResourceConfig) {
   return [
@@ -45,6 +46,13 @@ function App() {
             <Routes>
               <Route path="/" element={<OverviewPage />} />
               <Route path="/catalog" element={<CatalogPage />} />
+              <Route path="/catalog/crds" element={<CustomResourceCatalog />} />
+              <Route path="/networks/envoy-gateway" element={<CustomResourceCatalog envoy />} />
+              <Route path="/catalog/crds/:group/:plural" element={<CustomResourcePage />} />
+              <Route path="/catalog/crds/:group/:plural/:version" element={<CustomResourcePage />} />
+              <Route path="/catalog/crds/:group/:plural/:version/:namespace/:name" element={<CustomResourcePage view="detail" />} />
+              <Route path="/catalog/crds/:group/:plural/:version/:namespace/:name/events" element={<CustomResourcePage view="events" />} />
+              <Route path="/catalog/crds/:group/:plural/:version/:namespace/:name/manifest" element={<CustomResourcePage view="manifest" />} />
               <Route path="/events" element={<EventsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/monitoring" element={<MonitoringSettingsPage />} />

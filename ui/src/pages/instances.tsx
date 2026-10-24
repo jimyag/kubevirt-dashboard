@@ -70,11 +70,12 @@ import { bandwidthProblem, bandwidthText, listAttachableNetworks, nextNicName, t
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
 import { t } from "@/lib/i18n"
 import { usePolling } from "@/lib/polling"
+import { jsonPut } from "@/resources/configs"
 
 const VM_API = "/apis/kubevirt.io/v1"
 const SUB_API = "/apis/subresources.kubevirt.io/v1"
 const vmAction = async (vm: KubeObject, action: "start" | "stop" | "restart") =>
-  requestJson(`${SUB_API}/namespaces/${vm.metadata.namespace}/virtualmachines/${vm.metadata.name}/${action}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" })
+  requestJson(`${SUB_API}/namespaces/${vm.metadata.namespace}/virtualmachines/${vm.metadata.name}/${action}`, jsonPut())
 
 const vmDelete = async (vm: KubeObject) =>
   requestJson(`${VM_API}/namespaces/${vm.metadata.namespace}/virtualmachines/${vm.metadata.name}`, { method: "DELETE" })

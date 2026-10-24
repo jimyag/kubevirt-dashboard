@@ -1,4 +1,7 @@
 import type { CreateFormField, ResourceAction, ResourceConfig } from "@/components/resource-management";
+import { keyValueText, parseKeyValueText } from "../../lib/key-value";
+import { requestJson } from "../../lib/kube";
+import { t } from "../../lib/i18n";
 import { calicoDetailSections } from "../calico/detail-sections";
 import { ciliumEndpointDetailSections, ciliumPolicyDetailSections } from "../cilium/detail-sections";
 import { kubeOvnDetailSections } from "../kube-ovn/detail-sections";
@@ -42,6 +45,11 @@ const numberValue = (value: string | boolean, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const replicaCount = (value: string | boolean) => {
+  const parsed = typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 1;
+};
+
 const stringValue = (value: string | boolean | undefined, fallback = "") => {
   const next = String(value ?? "").trim();
   return next || fallback;
@@ -50,17 +58,6 @@ const stringValue = (value: string | boolean | undefined, fallback = "") => {
 const getRecord = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {});
 const listNames = (value: unknown) => Array.isArray(value) ? value.map((item) => item?.name || item?.metadata?.name || JSON.stringify(item)).join(", ") : "";
 const selectorText = (value: unknown) => Object.entries(getRecord(value)).map(([key, val]) => `${key}=${val}`).join(", ");
-const keyValueText = (value?: Record<string, string>) => Object.entries(value || {}).map(([key, val]) => `${key}=${val}`).join("\n");
-const parseKeyValueText = (text: string) => Object.fromEntries(
-  text.split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [key, ...rest] = line.split("=");
-      return [key.trim(), rest.join("=").trim()];
-    })
-    .filter(([key]) => key)
-);
 const selectorFromValues = (values: Record<string, string | boolean>, keyName = "selectorKey", valueName = "selectorValue") => ({
   matchLabels: { [stringValue(values[keyName], "app")]: stringValue(values[valueName], "default") },
 });
@@ -76,7 +73,8 @@ const jsonPost = (body: unknown): RequestInit => ({
 });
 const jsonPut = (body: unknown = {}): RequestInit => ({
   method: "PUT",
-  headers: { "Content-Type": "application/json", Accept: "application/json" },
+  // KubeVirt action endpoints return an empty response without a declared media type.
+  headers: { "Content-Type": "application/json", Accept: "application/json, */*;q=0.1" },
   body: JSON.stringify(body),
 });
 const resourceRefPath = (base: string, id: string, resource: { metadata: { namespace?: string; name: string } }) =>
@@ -109,10 +107,10 @@ const poolActions: ResourceAction[] = [
   {
     id: "scale-pool",
     label: "Scale",
-    fields: [{ name: "replicas", label: "Replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).replicas || 1) }],
+    fields: [{ name: "replicas", label: "Replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).replicas ?? 1) }],
     buildRequest: (resource, values) => ({
       url: resourceRefPath(poolBase(resource), "virtualmachinepools", resource),
-      options: mergePatch({ spec: { replicas: numberValue(values.replicas, 1) } }),
+      options: mergePatch({ spec: { replicas: replicaCount(values.replicas) } }),
     }),
   },
   {
@@ -192,29 +190,42 @@ const poolActions: ResourceAction[] = [
       { name: "vmName", label: "VM name", defaultValue: "" },
       { name: "nodeName", label: "Target node", defaultValue: "" },
     ],
-    buildRequest: (resource, values) => {
+    buildRequest: async (resource, values) => {
       const vmName = stringValue(values.vmName);
+      const nodeName = stringValue(values.nodeName);
+      if (!vmName || !nodeName) throw new Error(t("VM name and target node are required."));
+      const url = `/apis/kubevirt.io/v1/namespaces/${resource.metadata.namespace}/virtualmachines/${vmName}`;
+      const vm = getRecord(await requestJson(url, {}));
+      const metadata = getRecord(vm.metadata);
+      const owners = Array.isArray(metadata.ownerReferences) ? metadata.ownerReferences.map(getRecord) : [];
+      if (!resource.metadata.uid || !owners.some((owner) => owner.uid === resource.metadata.uid && owner.kind === "VirtualMachinePool")) throw new Error(t("The VM is not owned by this pool."));
+      const poolLabels = getRecord(getRecord(resource.spec).selector).matchLabels;
+      const labels = Object.fromEntries(Object.entries(getRecord(poolLabels)).map(([key]) => [key, null]));
       return {
-        url: `/apis/kubevirt.io/v1/namespaces/${resource.metadata.namespace}/virtualmachines/${vmName}`,
+        url,
         options: mergePatch({
           metadata: {
+            resourceVersion: metadata.resourceVersion,
             labels: {
+              ...labels,
               "kubevirt.io/domain": vmName,
               "kubevirt.io/vm-pool-revision-name": null,
               "kubevirt.io/vmpool": null,
             },
-            ownerReferences: null,
+            ownerReferences: owners.filter((owner) => owner.uid !== resource.metadata.uid),
+            finalizers: (Array.isArray(metadata.finalizers) ? metadata.finalizers : []).filter((item) => item !== "pool.kubevirt.io/finalizer"),
           },
           spec: {
             template: {
               metadata: {
                 labels: {
+                  ...labels,
                   "kubevirt.io/domain": vmName,
                   "kubevirt.io/vm-pool-revision-name": null,
                   "kubevirt.io/vmpool": null,
                 },
               },
-              spec: { nodeSelector: { "kubernetes.io/hostname": stringValue(values.nodeName) } },
+              spec: { nodeSelector: { "kubernetes.io/hostname": nodeName } },
             },
           },
         }),
@@ -270,7 +281,7 @@ const hpaActions: ResourceAction[] = [
     label: "Scale bounds",
     description: "Set replica bounds and the CPU utilization target. Other metrics are kept.",
     fields: [
-      { name: "minReplicas", label: "Min replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).minReplicas || 1) },
+      { name: "minReplicas", label: "Min replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).minReplicas ?? 1) },
       { name: "maxReplicas", label: "Max replicas", type: "number", defaultValue: (r) => String(getRecord(r.spec).maxReplicas || 3) },
       { name: "cpu", label: "CPU utilization %", type: "number", placeholder: "leave empty to keep metrics unchanged", defaultValue: (r) => {
         const cpu = (getRecord(r.spec).metrics as Array<Record<string, unknown>> | undefined || []).find((metric) => getRecord(metric.resource).name === "cpu");
@@ -285,7 +296,7 @@ const hpaActions: ResourceAction[] = [
       const metrics = cpu ? [...current.filter((metric) => getRecord(metric.resource).name !== "cpu"), cpuMetric] : undefined;
       return {
         url: resourceRefPath("/apis/autoscaling/v2", "horizontalpodautoscalers", resource),
-        options: mergePatch({ spec: { minReplicas: numberValue(values.minReplicas, 1), maxReplicas: numberValue(values.maxReplicas, 3), ...(metrics ? { metrics } : {}) } }),
+        options: mergePatch({ spec: { minReplicas: replicaCount(values.minReplicas), maxReplicas: numberValue(values.maxReplicas, 3), ...(metrics ? { metrics } : {}) } }),
       };
     },
   },
@@ -376,10 +387,10 @@ const kubeOvnResourceConfig = ({
   kind,
   allowCreate,
   allowDelete,
-  createFields: [
+  createFields: [...new Map([
     ...(namespaced ? namespaceNameFields(`example-${plural}`) : nameOnlyFields(`example-${plural}`)),
     ...createFields,
-  ],
+  ].map((field) => [field.name, field])).values()],
   buildCreateResource: buildSpec ? (values) => ({
     apiVersion: "kubeovn.io/v1",
     kind,
@@ -441,10 +452,10 @@ const extensionResourceConfig = ({
   kind,
   allowCreate,
   allowDelete,
-  createFields: [
+  createFields: [...new Map([
     ...(namespaced ? namespaceNameFields(`example-${plural}`) : nameOnlyFields(`example-${plural}`)),
     ...createFields,
-  ],
+  ].map((field) => [field.name, field])).values()],
   buildCreateResource: buildSpec ? (values) => ({
     apiVersion: groupVersion,
     kind,
@@ -537,6 +548,7 @@ export {
   networkAttachmentDetailSections,
   networkPolicyActions,
   numberValue,
+  replicaCount,
   parseKeyValueText,
   persistentVolumeClaimDetailSections,
   persistentVolumeDetailSections,

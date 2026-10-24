@@ -294,7 +294,7 @@ export function useNamespaces() {
   useEffect(() => {
     apiFetch("/api/v1/namespaces-list")
       .then((res) => res.ok ? res.json() : [])
-      .then((data: string[]) => setNamespaces((data || []).filter(Boolean)))
+      .then((data: string[]) => setNamespaces((data || []).filter((namespace) => namespace && namespace !== "all")))
       .catch(() => setNamespaces(["default"]))
   }, [])
   return namespaces

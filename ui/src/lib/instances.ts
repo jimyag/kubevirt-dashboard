@@ -147,8 +147,6 @@ export const buildVirtualMachine = (state: WizardState, vpcEnabled: boolean) => 
     else if (state.fixedIp.trim()) templateAnnotations[kubeOvnAnnotations.ipAddress] = state.fixedIp.trim()
     Object.assign(templateAnnotations, bandwidthAnnotations(state.bandwidth))
   }
-  const extra = extraNicSpec(state.extraNics)
-  Object.assign(templateAnnotations, extra.annotations)
   if (state.securityGroups.length && aclProvider === "kube-ovn") {
     templateAnnotations[kubeOvnAnnotations.securityGroups] = state.securityGroups.join(",")
     templateAnnotations[kubeOvnAnnotations.portSecurity] = "true"
@@ -161,6 +159,8 @@ export const buildVirtualMachine = (state: WizardState, vpcEnabled: boolean) => 
     })
   }
 
+  const extra = extraNicSpec(state.extraNics, templateAnnotations)
+  Object.assign(templateAnnotations, extra.annotations)
   const domain: UnknownRecord = {
     devices: { disks, interfaces: [{ name: "default", [state.binding]: {} }, ...extra.interfaces] },
   }

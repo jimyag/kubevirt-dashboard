@@ -169,6 +169,8 @@ export const navSections: NavSection[] = [
         children: [
           { name: "Resource Catalog", path: "/catalog", icon: ListChecks, match: ["/kubernetes", "/kubevirt", "/storage", "/networks"] },
           { name: "Helm Releases", path: "/catalog/helm", icon: Package },
+          { name: "Custom resources", path: "/catalog/crds", icon: ListTree },
+          { name: "Envoy Gateway", path: "/networks/envoy-gateway", icon: Network, requires: ["gateway.envoyproxy.io/v1alpha1", "envoyproxies"] },
         ],
       },
       {

@@ -19,11 +19,11 @@ export const kubeOvnVlansConfig: ResourceConfig = {
       apiVersion: "kubeovn.io/v1",
       kind: "Vlan",
       metadata: { name: shared.stringValue(values.name, "vlan100") },
-      spec: { id: shared.numberValue(values.id, 100), provider: shared.stringValue(values.provider, "provider-net") },
+      spec: { id: Number(shared.stringValue(values.id, "100")), provider: shared.stringValue(values.provider, "provider-net") },
     }),
     statusPath: ["spec", "id"],
     detailSections: shared.kubeOvnDetailSections,
-    extraColumns: [{ label: "VLAN ID", value: (r) => String(shared.getRecord(r.spec).id || "N/A") }, { label: "Provider", value: (r) => String(shared.getRecord(r.spec).provider || "N/A") }],
+    extraColumns: [{ label: "VLAN ID", value: (r) => String(shared.getRecord(r.spec).id ?? "N/A") }, { label: "Provider", value: (r) => String(shared.getRecord(r.spec).provider || "N/A") }],
     createTemplate: `apiVersion: kubeovn.io/v1
 kind: Vlan
 metadata:

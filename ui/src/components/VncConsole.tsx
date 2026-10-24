@@ -3,6 +3,7 @@ import { Maximize2, Minimize2, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import RFB from "../vendor/novnc.all.js";
 import { t } from "@/lib/i18n";
+import { ConfirmDialog } from "./console";
 
 type RfbClient = {
   scaleViewport: boolean;
@@ -44,13 +45,13 @@ export function VncConsole({ namespace, name }: { namespace: string, name: strin
         setStatus("connecting");
         const moduleValue = RFB as { default?: unknown };
         const RFBC = (moduleValue.default || RFB) as RfbConstructor;
-        if (typeof RFBC !== "function") { setErrorMsg("VNC 引擎载入失败：找不到有效的构造函数。"); setStatus("error"); return; }
+        if (typeof RFBC !== "function") { setErrorMsg("Could not load the VNC engine."); setStatus("error"); return; }
         rfb = new RFBC(containerRef.current!, wsUrl, { wsProtocols: ["binary"] });
         rfb.scaleViewport = true; rfb.resizeSession = true; rfb.focusOnClick = true;
         rfb.addEventListener("connect", () => setStatus("connected"));
-        rfb.addEventListener("disconnect", (e) => { setStatus("disconnected"); if (e.detail && e.detail.clean === false) { setStatus("error"); setErrorMsg("VNC 连接异常中断"); } });
+        rfb.addEventListener("disconnect", (e) => { setStatus("disconnected"); if (e.detail && e.detail.clean === false) { setStatus("error"); setErrorMsg("The VNC connection was interrupted."); } });
         rfbRef.current = rfb;
-      } catch (e) { setStatus("error"); setErrorMsg(e instanceof Error ? e.message : "本地 VNC 引擎初始化失败"); }
+      } catch (e) { setStatus("error"); setErrorMsg(e instanceof Error ? e.message : "Could not initialize the VNC engine."); }
     };
     startVnc(); return () => { if (rfb) rfb.disconnect(); };
   }, [namespace, name]);
@@ -60,7 +61,7 @@ export function VncConsole({ namespace, name }: { namespace: string, name: strin
       <div className="flex items-center justify-between gap-2 bg-muted/50 border-b p-3 px-5">
          <div className="flex items-center gap-3">
             <div className={cn("w-2.5 h-2.5 rounded-full", status === "connected" ? "bg-green-600" : status === "error" ? "bg-destructive" : "bg-muted-foreground")} />
-            <span className="text-[10px] font-semibold text-muted-foreground">{status === "connected" ? (isTheaterMode ? `VNC: ${namespace}/${name}` : t("VNC session active")) : status === "error" ? t("Connection error") : t("Initializing VNC...")}</span>
+            <span className="text-[10px] font-semibold text-muted-foreground">{status === "connected" ? (isTheaterMode ? `VNC: ${namespace}/${name}` : t("VNC session active")) : status === "error" ? t("Connection error") : status === "disconnected" ? t("Offline") : t("Initializing VNC...")}</span>
          </div>
          {status === "connected" && (
            <div className="flex gap-2">
@@ -70,33 +71,27 @@ export function VncConsole({ namespace, name }: { namespace: string, name: strin
          )}
       </div>
       <div ref={containerRef} className="flex-1 bg-background flex items-center justify-center overflow-auto pointer-events-auto" />
-      {status === "error" && (
+      {(status === "error" || status === "disconnected") && (
         <div className="absolute inset-0 top-12 bg-background/90 backdrop-blur-sm flex items-center justify-center p-8 z-10 text-center">
            <div className="max-w-md space-y-4">
               <div className="bg-destructive/10 p-4 rounded-full w-16 h-16 mx-auto flex items-center justify-center">
                  <ShieldAlert className="text-destructive" size={32} />
               </div>
               <h3 className="text-foreground font-semibold text-sm">{t("VNC connection failed")}</h3>
-              <p className="text-muted-foreground text-xs font-medium leading-relaxed">{errorMsg || t("Could not complete the VNC handshake.")}</p>
-              <button onClick={() => window.location.reload()} className="px-6 py-2 bg-primary text-primary-foreground rounded-lg text-[10px] font-semibold hover:bg-primary/90 transition-all">重试</button>
+              <p className="text-muted-foreground text-xs font-medium leading-relaxed">{errorMsg ? t(errorMsg) : t("Could not complete the VNC handshake.")}</p>
+              <button onClick={() => window.location.reload()} className="px-6 py-2 bg-primary text-primary-foreground rounded-lg text-[10px] font-semibold hover:bg-primary/90 transition-all">{t("Retry")}</button>
            </div>
         </div>
       )}
-      {showCADModal && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center p-4 bg-background/60 backdrop-blur-md">
-           <div className="bg-card rounded-lg shadow-2xl border max-w-sm w-full p-8 animate-in zoom-in-95 duration-200">
-              <div className="flex flex-col items-center text-center space-y-4">
-                 <div className="bg-destructive/10 p-4 rounded-full"><ShieldAlert className="text-destructive" size={32} /></div>
-                 <h3 className="text-lg font-semibold text-foreground">确认发送指令？</h3>
-                 <p className="text-muted-foreground text-xs font-medium leading-relaxed">{t("Sending Ctrl+Alt+Del may restart the VM. Make sure all work is saved.")}</p>
-                 <div className="flex flex-col w-full gap-3 pt-4">
-                    <button onClick={sendCAD} className="w-full py-3 bg-destructive hover:bg-destructive/90 text-primary-foreground rounded-lg text-[11px] font-semibold transition-all shadow-lg active:scale-95">确认发送</button>
-                    <button onClick={() => setShowCADModal(false)} className="w-full py-3 bg-muted hover:bg-muted/50 text-foreground rounded-lg text-[11px] font-semibold transition-all active:scale-95">取消操作</button>
-                 </div>
-              </div>
-           </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={showCADModal}
+        onOpenChange={setShowCADModal}
+        title={t("Send Ctrl+Alt+Del?")}
+        description={t("Sending Ctrl+Alt+Del may restart the VM. Make sure all work is saved.")}
+        confirmLabel={t("Send")}
+        onConfirm={sendCAD}
+        destructive
+      />
     </div>
   );
 }

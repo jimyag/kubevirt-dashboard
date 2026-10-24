@@ -63,6 +63,7 @@ const calicoV3ResourcePath = (parts: ApiPathParts) => {
 
 export const expandListPaths = (config: ResourceConfig) => {
   const configured = [config.listPath, ...(config.listPathAlternates || [])];
+  if (config.schema) return configured;
   const expanded = configured.flatMap((path) => {
     const parts = parseApiPath(path);
     if (!parts) return [path];
@@ -73,6 +74,7 @@ export const expandListPaths = (config: ResourceConfig) => {
 
 export const expandResourcePaths = (config: ResourceConfig) => {
   const configured = [config.resourcePath, ...(config.resourcePathAlternates || [])];
+  if (config.schema) return configured;
   const expanded = configured.flatMap((path) => {
     const parts = parseApiPath(path);
     if (!parts) return [path];

@@ -174,9 +174,7 @@ function PodDetailOverview({ resource }: { resource: KubeResource }) {
 function WorkloadDetailOverview({ resource }: { resource: KubeResource }) {
   const spec = asRecord(resource.spec)
   const status = asRecord(resource.status)
-  // CronJobs nest the pod template one level deeper, under the job template.
-  const jobTemplateSpec = asRecord(asRecord(spec.jobTemplate).spec)
-  const template = asRecord(spec.template || jobTemplateSpec.template)
+  const template = asRecord(spec.template)
   const templateSpec = asRecord(template.spec)
   const containers = asRecordList(templateSpec.containers)
   const volumes = asRecordList(templateSpec.volumes)
@@ -303,10 +301,10 @@ function StorageDetailOverview({ resource }: { resource: KubeResource }) {
   return (
     <div className="space-y-4">
       <SummaryRow>
-        <SummaryCard label={t("Phase")} value={status.phase || status.status || resource.kind} variant={String(status.phase || status.status || "")} />
-        <SummaryCard label={t("Capacity")} value={asRecord(status.capacity).storage || asRecord(spec.resources).requests} />
-        <SummaryCard label={t("Storage class")} value={spec.storageClassName || resource.storageClassName || resource.provisioner} />
-        <SummaryCard label={t("Access modes")} value={spec.accessModes || resource.reclaimPolicy} />
+        <SummaryCard label={t(resource.kind === "StorageClass" ? "Kind" : "Phase")} value={status.phase || status.status || resource.kind} variant={String(status.phase || status.status || "")} />
+        <SummaryCard label={t("Capacity")} value={asRecord(status.capacity).storage || asRecord(spec.capacity).storage || asRecord(asRecord(spec.resources).requests).storage} />
+        <SummaryCard label={t(resource.kind === "StorageClass" ? "Provisioner" : "Storage class")} value={spec.storageClassName || resource.storageClassName || resource.provisioner} />
+        <SummaryCard label={t(resource.kind === "StorageClass" ? "Reclaim policy" : "Access modes")} value={spec.accessModes || resource.reclaimPolicy} />
       </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
         <KvSection title={t("Storage")} rows={[
@@ -319,7 +317,7 @@ function StorageDetailOverview({ resource }: { resource: KubeResource }) {
           ]} />
         <KvSection title={t("Source and parameters")} rows={[
             { label: t("Parameters"), value: resource.parameters },
-            { label: t("Source"), value: spec.source || spec.csi || spec.hostPath || spec.nfs },
+            { label: t("Source"), value: spec.dataSourceRef || spec.dataSource || spec.source || spec.csi || spec.hostPath || spec.nfs },
             { label: t("Claim ref"), value: spec.claimRef },
             { label: t("Node affinity"), value: spec.nodeAffinity },
             { label: t("Conditions"), value: status.conditions },
@@ -701,7 +699,7 @@ function PolicyDetailOverview({ resource }: { resource: KubeResource }) {
         <SummaryCard label={t("Type")} value={resource.kind} />
         <SummaryCard label={t("Scopes")} value={spec.scopes || spec.scopeSelector} />
         <SummaryCard label={t("Limits")} value={limits.length || "N/A"} />
-        <SummaryCard label={t("Disruptions")} value={`${compactValue(status.currentHealthy)} / ${compactValue(status.desiredHealthy)}`} />
+        {resource.kind === "PodDisruptionBudget" && <SummaryCard label={t("Disruptions")} value={`${compactValue(status.currentHealthy)} / ${compactValue(status.desiredHealthy)}`} />}
       </SummaryRow>
       <div className="grid gap-4 xl:grid-cols-2">
         <KvSection title={t("Spec")} rows={[
@@ -726,6 +724,7 @@ function PolicyDetailOverview({ resource }: { resource: KubeResource }) {
 function ClusterControlDetailOverview({ resource }: { resource: KubeResource }) {
   const spec = asRecord(resource.spec)
   const status = asRecord(resource.status)
+  const fields = Object.entries(resource).filter(([key]) => !["apiVersion", "kind", "metadata", "spec", "status"].includes(key))
   return (
     <div className="space-y-4">
       <SummaryRow>
@@ -734,6 +733,7 @@ function ClusterControlDetailOverview({ resource }: { resource: KubeResource }) 
         <SummaryCard label={t("Available")} value={status.available ?? status.phase ?? asRecordList(status.conditions).find((item) => item.status === "True")?.type} />
         <SummaryCard label={t("Created")} value={resource.metadata.creationTimestamp} />
       </SummaryRow>
+      <KvSection title={t("Fields")} rows={fields.map(([label, value]) => ({ label, value }))} />
       <div className="grid gap-4 xl:grid-cols-2">
         <KvSection title={t("Spec")} rows={Object.entries(spec).map(([label, value]) => ({ label, value }))} />
         <KvSection title={t("Status")} rows={Object.entries(status).map(([label, value]) => ({ label, value }))} />
@@ -744,20 +744,20 @@ function ClusterControlDetailOverview({ resource }: { resource: KubeResource }) 
 }
 
 /** Spec and status as readable key/value sections; used for CRDs without a dedicated layout. */
-function StructuredResourceOverview({ resource, sections }: { resource: KubeResource; sections: DetailSection[] }) {
+export function StructuredResourceOverview({ resource, sections, preserveEmpty = false }: { resource: KubeResource; sections: DetailSection[]; preserveEmpty?: boolean }) {
   const spec = asRecord(resource.spec)
   const status = asRecord(resource.status)
   const rows = (record: Record<string, unknown>, skip: string[] = []) =>
-    Object.entries(record).filter(([key, value]) => !skip.includes(key) && hasRenderableValue(value)).map(([key, value]) => ({ label: t(humanizeKey(key)), value }))
+    Object.entries(record).filter(([key, value]) => !skip.includes(key) && (preserveEmpty ? value !== undefined : hasRenderableValue(value))).map(([key, value]) => ({ label: t(humanizeKey(key)), value }))
   // Kinds without spec/status (e.g. NetworkAttachmentDefinition config) still show their top-level fields.
   const topLevel = Object.fromEntries(Object.entries(resource).filter(([key]) => !["apiVersion", "kind", "metadata", "spec", "status"].includes(key)))
   return (
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-2">
-        <KvSection title={t("Spec")} rows={rows(spec)} />
-        <KvSection title={t("Status")} rows={rows(status, ["conditions"])} />
+        <KvSection title={t("Spec")} rows={rows(spec)} preserveEmpty={preserveEmpty} />
+        <KvSection title={t("Status")} rows={rows(status, ["conditions"])} preserveEmpty={preserveEmpty} />
       </div>
-      <KvSection title={t("Details")} rows={rows(topLevel)} />
+      <KvSection title={t("Details")} rows={rows(topLevel)} preserveEmpty={preserveEmpty} />
       <ValueSection title={t("Conditions")} value={status.conditions} />
       {sections.filter((section) => !["Metadata", "Status", "Spec"].some((title) => title === section.title || t(title) === section.title)).map((section) => (
         <KvSection key={section.title} title={t(section.title)} description={section.description && t(section.description)} rows={section.items.map((item) => ({ label: t(item.label), value: item.value }))} />
@@ -768,17 +768,17 @@ function StructuredResourceOverview({ resource, sections }: { resource: KubeReso
 
 export function ResourceSpecificOverview({ resource, config, sections }: { resource: KubeResource; config: ResourceConfig; sections: DetailSection[] }) {
   const kind = resource.kind || config.kind
-  const scope = `${config.id} ${config.path}`.toLowerCase()
   if (kind === "Pod") return <PodDetailOverview resource={resource} />
-  if (["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "HorizontalPodAutoscaler", "ReplicationController", "PodTemplate", "ControllerRevision", "VirtualMachinePool", "VirtualMachineInstanceReplicaSet"].includes(kind)) return <WorkloadDetailOverview resource={resource} />
+  if (["Deployment", "StatefulSet", "ReplicaSet", "ReplicationController"].includes(kind)) return <WorkloadDetailOverview resource={resource} />
   if (kind === "Node") return <NodeDetailOverview resource={resource} />
   if (["MutatingWebhookConfiguration", "ValidatingWebhookConfiguration", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"].includes(kind)) return <AdmissionDetailOverview resource={resource} />
   if (["Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding", "ServiceAccount"].includes(kind)) return <RbacDetailOverview resource={resource} />
   if (["ConfigMap", "Secret"].includes(kind)) return <ConfigDetailOverview resource={resource} />
+  if (["Endpoints", "EndpointSlice"].includes(kind)) return <StructuredResourceOverview resource={resource} sections={[]} />
   if (["LimitRange", "ResourceQuota", "PodDisruptionBudget"].includes(kind)) return <PolicyDetailOverview resource={resource} />
   if (["APIService", "CustomResourceDefinition", "ComponentStatus", "Namespace", "Lease", "CertificateSigningRequest", "FlowSchema", "PriorityLevelConfiguration", "RuntimeClass", "PriorityClass", "Event"].includes(kind)) return <ClusterControlDetailOverview resource={resource} />
-  if (["Service", "Ingress", "IngressClass", "NetworkPolicy", "EndpointSlice", "Endpoints", "Gateway", "GatewayClass", "HTTPRoute"].includes(kind)) return <NetworkDetailOverview resource={resource} />
-  if (["PersistentVolume", "PersistentVolumeClaim", "StorageClass", "CSIDriver", "CSINode", "CSIStorageCapacity", "VolumeAttachment", "VolumeSnapshot", "VolumeSnapshotClass", "VolumeSnapshotContent", "DataVolume", "DataSource", "StorageProfile"].includes(kind) || ["volume", "storage", "snapshot"].some((item) => scope.includes(item))) return <StorageDetailOverview resource={resource} />
-  if (kind.includes("VirtualMachine") || kind === "KubeVirt" || kind.startsWith("CDI") || ["ObjectTransfer", "DataImportCron", "VolumeImportSource", "VolumeUploadSource", "VolumeCloneSource"].includes(kind)) return <VirtualizationDetailOverview resource={resource} />
+  if (["Service", "Ingress", "IngressClass", "NetworkPolicy", "Gateway", "GatewayClass", "HTTPRoute"].includes(kind)) return <NetworkDetailOverview resource={resource} />
+  if (["PersistentVolume", "PersistentVolumeClaim", "StorageClass"].includes(kind)) return <StorageDetailOverview resource={resource} />
+  if (["VirtualMachine", "VirtualMachineInstance"].includes(kind)) return <VirtualizationDetailOverview resource={resource} />
   return <StructuredResourceOverview resource={resource} sections={sections} />
 }

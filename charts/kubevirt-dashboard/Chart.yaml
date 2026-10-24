@@ -1,0 +1,5 @@
+apiVersion: v2
+name: kubevirt-dashboard
+description: Web console for Kubernetes and KubeVirt clusters
+type: application
+version: 0.1.0

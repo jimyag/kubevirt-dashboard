@@ -25,7 +25,7 @@ export const virtualmachinepoolsConfig: ResourceConfig = {
         kind: "VirtualMachinePool",
         metadata: { name, namespace: shared.stringValue(values.namespace, "default"), labels: { "kubevirt-manager.io/managed": "true" } },
         spec: {
-          replicas: shared.numberValue(values.replicas, 1),
+          replicas: shared.replicaCount(values.replicas),
           selector: { matchLabels: { "kubevirt.io/vmpool": name } },
           virtualMachineTemplate: {
             metadata: { labels: { "kubevirt.io/vmpool": name, "kubevirt-manager.io/managed": "true" } },

@@ -72,7 +72,7 @@ export function SerialConsole({ namespace, name }: { namespace: string, name: st
                {connStatus === "connected" && (
                  <div className="flex items-center gap-1.5 text-primary animate-in slide-in-from-top-1">
                     <AlertCircle size={10} />
-                    <span className="text-[9px] font-bold text-primary">选中文字自动复制</span>
+                    <span className="text-[9px] font-bold text-primary">{t("Selected text is copied automatically")}</span>
                  </div>
                )}
             </div>

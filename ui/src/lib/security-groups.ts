@@ -16,6 +16,7 @@ import {
 } from "./kube"
 import { parseIPv4Cidr } from "./validate"
 import { t } from "./i18n"
+import { vmOvnAnnotationPatch } from "./vm-network"
 
 /**
  * A provider-neutral security group, modeled after cloud security groups:
@@ -419,7 +420,9 @@ const templateMeta = (vm: VmLike) => asRecord(asRecord(asRecord(vm.spec).templat
 export const vmSecurityGroups = (vm: VmLike, provider: SgProvider, global = false): string[] => {
   const meta = templateMeta(vm)
   if (provider === "kube-ovn") {
-    return str(asRecord(meta.annotations)[kubeOvnAnnotations.securityGroups]).split(",").map((item) => item.trim()).filter(Boolean)
+    return [...new Set(Object.entries(asRecord(meta.annotations))
+      .filter(([key]) => key.endsWith(".kubernetes.io/security_groups"))
+      .flatMap(([, value]) => str(value).split(",").map((item) => item.trim()).filter(Boolean)))]
   }
   const prefix = groupLabel(global)("")
   return Object.entries(asRecord(meta.labels)).filter(([key, value]) => key.startsWith(prefix) && value === "true").map(([key]) => key.slice(prefix.length))
@@ -449,9 +452,10 @@ export const setVmSecurityGroups = async (vm: VmLike, provider: SgProvider, grou
   let metaPatch: UnknownRecord
   if (provider === "kube-ovn") {
     metaPatch = {
-      annotations: groups.length
-        ? { [kubeOvnAnnotations.securityGroups]: groups.join(","), [kubeOvnAnnotations.portSecurity]: "true" }
-        : { [kubeOvnAnnotations.securityGroups]: null },
+      annotations: await vmOvnAnnotationPatch(vm, {
+        security_groups: groups.length ? groups.join(",") : null,
+        ...(groups.length ? { port_security: "true" } : {}),
+      }),
     }
   } else {
     const current = vmSecurityGroups(vm, provider, global)
@@ -462,8 +466,8 @@ export const setVmSecurityGroups = async (vm: VmLike, provider: SgProvider, grou
     metaPatch = { labels }
   }
   await mergePatch(`${VM_API}/namespaces/${namespace}/virtualmachines/${name}`, { spec: { template: { metadata: metaPatch } } })
-  const pods = await listItems(`/api/v1/namespaces/${namespace}/pods?labelSelector=${encodeURIComponent(`vm.kubevirt.io/name=${name}`)}`)
-  await Promise.all(pods.map((pod) => mergePatch(`/api/v1/namespaces/${namespace}/pods/${pod.metadata.name}`, { metadata: metaPatch }).catch(() => null)))
+  const pods = await listItems(`/api/v1/namespaces/${namespace}/pods?labelSelector=${encodeURIComponent(`kubevirt.io/domain=${name}`)}`)
+  await Promise.all(pods.map((pod) => mergePatch(`/api/v1/namespaces/${namespace}/pods/${pod.metadata.name}`, { metadata: metaPatch })))
 }
 
 // --- Routing and provider selection ---
@@ -522,7 +526,7 @@ export const setVmSecurityGroupRefs = async (vm: VmLike, providers: SgProvider[]
     for (const global of provider === "cilium" ? [false, true] : [false]) {
       const next = refs.filter((ref) => ref.provider === provider && Boolean(ref.global) === global).map((ref) => ref.name)
       const current = vmSecurityGroups(vm, provider, global)
-      if (next.length === current.length && next.every((name) => current.includes(name))) continue
+      if (provider !== "kube-ovn" && next.length === current.length && next.every((name) => current.includes(name))) continue
       await setVmSecurityGroups(vm, provider, next, global)
     }
   }

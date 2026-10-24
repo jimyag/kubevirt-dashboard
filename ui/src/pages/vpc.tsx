@@ -32,11 +32,11 @@ import {
   Panel,
 } from "@/components/console"
 import { useFilteredRows, type FilterField } from "@/lib/filter"
+import { vmSubnets } from "@/lib/vm-network"
 import {
   apiFetch,
   asList,
   asRecord,
-  kubeOvnAnnotations,
   listItems,
   relativeTime,
   requestJson,
@@ -66,11 +66,6 @@ const subnetReady = (subnet: KubeObject) => {
   if (!ready) return "Pending"
   return ready.status === "True" ? "Available" : "NotReady"
 }
-
-const vmSubnet = (vm: KubeObject) =>
-  asRecord(asRecord(asRecord(vm.spec).template).metadata).annotations
-    ? str(asRecord(asRecord(asRecord(asRecord(vm.spec).template).metadata).annotations)[kubeOvnAnnotations.logicalSwitch])
-    : ""
 
 export function KubeOvnMissing() {
   const profile = useNetworkProfile()
@@ -403,7 +398,7 @@ export function VpcDetailPage() {
 
   const spec = asRecord(data.vpc.spec)
   const subnetNames = new Set(data.subnets.map((subnet) => subnet.metadata.name))
-  const instances = data.vms.filter((vm) => subnetNames.has(vmSubnet(vm)))
+  const instances = data.vms.filter((vm) => vmSubnets(vm).some((subnet) => subnetNames.has(subnet)))
 
   return (
     <div className="space-y-6">
@@ -460,7 +455,7 @@ export function VpcDetailPage() {
           columns={[
             { header: t("Instance"), cell: (vm) => <Link to={`/kubevirt/virtualization/virtual-machines/${vm.metadata.namespace}/${vm.metadata.name}/overview`} className="font-medium hover:text-primary transition-colors">{vm.metadata.name}</Link> },
             { header: t("Namespace"), cell: (vm) => <span className="text-sm text-muted-foreground">{vm.metadata.namespace}</span> },
-            { header: t("Subnet"), cell: (vm) => <span className="text-sm">{vmSubnet(vm)}</span> },
+            { header: t("Subnet"), cell: (vm) => <span className="text-sm">{vmSubnets(vm).filter((subnet) => subnetNames.has(subnet)).join(", ")}</span> },
             { header: t("Status"), cell: (vm) => <StatusDot status={str(asRecord(vm.status).printableStatus)} /> },
           ]}
         />
@@ -493,7 +488,7 @@ function SubnetTable({ subnets, loading, vms, onCreate, onDelete }: { subnets: K
             return <UsageBar used={usage.used} total={usage.total} />
           },
         },
-        { header: t("Instances"), cell: (subnet) => <span className="text-sm tabular-nums">{vms.filter((vm) => vmSubnet(vm) === subnet.metadata.name).length}</span> },
+        { header: t("Instances"), cell: (subnet) => <span className="text-sm tabular-nums">{vms.filter((vm) => vmSubnets(vm).includes(subnet.metadata.name)).length}</span> },
         { header: t("ACL rules"), cell: (subnet) => <span className="text-sm tabular-nums">{asList(asRecord(subnet.spec).acls).length}</span> },
         ...(onDelete ? [{
           header: "",
@@ -603,7 +598,7 @@ export function SubnetDetailPage() {
       listItems(`${OVN}/ippools`).catch(() => [] as KubeObject[]),
     ])
     const subnet = subnetRes.ok ? await subnetRes.json() as KubeObject : null
-    return { subnet, ips: ips.filter((ip) => str(asRecord(ip.spec).subnet) === name), vms: vms.filter((vm) => vmSubnet(vm) === name), pools: pools.filter((pool) => str(asRecord(pool.spec).subnet) === name) }
+    return { subnet, ips: ips.filter((ip) => str(asRecord(ip.spec).subnet) === name), vms: vms.filter((vm) => vmSubnets(vm).includes(name ?? "")), pools: pools.filter((pool) => str(asRecord(pool.spec).subnet) === name) }
   }, { subnet: null as KubeObject | null, ips: [] as KubeObject[], vms: [] as KubeObject[], pools: [] as KubeObject[] }, [name])
 
   if (loading && !data.subnet) return <LoadingState />

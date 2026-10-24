@@ -54,7 +54,29 @@ Attaching or detaching a security group updates the VM template and the running 
 - **History** (Prometheus API): in **Settings → Monitoring**, **Detect in cluster** finds the query services that kube-prometheus-stack, the prometheus chart, the VictoriaMetrics operator (`VMSingle`, `VMCluster` vmselect) and the victoria-metrics-single chart create, or enter namespace, service, port and an optional path prefix (`/select/0/prometheus` for a VictoriaMetrics cluster). Queries go through the Kubernetes API service proxy, so the backend does not need to be exposed outside the cluster. VM charts use the metrics KubeVirt exports (`kubevirt_vmi_*`) and match the VMI namespace whether the scrape kept it as `namespace` or renamed it to `exported_namespace`.
 - Verified on a k3s cluster with kube-prometheus-stack (Prometheus 3.7), the VictoriaMetrics operator with a `VMSingle`, and the victoria-metrics-single chart (VictoriaMetrics 1.128), each installed from its chart.
 
+Key/value editors accept one `key=value` per line. Values containing newlines, surrounding whitespace, or leading quotes use JSON string syntax, for example `config="line one\nline two"`; the editor preserves these values when saving. RBAC rule and subject editors use JSON arrays to preserve all Kubernetes fields and restrictions.
+
+VM pool **Detach VM** accepts only a VM owned by that pool. It removes pool ownership, selector labels and the pool finalizer while preserving other owners and finalizers. The target node is saved in the VM template; a running VM uses it after restarting.
+
+FlowSchema subjects use `User|name`, `Group|name`, or `ServiceAccount|name|namespace`, one per line. A service account without a namespace uses `default`. Clearing **API groups** selects the core API group; **Namespaces** and **Cluster scope** select the rule's resource scope. Priority levels use the stable API's nominal concurrency shares.
+
+Certificate requests accept PEM or Base64; PEM is encoded for the Kubernetes API. CRD names are generated from `plural.group`. PriorityClass, RuntimeClass, Endpoints and EndpointSlice editors patch top-level fields; other control-plane editors patch `spec`. Quote numeric or boolean strings explicitly, for example `internalPort="81"`; unquoted `replicas=0`, `enabled=false`, arrays and objects retain their JSON types. Kubernetes rejects immutable field changes. ValidatingAdmissionPolicy creation accepts match constraints as JSON, including resource rules and namespace selectors; bindings initially use `Warn`.
+
+CDI DataSources reference a PVC, VolumeSnapshot or another DataSource. VolumeCloneSource references a PVC in the same namespace. DataImportCron uses a Registry URL and requires a managed DataSource name; choose an explicit access mode when the StorageProfile has no defaults. CDI rejects changes to an existing DataImportCron spec, so recreate it to change the schedule. Manual VM snapshot-content creation requires the saved VM's `metadata` and `spec`; a VM name alone is insufficient. Schema forms expose SwitchLBRule ports and VpcEgressGateway policies as individual array items. VLAN ID `0` creates an untagged provider network. DNSNameResolver takes one fully qualified DNS name ending in a dot.
+
+Kube-OVN native OVN SNAT, DNAT and FIP mappings must be recreated to change their endpoints, ports or mode. Their controllers do not apply those changes to an existing mapping, so the console omits the generic spec-edit action for these resources. Metadata editing and manifest inspection remain available.
+
+QoSPolicy forms expose individual bandwidth rules and a binding type of `EIP` or `NATGW`. NAT gateway policies must be shared. The policy takes effect after an EIP or NAT gateway references its name through `spec.qosPolicy`. Non-shared policies allow editing bandwidth rules; shared policies and binding types must be recreated to change them.
+
 ## API Versions
+
+Custom resources are discovered from the cluster under Resource Catalog → Custom resources. Each CRD exposes every served API version, including alpha and beta versions; the initial selection follows the API group's preferred version. Envoy Gateway resources have a separate catalog entry and use the same discovery and editing components.
+
+Catalog resource lists use the API server's Kubernetes Table response to display the CRD's printer columns. Those columns participate in filtering without modifying the resource objects used by the editor.
+
+Create and edit forms read the selected CRD's structural OpenAPI schema. Objects use flat sections, arrays use expandable rows, and primitive fields use typed controls. Labels and annotations share the same form as resource fields, with individual key/value rows for adding, renaming and deleting entries. System annotations can be expanded separately. Status and server-managed identity fields are not editable in this form.
+
+Saving validates the schema locally and runs an API server dry-run before showing a diff. Updates retain the original resourceVersion and untouched fields, so concurrent changes are rejected. CRD schemas do not always describe a controller's restrictions; admission success alone does not prove reconciliation or traffic behavior. The Manifest tab remains available for advanced edits.
 
 The console talks to the cluster through the Kubernetes API and uses these API versions, falling back to older ones when the cluster does not serve the preferred version. The CRD lists were checked against KubeVirt 1.9.1, Cilium 1.20.3 and Kube-OVN 1.16.15.
 
@@ -94,6 +116,20 @@ Download a release from the [Releases](https://github.com/jimyag/kubevirt-dashbo
 | `--allowed-origin` | none | Extra browser origin (e.g. `https://dash.example.com`) allowed to open console, VNC and pod shell WebSockets when a reverse proxy rewrites the Host header; repeatable |
 
 ### In cluster
+
+Install the Helm chart from this repository:
+
+```bash
+helm upgrade --install kubevirt-dashboard ./charts/kubevirt-dashboard \
+  --namespace kubevirt-dashboard --create-namespace
+kubectl port-forward -n kubevirt-dashboard svc/kubevirt-dashboard 8080:80
+```
+
+Use `--set image.tag=<tag>` to select a built image. The chart grants cluster-wide
+administration permissions, matching the deployment manifest; keep access local
+or protect it with an authenticating proxy as described in [Security](#security).
+
+Alternatively, use the deployment manifest:
 
 ```bash
 kubectl apply -f manifest/deploy.yaml

@@ -23,6 +23,8 @@ rules:
       - /livez
       - /readyz
       - /version
+      - /metrics
+      - /metrics/*
     verbs:
       - get
   - apiGroups:

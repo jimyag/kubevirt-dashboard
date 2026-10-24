@@ -68,10 +68,14 @@ export const providerSwitchAnnotation = (provider: string) => `${provider}.kuber
 export type ExtraNic = { name: string; network: AttachableNetwork }
 
 /** Interface, network and template annotations for extra NICs (bridge binding: the only one Multus supports). */
-export const extraNicSpec = (nics: ExtraNic[]) => ({
+export const extraNicSpec = (nics: ExtraNic[], annotations: UnknownRecord = {}) => ({
   interfaces: nics.map((nic) => ({ name: nic.name, bridge: {} })),
   networks: nics.map((nic) => ({ name: nic.name, multus: { networkName: nic.network.nad } })),
-  annotations: Object.fromEntries(nics.filter((nic) => nic.network.provider && nic.network.subnet).map((nic) => [providerSwitchAnnotation(nic.network.provider!), nic.network.subnet!])),
+  annotations: Object.fromEntries(nics.filter((nic) => nic.network.provider && nic.network.subnet).flatMap((nic) => [
+    [providerSwitchAnnotation(nic.network.provider!), nic.network.subnet!],
+    ...[kubeOvnAnnotations.securityGroups, kubeOvnAnnotations.portSecurity, kubeOvnAnnotations.ingressRate, kubeOvnAnnotations.egressRate]
+      .flatMap((key) => typeof annotations[key] === "string" ? [[key.replace("ovn.kubernetes.io/", `${nic.network.provider}.kubernetes.io/`), str(annotations[key])]] : []),
+  ])),
 })
 
 /** First free nicN name. */
@@ -81,6 +85,27 @@ export const nextNicName = (taken: string[]) => {
 
 const templateSpec = (vm: KubeObject) => asRecord(asRecord(asRecord(vm.spec).template).spec)
 const templateAnnotations = (vm: KubeObject) => asRecord(asRecord(asRecord(asRecord(vm.spec).template).metadata).annotations)
+
+export const vmSubnets = (vm: KubeObject): string[] => [...new Set(Object.entries(templateAnnotations(vm))
+  .filter(([key]) => key.endsWith(".kubernetes.io/logical_switch"))
+  .map(([, value]) => str(value)).filter(Boolean))]
+
+export const vmOvnProviders = (vm: KubeObject, nads: KubeObject[], networks = asList(templateSpec(vm).networks)): string[] => {
+  const attached = new Set(networks.flatMap((network) => {
+    const name = str(asRecord(network.multus).networkName)
+    return name ? [name.includes("/") ? name : `${vm.metadata.namespace}/${name}`] : []
+  }))
+  return [...new Set(["ovn", ...nads.filter((nad) => attached.has(nadRef(nad)) && nadConfig(nad).type === "kube-ovn")
+    .map((nad) => str(nadConfig(nad).provider, `${nad.metadata.name}.${nad.metadata.namespace}.ovn`))])]
+}
+
+/** Kube-OVN annotations are scoped to the provider of each attached interface. */
+export const vmOvnAnnotationPatch = async (vm: KubeObject, values: Record<string, string | null>) => {
+  const nads = asList(templateSpec(vm).networks).some((network) => network.multus)
+    ? await listItems(`${NAD_API}/network-attachment-definitions`) : []
+  return Object.fromEntries(vmOvnProviders(vm, nads).flatMap((provider) =>
+    Object.entries(values).map(([key, value]) => [`${provider}.kubernetes.io/${key}`, value])))
+}
 
 const mergePatch = (url: string, body: unknown) =>
   requestJson(url, { method: "PATCH", headers: { "Content-Type": "application/merge-patch+json" }, body: JSON.stringify(body) })
@@ -93,7 +118,7 @@ export const addVmNic = async (vm: KubeObject, network: AttachableNetwork) => {
   const interfaces = asList(asRecord(asRecord(spec.domain).devices).interfaces)
   const networks = asList(spec.networks)
   const name = nextNicName([...interfaces, ...networks].map((item) => str(item.name)))
-  const extra = extraNicSpec([{ name, network }])
+  const extra = extraNicSpec([{ name, network }], templateAnnotations(vm))
   await mergePatch(vmUrl(vm), {
     spec: {
       template: {
@@ -104,15 +129,19 @@ export const addVmNic = async (vm: KubeObject, network: AttachableNetwork) => {
   })
 }
 
-/** Removes an extra NIC from the VM template, with its subnet annotation when no other NIC uses it. */
+/** Remove provider settings only after the last interface using that provider is removed. */
 export const removeVmNic = async (vm: KubeObject, nicName: string, provider?: string) => {
   const spec = templateSpec(vm)
   const interfaces = asList(asRecord(asRecord(spec.domain).devices).interfaces).filter((item) => str(item.name) !== nicName)
   const networks = asList(spec.networks).filter((item) => str(item.name) !== nicName)
+  const nads = provider && networks.some((network) => network.multus) ? await listItems(`${NAD_API}/network-attachment-definitions`) : []
+  const annotations = provider && !vmOvnProviders(vm, nads, networks).includes(provider)
+    ? Object.fromEntries(Object.keys(templateAnnotations(vm)).filter((key) => key.startsWith(`${provider}.kubernetes.io/`)).map((key) => [key, null]))
+    : {}
   await mergePatch(vmUrl(vm), {
     spec: {
       template: {
-        ...(provider ? { metadata: { annotations: { [providerSwitchAnnotation(provider)]: null } } } : {}),
+        ...(Object.keys(annotations).length ? { metadata: { annotations } } : {}),
         spec: { domain: { devices: { interfaces } }, networks },
       },
     },
@@ -141,14 +170,14 @@ export const bandwidthAnnotations = (bandwidth: Bandwidth): Record<string, strin
  * where Kube-OVN applies them without a restart.
  */
 export const setVmBandwidth = async (vm: KubeObject, bandwidth: Bandwidth) => {
-  const annotations = {
-    [kubeOvnAnnotations.ingressRate]: bandwidth.ingress.trim() || null,
-    [kubeOvnAnnotations.egressRate]: bandwidth.egress.trim() || null,
-  }
+  const annotations = await vmOvnAnnotationPatch(vm, {
+    ingress_rate: bandwidth.ingress.trim() || null,
+    egress_rate: bandwidth.egress.trim() || null,
+  })
   await mergePatch(vmUrl(vm), { spec: { template: { metadata: { annotations } } } })
   const namespace = vm.metadata.namespace
-  const pods = await listItems(`/api/v1/namespaces/${namespace}/pods?labelSelector=${encodeURIComponent(`vm.kubevirt.io/name=${vm.metadata.name}`)}`)
-  await Promise.all(pods.map((pod) => mergePatch(`/api/v1/namespaces/${namespace}/pods/${pod.metadata.name}`, { metadata: { annotations } }).catch(() => null)))
+  const pods = await listItems(`/api/v1/namespaces/${namespace}/pods?labelSelector=${encodeURIComponent(`kubevirt.io/domain=${vm.metadata.name}`)}`)
+  await Promise.all(pods.map((pod) => mergePatch(`/api/v1/namespaces/${namespace}/pods/${pod.metadata.name}`, { metadata: { annotations } })))
 }
 
 export const bandwidthText = (value: string) => (value ? `${value} Mbit/s` : "")

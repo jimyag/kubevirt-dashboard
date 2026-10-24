@@ -1,5 +1,6 @@
 import type { ResourceConfig } from "@/components/resource-management";
 import * as shared from "./shared";
+import { rbacApiGroups, rbacSubject } from "../../lib/rbac";
 import {
   kubernetesConfigMapDetailSections,
   kubernetesCronJobDetailSections,
@@ -35,9 +36,10 @@ const containerStatuses = (resource: Record<string, unknown>) => {
 };
 const listValue = (value: unknown) => Array.isArray(value) ? value : [];
 
-const podTemplate = (values: Record<string, string | boolean>) => ({
+const podTemplate = (values: Record<string, string | boolean>, restartPolicy?: "Never") => ({
   metadata: { labels: labelsFromValues(values) },
   spec: {
+    ...(restartPolicy ? { restartPolicy } : {}),
     serviceAccountName: shared.stringValue(values.serviceAccountName),
     containers: [containerFromValues(values)],
   },
@@ -209,7 +211,7 @@ export const deploymentsConfig = extensionResource({
     apiVersion: "apps/v1",
     kind: "Deployment",
     metadata: { name: shared.stringValue(values.name, "example-deployment"), namespace: shared.stringValue(values.namespace, "default") },
-    spec: { replicas: shared.numberValue(values.replicas, 1), selector: { matchLabels: labelsFromValues(values) }, template: podTemplate(values) },
+    spec: { replicas: shared.replicaCount(values.replicas), selector: { matchLabels: labelsFromValues(values) }, template: podTemplate(values) },
   }),
   extraColumns: [
     { label: "Ready", value: (r) => `${shared.getRecord(r.status).readyReplicas || 0} / ${shared.getRecord(r.status).replicas || shared.getRecord(r.spec).replicas || 0}` },
@@ -233,7 +235,7 @@ export const statefulsetsConfig = extensionResource({
     apiVersion: "apps/v1",
     kind: "StatefulSet",
     metadata: { name: shared.stringValue(values.name, "example-statefulset"), namespace: shared.stringValue(values.namespace, "default") },
-    spec: { serviceName: shared.stringValue(values.serviceName, shared.stringValue(values.name, "example-statefulset")), replicas: shared.numberValue(values.replicas, 1), selector: { matchLabels: labelsFromValues(values) }, template: podTemplate(values) },
+    spec: { serviceName: shared.stringValue(values.serviceName, shared.stringValue(values.name, "example-statefulset")), replicas: shared.replicaCount(values.replicas), selector: { matchLabels: labelsFromValues(values) }, template: podTemplate(values) },
   }),
   extraColumns: [{ label: "Ready", value: (r) => `${shared.getRecord(r.status).readyReplicas || 0} / ${shared.getRecord(r.status).replicas || shared.getRecord(r.spec).replicas || 0}` }],
 });
@@ -291,7 +293,7 @@ export const jobsConfig = extensionResource({
     apiVersion: "batch/v1",
     kind: "Job",
     metadata: { name: shared.stringValue(values.name, "example-job"), namespace: shared.stringValue(values.namespace, "default") },
-    spec: { template: podTemplate(values), backoffLimit: 3 },
+    spec: { template: podTemplate(values, "Never"), backoffLimit: 3 },
   }),
   extraColumns: [{ label: "Succeeded", value: (r) => String(shared.getRecord(r.status).succeeded || 0) }, { label: "Failed", value: (r) => String(shared.getRecord(r.status).failed || 0) }],
 });
@@ -311,7 +313,7 @@ export const cronjobsConfig = extensionResource({
     apiVersion: "batch/v1",
     kind: "CronJob",
     metadata: { name: shared.stringValue(values.name, "example-cronjob"), namespace: shared.stringValue(values.namespace, "default") },
-    spec: { schedule: shared.stringValue(values.schedule, "*/5 * * * *"), jobTemplate: { spec: { template: podTemplate(values) } } },
+    spec: { schedule: shared.stringValue(values.schedule, "*/5 * * * *"), jobTemplate: { spec: { template: podTemplate(values, "Never") } } },
   }),
   extraColumns: [{ label: "Schedule", value: (r) => String(shared.getRecord(r.spec).schedule || "N/A") }, { label: "Suspend", value: (r) => String(shared.getRecord(r.spec).suspend || false) }],
 });
@@ -396,7 +398,7 @@ export const rolesConfig = extensionResource({
   namespaced: true,
   detailSections: kubernetesRoleDetailSections,
   createFields: [{ name: "apiGroups", label: "API groups", section: "Rules", defaultValue: "" }, { name: "resources", label: "Resources", section: "Rules", defaultValue: "pods" }, { name: "verbs", label: "Verbs", section: "Rules", defaultValue: "get,list,watch" }],
-  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "Role", metadata: { name: shared.stringValue(values.name, "example-role"), namespace: shared.stringValue(values.namespace, "default") }, rules: [{ apiGroups: shared.csvList(String(values.apiGroups || "")), resources: shared.csvList(String(values.resources || "pods")), verbs: shared.csvList(String(values.verbs || "get,list,watch")) }] }),
+  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "Role", metadata: { name: shared.stringValue(values.name, "example-role"), namespace: shared.stringValue(values.namespace, "default") }, rules: [{ apiGroups: rbacApiGroups(values.apiGroups), resources: shared.csvList(String(values.resources || "pods")), verbs: shared.csvList(String(values.verbs || "get,list,watch")) }] }),
   extraColumns: [{ label: "Rules", value: (r) => String(listValue(shared.getRecord(r).rules).length) }],
 });
 
@@ -410,7 +412,7 @@ export const rolebindingsConfig = extensionResource({
   namespaced: true,
   detailSections: kubernetesRoleBindingDetailSections,
   createFields: [{ name: "roleKind", label: "Role kind", section: "Role", type: "select", defaultValue: "Role", options: [{ label: "Role", value: "Role" }, { label: "ClusterRole", value: "ClusterRole" }] }, { name: "roleName", label: "Role name", section: "Role", defaultValue: "example-role" }, { name: "subjectKind", label: "Subject kind", section: "Subject", type: "select", defaultValue: "ServiceAccount", options: [{ label: "ServiceAccount", value: "ServiceAccount" }, { label: "User", value: "User" }, { label: "Group", value: "Group" }] }, { name: "subjectName", label: "Subject name", section: "Subject", defaultValue: "default" }],
-  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "RoleBinding", metadata: { name: shared.stringValue(values.name, "example-rolebinding"), namespace: shared.stringValue(values.namespace, "default") }, roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: shared.stringValue(values.roleKind, "Role"), name: shared.stringValue(values.roleName, "example-role") }, subjects: [{ kind: shared.stringValue(values.subjectKind, "ServiceAccount"), name: shared.stringValue(values.subjectName, "default"), namespace: shared.stringValue(values.namespace, "default") }] }),
+  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "RoleBinding", metadata: { name: shared.stringValue(values.name, "example-rolebinding"), namespace: shared.stringValue(values.namespace, "default") }, roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: shared.stringValue(values.roleKind, "Role"), name: shared.stringValue(values.roleName, "example-role") }, subjects: [rbacSubject(shared.stringValue(values.subjectKind, "ServiceAccount"), shared.stringValue(values.subjectName, "default"), shared.stringValue(values.namespace, "default"))] }),
   extraColumns: [{ label: "Role", value: (r) => `${shared.getRecord(shared.getRecord(r).roleRef).kind || ""}/${shared.getRecord(shared.getRecord(r).roleRef).name || ""}` }],
 });
 
@@ -424,7 +426,7 @@ export const clusterrolesConfig = extensionResource({
   namespaced: false,
   detailSections: kubernetesRoleDetailSections,
   createFields: [{ name: "apiGroups", label: "API groups", section: "Rules", defaultValue: "" }, { name: "resources", label: "Resources", section: "Rules", defaultValue: "pods" }, { name: "verbs", label: "Verbs", section: "Rules", defaultValue: "get,list,watch" }],
-  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "ClusterRole", metadata: { name: shared.stringValue(values.name, "example-clusterrole") }, rules: [{ apiGroups: shared.csvList(String(values.apiGroups || "")), resources: shared.csvList(String(values.resources || "pods")), verbs: shared.csvList(String(values.verbs || "get,list,watch")) }] }),
+  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "ClusterRole", metadata: { name: shared.stringValue(values.name, "example-clusterrole") }, rules: [{ apiGroups: rbacApiGroups(values.apiGroups), resources: shared.csvList(String(values.resources || "pods")), verbs: shared.csvList(String(values.verbs || "get,list,watch")) }] }),
   extraColumns: [{ label: "Rules", value: (r) => String(listValue(shared.getRecord(r).rules).length) }],
 });
 
@@ -438,7 +440,7 @@ export const clusterrolebindingsConfig = extensionResource({
   namespaced: false,
   detailSections: kubernetesRoleBindingDetailSections,
   createFields: [{ name: "roleName", label: "Cluster role name", section: "Role", defaultValue: "view" }, { name: "subjectKind", label: "Subject kind", section: "Subject", type: "select", defaultValue: "ServiceAccount", options: [{ label: "ServiceAccount", value: "ServiceAccount" }, { label: "User", value: "User" }, { label: "Group", value: "Group" }] }, { name: "subjectName", label: "Subject name", section: "Subject", defaultValue: "default" }, { name: "subjectNamespace", label: "Subject namespace", section: "Subject", defaultValue: "default" }],
-  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "ClusterRoleBinding", metadata: { name: shared.stringValue(values.name, "example-clusterrolebinding") }, roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "ClusterRole", name: shared.stringValue(values.roleName, "view") }, subjects: [{ kind: shared.stringValue(values.subjectKind, "ServiceAccount"), name: shared.stringValue(values.subjectName, "default"), namespace: shared.stringValue(values.subjectNamespace, "default") }] }),
+  buildResource: (values) => ({ apiVersion: "rbac.authorization.k8s.io/v1", kind: "ClusterRoleBinding", metadata: { name: shared.stringValue(values.name, "example-clusterrolebinding") }, roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "ClusterRole", name: shared.stringValue(values.roleName, "view") }, subjects: [rbacSubject(shared.stringValue(values.subjectKind, "ServiceAccount"), shared.stringValue(values.subjectName, "default"), shared.stringValue(values.subjectNamespace, "default"))] }),
   extraColumns: [{ label: "Role", value: (r) => String(shared.getRecord(shared.getRecord(r).roleRef).name || "N/A") }],
 });
 
@@ -452,7 +454,10 @@ export const poddisruptionbudgetsConfig = extensionResource({
   namespaced: true,
   detailSections: kubernetesPodDisruptionBudgetDetailSections,
   createFields: [{ name: "minAvailable", label: "Min available", section: "Budget", defaultValue: "1" }, { name: "selectorKey", label: "Selector key", section: "Selector", defaultValue: "app" }, { name: "selectorValue", label: "Selector value", section: "Selector", defaultValue: "example" }],
-  buildResource: (values) => ({ apiVersion: "policy/v1", kind: "PodDisruptionBudget", metadata: { name: shared.stringValue(values.name, "example-pdb"), namespace: shared.stringValue(values.namespace, "default") }, spec: { minAvailable: shared.stringValue(values.minAvailable, "1"), selector: { matchLabels: { [shared.stringValue(values.selectorKey, "app")]: shared.stringValue(values.selectorValue, "example") } } } }),
+  buildResource: (values) => {
+    const minimum = shared.stringValue(values.minAvailable, "1");
+    return { apiVersion: "policy/v1", kind: "PodDisruptionBudget", metadata: { name: shared.stringValue(values.name, "example-pdb"), namespace: shared.stringValue(values.namespace, "default") }, spec: { minAvailable: /^\d+$/.test(minimum) ? Number(minimum) : minimum, selector: { matchLabels: { [shared.stringValue(values.selectorKey, "app")]: shared.stringValue(values.selectorValue, "example") } } } };
+  },
   extraColumns: [{ label: "Allowed", value: (r) => String(shared.getRecord(r.status).disruptionsAllowed || 0) }, { label: "Healthy", value: (r) => `${shared.getRecord(r.status).currentHealthy || 0} / ${shared.getRecord(r.status).desiredHealthy || 0}` }],
 });
 
@@ -491,10 +496,17 @@ export const limitrangesConfig = namedCoreResource({
   namespaced: true,
   createFields: [
     { name: "type", label: "Limit type", section: "Limits", type: "select", defaultValue: "Container", options: [{ label: "Container", value: "Container" }, { label: "Pod", value: "Pod" }, { label: "PersistentVolumeClaim", value: "PersistentVolumeClaim" }] },
-    { name: "defaultCpu", label: "Default CPU", section: "Limits", defaultValue: "500m" },
-    { name: "defaultMemory", label: "Default memory", section: "Limits", defaultValue: "512Mi" },
+    { name: "defaultCpu", label: "Default CPU", section: "Limits", defaultValue: "500m", description: "Container only." },
+    { name: "defaultMemory", label: "Default memory", section: "Limits", defaultValue: "512Mi", description: "Container only." },
+    { name: "min", label: "Minimum resources", section: "Limits", type: "textarea", defaultValue: "", description: "Use cpu and memory for Container or Pod; storage for PersistentVolumeClaim.", placeholder: "cpu=100m\nmemory=128Mi" },
+    { name: "max", label: "Maximum resources", section: "Limits", type: "textarea", defaultValue: "", description: "Use cpu and memory for Container or Pod; storage for PersistentVolumeClaim.", placeholder: "cpu=2\nmemory=2Gi" },
   ],
-  buildResource: (values) => ({ apiVersion: "v1", kind: "LimitRange", metadata: { name: shared.stringValue(values.name, "example-limits"), namespace: shared.stringValue(values.namespace, "default") }, spec: { limits: [{ type: shared.stringValue(values.type, "Container"), default: { cpu: shared.stringValue(values.defaultCpu, "500m"), memory: shared.stringValue(values.defaultMemory, "512Mi") } }] } }),
+  buildResource: (values) => {
+    const type = shared.stringValue(values.type, "Container");
+    const min = shared.parseKeyValueText(String(values.min || ""));
+    const max = shared.parseKeyValueText(String(values.max || ""));
+    return { apiVersion: "v1", kind: "LimitRange", metadata: { name: shared.stringValue(values.name, "example-limits"), namespace: shared.stringValue(values.namespace, "default") }, spec: { limits: [{ type, ...(type === "Container" ? { default: { cpu: shared.stringValue(values.defaultCpu, "500m"), memory: shared.stringValue(values.defaultMemory, "512Mi") } } : {}), ...(Object.keys(min).length ? { min } : {}), ...(Object.keys(max).length ? { max } : {}) }] } };
+  },
   extraColumns: [{ label: "Rules", value: (r) => String(listValue(shared.getRecord(r.spec).limits).length) }],
 });
 
@@ -505,7 +517,6 @@ export const resourcequotasConfig = namedCoreResource({
   subtitle: "Manage namespace hard resource quotas and usage status",
   kind: "ResourceQuota",
   namespaced: true,
-  statusPath: ["status", "hard"],
   createFields: [{ name: "hard", label: "Hard limits", section: "Quota", type: "textarea", defaultValue: "pods=10\nrequests.cpu=4\nrequests.memory=8Gi" }],
   buildResource: (values) => ({ apiVersion: "v1", kind: "ResourceQuota", metadata: { name: shared.stringValue(values.name, "example-quota"), namespace: shared.stringValue(values.namespace, "default") }, spec: { hard: shared.parseKeyValueText(String(values.hard || "")) } }),
   extraColumns: [{ label: "Hard", value: (r) => String(Object.keys(shared.getRecord(shared.getRecord(r.status).hard || shared.getRecord(r.spec).hard)).length) }, { label: "Used", value: (r) => String(Object.keys(shared.getRecord(shared.getRecord(r.status).used)).length) }],
@@ -532,7 +543,7 @@ export const replicationcontrollersConfig = namedCoreResource({
   namespaced: true,
   statusPath: ["status", "replicas"],
   createFields: workloadFields,
-  buildResource: (values) => ({ apiVersion: "v1", kind: "ReplicationController", metadata: { name: shared.stringValue(values.name, "example-rc"), namespace: shared.stringValue(values.namespace, "default") }, spec: { replicas: shared.numberValue(values.replicas, 1), selector: labelsFromValues(values), template: podTemplate(values) } }),
+  buildResource: (values) => ({ apiVersion: "v1", kind: "ReplicationController", metadata: { name: shared.stringValue(values.name, "example-rc"), namespace: shared.stringValue(values.namespace, "default") }, spec: { replicas: shared.replicaCount(values.replicas), selector: labelsFromValues(values), template: podTemplate(values) } }),
   extraColumns: [{ label: "Ready", value: (r) => `${shared.getRecord(r.status).readyReplicas || 0} / ${shared.getRecord(r.status).replicas || 0}` }],
 });
 
@@ -611,8 +622,11 @@ export const validatingadmissionpoliciesConfig = extensionResource({
   subtitle: "Manage CEL-based validating admission policies",
   kind: "ValidatingAdmissionPolicy",
   namespaced: false,
-  createFields: [{ name: "expression", label: "Validation expression", section: "Validation", defaultValue: "true" }],
-  buildResource: (values) => ({ apiVersion: "admissionregistration.k8s.io/v1", kind: "ValidatingAdmissionPolicy", metadata: { name: shared.stringValue(values.name, "example-validation-policy") }, spec: { validations: [{ expression: shared.stringValue(values.expression, "true") }] } }),
+  createFields: [
+    { name: "expression", label: "Validation expression", section: "Validation", defaultValue: "true" },
+    { name: "matchConstraints", label: "Match constraints (JSON)", section: "Matching", type: "textarea", defaultValue: JSON.stringify({ resourceRules: [{ apiGroups: [""], apiVersions: ["v1"], operations: ["CREATE", "UPDATE"], resources: ["pods"] }] }, null, 2) },
+  ],
+  buildResource: (values) => ({ apiVersion: "admissionregistration.k8s.io/v1", kind: "ValidatingAdmissionPolicy", metadata: { name: shared.stringValue(values.name, "example-validation-policy") }, spec: { matchConstraints: JSON.parse(shared.stringValue(values.matchConstraints)), validations: [{ expression: shared.stringValue(values.expression, "true") }] } }),
   extraColumns: [{ label: "Validations", value: (r) => String(listValue(shared.getRecord(r.spec).validations).length) }],
 });
 

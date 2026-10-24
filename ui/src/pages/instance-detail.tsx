@@ -41,7 +41,7 @@ import { InstanceSecurityGroupsDialog } from "@/pages/security-groups";
 import { t } from "@/lib/i18n";
 import { usePolling } from "@/lib/polling";
 import { CopyableText, StatusBadge, VmActionDialog } from "@/components/vm-dialogs";
-import { apiFetch, isVm, vmPodSelectors, type DV, type VM, type VMI } from "@/lib/vm-pages";
+import { apiFetch, isVm, vmPodSelectors, vmRuntimeSpec, type DV, type VM, type VMI } from "@/lib/vm-pages";
 import { InstanceElasticIps } from "@/components/instance-eip";
 import { BandwidthDialog, InstanceInterfaces } from "@/components/instance-network";
 import { bandwidthSummary } from "@/lib/vm-network";
@@ -65,8 +65,12 @@ export function VMDetailContent() {
   const fetchData = useCallback(async () => {
     try {
       const [vmRes, vmiRes] = await Promise.all([ apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachines/${name}`), apiFetch(`/apis/kubevirt.io/v1/namespaces/${namespace}/virtualmachineinstances/${name}`) ]);
-      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null; setVm(vmData); setVmi(vmiRes.ok ? await vmiRes.json() : null);
-      if (vmData?.spec.template?.spec?.volumes) { const dns = vmData.spec.template.spec.volumes.filter((v) => v.dataVolume).map((v) => v.dataVolume!.name); if (dns.length > 0) { const ds = await Promise.all(dns.map((dn:string) => apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${dn}`).then(r => r.ok ? r.json() : null))); setAssociatedDVs(ds.filter(d => d !== null)); } }
+      const rawVmData: unknown = vmRes.ok ? await vmRes.json() : null; const vmData = isVm(rawVmData) ? rawVmData : null;
+      const vmiData: VMI | null = vmiRes.ok ? await vmiRes.json() : null;
+      setVm(vmData); setVmi(vmiData);
+      const names = [...new Set((vmData ? vmRuntimeSpec(vmData, vmiData)?.volumes || [] : []).flatMap((volume) => volume.dataVolume ? [volume.dataVolume.name] : []))];
+      const disks = await Promise.all(names.map((disk) => apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${disk}`).then((response) => response.ok ? response.json() : null)));
+      setAssociatedDVs(disks.filter((disk) => disk !== null));
     } finally { setLoading(false); }
   }, [name, namespace]);
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -109,6 +113,8 @@ export function VMDetailContent() {
     </div>
   );
   const currentCpu = vm.spec.template?.spec?.domain?.cpu || {};
+  const storageSpec = vmRuntimeSpec(vm, vmi);
+  const pvcVolumes = (storageSpec?.volumes || []).filter((volume) => volume.persistentVolumeClaim?.claimName);
   const currentMemory = vm.spec.template?.spec?.domain?.resources?.requests?.memory || "1Gi";
   const isRunning = vmi?.status.phase === "Running";
   const templateAnnotations = vm.spec.template?.metadata?.annotations || {};
@@ -427,13 +433,19 @@ export function VMDetailContent() {
                         <StatusBadge status={d.status?.phase} />
                       </div>
                     ))}
-                    {associatedDVs.length === 0 && <p className="text-sm text-muted-foreground">{t("No storage volumes")}</p>}
+                    {pvcVolumes.map((volume) => (
+                      <div key={volume.name} className="flex items-center justify-between gap-4 rounded-lg border bg-muted/30 p-2 text-sm">
+                        <Link to={`/storage/kubernetes/persistent-volume-claims/${namespace}/${volume.persistentVolumeClaim!.claimName}`} className="flex-1 font-medium hover:text-primary">{volume.persistentVolumeClaim!.claimName}</Link>
+                        <span className="font-mono text-xs text-muted-foreground">PersistentVolumeClaim</span>
+                      </div>
+                    ))}
+                    {associatedDVs.length === 0 && pvcVolumes.length === 0 && <p className="text-sm text-muted-foreground">{t("No storage volumes")}</p>}
                   </div>
                 </Panel>
 
               <Panel title={t("Disks")}>
                   <div className="space-y-2">
-                    {(vm.spec.template?.spec?.domain?.devices?.disks || []).map((disk) => (
+                    {(storageSpec?.domain?.devices?.disks || []).map((disk) => (
                       <div key={disk.name} className="grid gap-1 rounded-lg border bg-muted/30 p-3 text-sm">
                         <div className="font-medium">{disk.name}</div>
                         <div className="text-xs text-muted-foreground">
@@ -442,19 +454,19 @@ export function VMDetailContent() {
                         </div>
                       </div>
                     ))}
-                    {((vm.spec.template?.spec?.domain?.devices?.disks || []).length === 0) && <p className="text-sm text-muted-foreground">{t("No disks declared")}</p>}
+                    {((storageSpec?.domain?.devices?.disks || []).length === 0) && <p className="text-sm text-muted-foreground">{t("No disks declared")}</p>}
                   </div>
                 </Panel>
 
               <Panel title={t("Volumes")}>
                   <div className="space-y-2">
-                    {(vm.spec.template?.spec?.volumes || []).map((volume) => (
+                    {(storageSpec?.volumes || []).map((volume) => (
                       <div key={volume.name} className="grid gap-1 rounded-lg border bg-muted/30 p-3 text-sm">
                         <div className="font-medium">{volume.name}</div>
                         <div className="text-xs text-muted-foreground">{Object.keys(volume).filter((key) => key !== "name").join(", ") || "volume"}</div>
                       </div>
                     ))}
-                    {(vm.spec.template?.spec?.volumes || []).length === 0 && <p className="text-sm text-muted-foreground">{t("No volumes declared")}</p>}
+                    {(storageSpec?.volumes || []).length === 0 && <p className="text-sm text-muted-foreground">{t("No volumes declared")}</p>}
                   </div>
                 </Panel>
 

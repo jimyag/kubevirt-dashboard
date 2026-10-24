@@ -142,6 +142,8 @@ export function SettingsPage() {
 }
 
 const catalog = [
+  { to: "/catalog/crds", title: "Custom resources", description: "CustomResourceDefinition · served APIs" },
+  { to: "/networks/envoy-gateway", title: "Envoy Gateway", description: "gateway.envoyproxy.io" },
   { to: "/catalog/helm", title: "Helm releases", description: "Charts installed with Helm: values, manifests, history" },
   { to: "/kubevirt", title: "KubeVirt", description: "VMs, VMIs, pools, CDI, instance types, snapshots, migrations" },
   { to: "/storage", title: "Storage", description: "StorageClasses, PV/PVC, CSI, volume snapshots" },
@@ -154,6 +156,12 @@ export function MonitoringSettings() {
   const saved = usePrometheusConfig()
   const [form, setForm] = useState<PrometheusConfig>(() => saved || { namespace: "monitoring", service: "prometheus-operated", port: "9090", scheme: "http", path: "" })
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const [previousSaved, setPreviousSaved] = useState(saved)
+  if (saved !== previousSaved) {
+    setPreviousSaved(saved)
+    if (saved) setForm(saved)
+    setStatus(null)
+  }
   const [testing, setTesting] = useState(false)
   const [found, setFound] = useState<Awaited<ReturnType<typeof detectBackends>> | null>(null)
   const [detecting, setDetecting] = useState(false)

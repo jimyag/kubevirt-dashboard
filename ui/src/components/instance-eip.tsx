@@ -10,6 +10,7 @@ import { ChoiceCard, Combobox, ConfirmDialog, DataTable, EmptyState, ErrorNote, 
 import { asRecord, listItems, requestJson, str, useAsync, useDiscovery, type KubeObject } from "@/lib/kube"
 import { OVN_API, natEngineLabel, natKinds, natManifest, natReady, type NatEngine } from "@/lib/nat"
 import { t } from "@/lib/i18n"
+import { usePolling } from "@/lib/polling"
 
 type Binding = {
   item: KubeObject
@@ -50,7 +51,7 @@ export function InstanceElasticIps({ namespace, name, ips, subnet }: { namespace
   const [removing, setRemoving] = useState<Binding | null>(null)
   const ipKey = ips.join(",")
 
-  const { data, reload: load } = useAsync(async (): Promise<NatData> => {
+  const { data, error, reload: load } = useAsync(async (): Promise<NatData> => {
     if (engines.length === 0) return emptyData
     const has = (engine: NatEngine) => engines.includes(engine)
     const list = (plural: string, engine: NatEngine) => (has(engine) ? listItems(`${OVN_API}/${plural}`) : Promise.resolve([] as KubeObject[]))
@@ -72,6 +73,7 @@ export function InstanceElasticIps({ namespace, name, ips, subnet }: { namespace
     ]
     return { iptablesEips, ovnEips, gateways, subnets, bindings }
   }, emptyData, [engines, ipKey, ipName])
+  usePolling(load, engines.length > 0 ? 5000 : 0)
 
   if (engines.length === 0) return null
 
@@ -82,12 +84,14 @@ export function InstanceElasticIps({ namespace, name, ips, subnet }: { namespace
       className="lg:col-span-2"
       actions={
         <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={load}>{t("Refresh")}</Button>
           <Button size="sm" variant="outline" disabled={!running} onClick={() => setDialog("dnat")} className="gap-1.5"><Waypoints className="size-3.5" />{t("Add port forwarding")}</Button>
           <Button size="sm" variant="outline" disabled={!running} onClick={() => setDialog("fip")} className="gap-1.5"><Globe className="size-3.5" />{t("Bind floating IP")}</Button>
         </div>
       }
       bodyClassName="p-0"
     >
+      {error && <ErrorNote>{error}</ErrorNote>}
       <DataTable
         rows={data.bindings}
         rowKey={(binding) => `${binding.plural}/${binding.item.metadata.name}`}

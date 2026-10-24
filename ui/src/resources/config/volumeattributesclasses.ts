@@ -15,7 +15,7 @@ export const volumeattributesclassesConfig: ResourceConfig = {
     createFields: [
       ...shared.nameOnlyFields("example-volume-attributes"),
       { name: "driverName", label: "Driver name", section: "Driver", defaultValue: "example.csi.io" },
-      { name: "parameters", label: "Parameters", section: "Driver", type: "textarea", defaultValue: "", placeholder: "iops=3000\nthroughput=125" },
+      { name: "parameters", label: "Parameters", section: "Driver", type: "textarea", defaultValue: "", required: true, placeholder: "iops=3000\nthroughput=125" },
     ],
     buildCreateResource: (values) => ({
       apiVersion: "storage.k8s.io/v1",

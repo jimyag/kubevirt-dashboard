@@ -1,6 +1,5 @@
-kubevirt-dashboard
-kubevirt-dashboard.exe
-kubevirt-dashboard
+/kubevirt-dashboard
+/kubevirt-dashboard.exe
 vm-statuses.txt
 dashboard/ui/node_modules
 dashboard/ui/dist
@@ -8,3 +7,5 @@ dashboard/ui/dist
 kite
 
 kubevirt-manager
+
+/tmp/

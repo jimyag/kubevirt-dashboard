@@ -11,6 +11,7 @@ import {
 
 import { cn } from "@/lib/utils"
 import { relativeTime, replaceMap, useAsync } from "@/lib/kube"
+import { resourceTable, type ResourceListData } from "@/lib/resource-table"
 import { Combobox, ConfirmDialog, EmptyState, ErrorNote, FilterInput, LoadingState, PageHeader, Pager, StatusDot, Toolbar } from "@/components/console"
 import { namespaceScope, useFilteredRows, usePaged, type FilterField } from "@/lib/filter"
 import {
@@ -49,9 +50,17 @@ import { EventList } from "@/components/events"
 import { eventsUrl } from "@/lib/events"
 import { ManifestPanel } from "@/components/manifest"
 import { t } from "@/lib/i18n"
-import { ResourceSpecificOverview } from "@/components/resource-overviews"
+import { ResourceSpecificOverview, StructuredResourceOverview } from "@/components/resource-overviews"
 import { MetadataSection } from "@/components/detail-parts"
 import { asRecord, asRecordList, compactValue, getValue, hiddenAnnotations, isPrimitiveDetailValue, isRecordValue } from "@/lib/detail-values"
+import { parseRbacEntries, rbacApiGroups } from "@/lib/rbac"
+import { flowSchemaSubject } from "@/lib/flow-control"
+import { certificateRequest, certificateRequestStatus } from "@/lib/certificates"
+import { keyValueText as textFromRecord, parseKeyValueText as recordFromText, parseSpecFields } from "@/lib/key-value"
+import { useCrdSchema } from "@/lib/crd-discovery"
+import type { StructuralSchema } from "@/lib/crd-schema"
+import { SchemaResourceEditor } from "@/components/schema-resource-editor"
+import { conditionReadiness } from "@/lib/resource-status"
 
 export type KubeResource = {
   apiVersion?: string
@@ -61,6 +70,7 @@ export type KubeResource = {
     namespace?: string
     uid?: string
     creationTimestamp?: string
+    deletionTimestamp?: string
     labels?: Record<string, string>
     annotations?: Record<string, string>
     ownerReferences?: Array<{ apiVersion?: string; kind?: string; name?: string; uid?: string; controller?: boolean }>
@@ -88,6 +98,12 @@ export type DetailSection = {
   items: Array<{ label: string; value: unknown; fullWidth?: boolean }>
 }
 
+type ResourceActionRequest = {
+  url: string
+  options?: RequestInit
+  navigateTo?: string
+}
+
 export type ResourceAction = {
   id: string
   label: string
@@ -95,11 +111,7 @@ export type ResourceAction = {
   fields?: CreateFormField[]
   confirmLabel?: string
   variant?: "default" | "outline" | "destructive" | "secondary"
-  buildRequest: (resource: KubeResource, values: Record<string, string | boolean>) => {
-    url: string
-    options?: RequestInit
-    navigateTo?: string
-  }
+  buildRequest: (resource: KubeResource, values: Record<string, string | boolean>) => ResourceActionRequest | Promise<ResourceActionRequest>
 }
 
 export type ResourceConfig = {
@@ -118,6 +130,8 @@ export type ResourceConfig = {
   createTemplate: string
   allowCreate?: boolean
   allowDelete?: boolean
+  allowUpdate?: boolean
+  schema?: StructuralSchema
   createFields?: CreateFormField[]
   buildCreateResource?: (values: Record<string, string | boolean>) => KubeResource | KubeResource[]
   createResourcePath?: (resource: KubeResource) => string
@@ -324,25 +338,23 @@ const relatedPodsForResource = (resource: KubeResource) => {
   return undefined
 }
 
-/** Status from the config path, the phase, or a Ready / Available condition (not just the first one). */
-const readinessText = (resource: KubeResource) => {
-  const conditions = asRecordList(getValue(resource, ["status", "conditions"]))
-  const ready = conditions.find((item) => item.type === "Ready" || item.type === "Available") || conditions[0]
-  if (!ready) return undefined
-  if (ready.status === "True") return String(ready.type)
-  return ready.type === "Ready" ? "NotReady" : ready.type === "Available" ? "Unavailable" : `${String(ready.type)} (${String(ready.status)})`
-}
+const readinessText = (resource: KubeResource) => conditionReadiness(resource.status, getValue(resource, ["metadata", "generation"]))
 
 const conditionsStatusPath = (path?: string[]) => Boolean(path && path[0] === "status" && path[1] === "conditions")
 
-const resourceStatusText = (resource: KubeResource, config: ResourceConfig) =>
-  String(
-    // Condition-based paths (often conditions[0].type) would name a condition even when it is False.
-    (conditionsStatusPath(config.statusPath) ? readinessText(resource) : getValue(resource, config.statusPath)) ??
+const resourceStatusText = (resource: KubeResource, config: ResourceConfig) => {
+  if (resource.metadata.deletionTimestamp) return "Terminating"
+  if (config.kind === "CertificateSigningRequest") return certificateRequestStatus(asRecord(resource.status))
+  // Condition-based paths (often conditions[0].type) would name a condition even when it is False.
+  const status = conditionsStatusPath(config.statusPath) ? readinessText(resource) : getValue(resource, config.statusPath)
+  if (typeof status === "boolean" && ["ready", "readyToUse"].includes(config.statusPath?.[1] || "")) return status ? "Ready" : "NotReady"
+  return String(
+    status ??
     getValue(resource, ["status", "phase"]) ??
     readinessText(resource) ??
     "Active"
   )
+}
 
 function ResourceStatus({ resource, config }: { resource: KubeResource; config: ResourceConfig }) {
   return <StatusDot status={resourceStatusText(resource, config)} />
@@ -351,11 +363,11 @@ function ResourceStatus({ resource, config }: { resource: KubeResource; config: 
 const fieldKey = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
 /** Filterable fields of a generic resource list: the columns shown plus labels. */
-const resourceFilterFields = (config: ResourceConfig): FilterField<KubeResource>[] => [
+const resourceFilterFields = (config: ResourceConfig, columns: ResourceConfig["extraColumns"], status: (resource: KubeResource) => string): FilterField<KubeResource>[] => [
   { key: "name", label: t("Name"), value: (r) => r.metadata.name },
   ...(config.namespaced ? [{ key: "namespace", label: t("Namespace"), aliases: ["ns"], value: (r: KubeResource) => r.metadata.namespace }] : []),
-  { key: "status", label: t("Status"), value: (r) => resourceStatusText(r, config) },
-  ...(config.extraColumns || []).map((column) => ({ key: fieldKey(column.label), label: column.label, value: (r: KubeResource) => column.value(r) })),
+  { key: "status", label: t("Status"), value: status },
+  ...(columns || []).map((column) => ({ key: fieldKey(column.label), label: column.label, value: (r: KubeResource) => column.value(r) })),
   { key: "label", label: t("Labels"), value: (r) => Object.entries(r.metadata.labels || {}).map(([key, value]) => `${key}=${value}`) },
 ]
 
@@ -376,35 +388,6 @@ const resourceFieldDefaults = (resource: KubeResource, fields?: CreateFormField[
     field.name,
     editableDefault(typeof field.defaultValue === "function" ? field.defaultValue(resource) : field.defaultValue ?? ""),
   ])) as Record<string, string | boolean>
-
-/** Parses free-form spec values so "replicas=3" sends a number and "enabled=true" a boolean. */
-const scalarFromText = (value: string): unknown => {
-  if (value === "true" || value === "false") return value === "true"
-  if (value === "null") return null
-  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value)
-  if (/^[[{]/.test(value)) {
-    try {
-      return JSON.parse(value)
-    } catch {
-      return value
-    }
-  }
-  return value
-}
-
-const textFromRecord = (value: unknown) =>
-  Object.entries(asRecord(value)).map(([key, next]) => `${key}=${compactValue(next)}`).join("\n")
-
-const recordFromText = (value: string | boolean | undefined) =>
-  Object.fromEntries(String(value ?? "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [key, ...rest] = line.split("=")
-      return [key.trim(), rest.join("=").trim()]
-    })
-    .filter(([key]) => key))
 
 const csvFromList = (value: unknown) => Array.isArray(value) ? value.map(compactValue).join(", ") : compactValue(value) === "N/A" ? "" : compactValue(value)
 
@@ -437,8 +420,8 @@ const resourceActionBase = (config: ResourceConfig, resource: KubeResource) => {
 const resourceActionUrl = (config: ResourceConfig, resource: KubeResource) =>
   `${resourceActionBase(config, resource)}${config.namespaced ? `/namespaces/${resource.metadata.namespace}` : ""}/${config.id}/${resource.metadata.name}`
 
-const canCreateResource = (config: ResourceConfig) => config.kind !== "ComponentStatus"
-const canDeleteResource = (config: ResourceConfig) => config.kind !== "ComponentStatus"
+const canCreateResource = (config: ResourceConfig) => config.allowCreate !== false && config.kind !== "ComponentStatus"
+const canDeleteResource = (config: ResourceConfig) => config.allowDelete !== false && config.kind !== "ComponentStatus"
 
 const mergePatchOptions = (body: unknown): RequestInit => ({
   method: "PATCH",
@@ -453,7 +436,7 @@ const jsonPatchOptions = (body: unknown[]): RequestInit => ({
 })
 
 const specBasicsPatch = (values: Record<string, string | boolean>) => {
-  const spec = Object.fromEntries(Object.entries(recordFromText(values.specFields)).map(([key, value]) => [key, scalarFromText(String(value))]))
+  const spec = parseSpecFields(values.specFields)
   return Object.keys(spec).length ? { spec } : {}
 }
 
@@ -482,16 +465,17 @@ const effectiveCreateFields = (config: ResourceConfig): CreateFormField[] => {
         { name: "priorityLevel", label: t("Priority level"), section: "Matching", defaultValue: "workload-low" },
         { name: "matchingPrecedence", label: t("Matching precedence"), section: "Matching", type: "number", defaultValue: "1000" },
         { name: "distinguisherMethod", label: t("Distinguisher method"), section: "Matching", type: "select", defaultValue: "ByUser", options: [{ label: t("By user"), value: "ByUser" }, { label: t("By namespace"), value: "ByNamespace" }] },
-        { name: "subjects", label: t("Subjects"), section: "Rules", type: "textarea", defaultValue: "Group|system:authenticated", placeholder: t("Kind|Name per line") },
+        { name: "subjects", label: t("Subjects"), section: "Rules", type: "textarea", defaultValue: "Group|system:authenticated", description: "Use User|name, Group|name or ServiceAccount|name|namespace; omitted namespaces use default.", placeholder: t("Kind|Name per line") },
         { name: "verbs", label: t("Verbs"), section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
         { name: "apiGroups", label: t("API groups"), section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
         { name: "resources", label: t("Resources"), section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
+        { name: "namespaces", label: t("Namespaces"), section: "Rules", defaultValue: "*", placeholder: "comma-separated" },
+        { name: "clusterScope", label: t("Cluster scope"), section: "Rules", type: "checkbox", defaultValue: false },
       ]
     case "PriorityLevelConfiguration":
       return [
         ...identity,
-        { name: "type", label: t("Type"), section: "Priority", type: "select", defaultValue: "Limited", options: [{ label: t("Limited"), value: "Limited" }, { label: t("Exempt"), value: "Exempt" }] },
-        { name: "assuredConcurrencyShares", label: t("Assured concurrency shares"), section: "Limited", type: "number", defaultValue: "30" },
+        { name: "nominalConcurrencyShares", label: t("Nominal concurrency shares"), section: "Limited", type: "number", defaultValue: "30" },
         { name: "queues", label: t("Queues"), section: "Limited", type: "number", defaultValue: "64" },
         { name: "handSize", label: t("Hand size"), section: "Limited", type: "number", defaultValue: "8" },
         { name: "queueLengthLimit", label: t("Queue length limit"), section: "Limited", type: "number", defaultValue: "50" },
@@ -509,7 +493,6 @@ const effectiveCreateFields = (config: ResourceConfig): CreateFormField[] => {
       ]
     case "CustomResourceDefinition":
       return [
-        ...identity,
         { name: "group", label: t("Group"), section: "Names", defaultValue: "example.com" },
         { name: "plural", label: t("Plural"), section: "Names", defaultValue: "examples" },
         { name: "singular", label: t("Singular"), section: "Names", defaultValue: "example" },
@@ -539,13 +522,6 @@ const effectiveCreateFields = (config: ResourceConfig): CreateFormField[] => {
 }
 
 
-const flowSchemaSubject = (line: string, namespace: string) => {
-  const [kind, name] = line.split("|")
-  if (kind === "ServiceAccount") return { kind, serviceAccount: { name, namespace } }
-  if (kind === "User") return { kind, user: { name } }
-  return { kind: "Group", group: { name: name || "system:authenticated" } }
-}
-
 const buildEffectiveCreateResource = (config: ResourceConfig, values: Record<string, string | boolean>): KubeResource | KubeResource[] => {
   if (config.buildCreateResource && !usesInferredCreate(config)) return config.buildCreateResource(values)
   const name = String(values.name || `example-${config.id}`)
@@ -556,15 +532,17 @@ const buildEffectiveCreateResource = (config: ResourceConfig, values: Record<str
 
   switch (config.kind) {
     case "FlowSchema":
-      return { ...base, spec: { matchingPrecedence: numberFromValue(values.matchingPrecedence, 1000), priorityLevelConfiguration: { name: values.priorityLevel }, distinguisherMethod: { type: values.distinguisherMethod }, rules: [{ subjects: String(values.subjects || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => flowSchemaSubject(line, namespace)), resourceRules: [{ verbs: listFromCsv(values.verbs), apiGroups: listFromCsv(values.apiGroups), resources: listFromCsv(values.resources) }] }] } }
+      return { ...base, spec: { matchingPrecedence: numberFromValue(values.matchingPrecedence, 1000), priorityLevelConfiguration: { name: values.priorityLevel }, distinguisherMethod: { type: values.distinguisherMethod }, rules: [{ subjects: String(values.subjects || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => flowSchemaSubject(line, namespace)), resourceRules: [{ verbs: listFromCsv(values.verbs), apiGroups: rbacApiGroups(values.apiGroups), resources: listFromCsv(values.resources), namespaces: listFromCsv(values.namespaces), clusterScope: values.clusterScope === true }] }] } }
     case "PriorityLevelConfiguration":
-      return { ...base, spec: { type: values.type, ...(values.type === "Limited" ? { limited: { assuredConcurrencyShares: numberFromValue(values.assuredConcurrencyShares, 30), limitResponse: { type: "Queue", queuing: { queues: numberFromValue(values.queues, 64), handSize: numberFromValue(values.handSize, 8), queueLengthLimit: numberFromValue(values.queueLengthLimit, 50) } } } } : {}) } }
+      return { ...base, spec: { type: "Limited", limited: { nominalConcurrencyShares: numberFromValue(values.nominalConcurrencyShares, 30), limitResponse: { type: "Queue", queuing: { queues: numberFromValue(values.queues, 64), handSize: numberFromValue(values.handSize, 8), queueLengthLimit: numberFromValue(values.queueLengthLimit, 50) } } } } }
     case "APIService":
       return { ...base, spec: { group: values.group, version: values.version, service: { namespace: values.serviceNamespace, name: values.serviceName }, insecureSkipTLSVerify: values.insecureSkipTLSVerify === true, groupPriorityMinimum: numberFromValue(values.groupPriorityMinimum, 1000), versionPriority: numberFromValue(values.versionPriority, 15) } }
     case "CustomResourceDefinition":
       return { ...base, metadata: { name: `${values.plural}.${values.group}` }, spec: { group: values.group, scope: values.scope, names: { plural: values.plural, singular: values.singular, kind: values.kind }, versions: [{ name: values.version, served: true, storage: true, schema: { openAPIV3Schema: { type: "object", "x-kubernetes-preserve-unknown-fields": true } } }] } }
-    case "CertificateSigningRequest":
-      return { ...base, spec: { request: values.request, signerName: values.signerName, usages: listFromCsv(values.usages) } }
+    case "CertificateSigningRequest": {
+      const request = String(values.request || "")
+      return { ...base, spec: { request: certificateRequest(request), signerName: values.signerName, usages: listFromCsv(values.usages) } }
+    }
     case "Node":
       return { ...base, spec: { ...(values.podCIDR ? { podCIDR: values.podCIDR } : {}), ...(values.providerID ? { providerID: values.providerID } : {}) } }
     case "Endpoints":
@@ -626,7 +604,8 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     })
   }
 
-  if (["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job", "CronJob"].includes(kind)) {
+  if (["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "CronJob"].includes(kind)
+    || (kind === "Job" && spec.suspend === true && !asRecord(resource.status).startTime)) {
     const template = kind === "CronJob" ? asRecord(getValue(resource, ["spec", "jobTemplate", "spec", "template"])) : asRecord(spec.template)
     add({
       id: "edit-pod-template-metadata",
@@ -721,14 +700,15 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     add({
       id: "edit-service-routing",
       label: t("Edit service"),
-      description: t("Update service type, selector, external IPs, and load balancer IP."),
+      description: t("Update service type, selector, external name, external IPs, and load balancer IP."),
       fields: [
         { name: "type", label: t("Type"), section: "Routing", type: "select", defaultValue: () => compactValue(spec.type || "ClusterIP"), options: [{ label: t("ClusterIP"), value: "ClusterIP" }, { label: t("NodePort"), value: "NodePort" }, { label: t("LoadBalancer"), value: "LoadBalancer" }, { label: t("ExternalName"), value: "ExternalName" }] },
         { name: "selector", label: t("Selector"), section: "Routing", type: "textarea", defaultValue: () => textFromRecord(spec.selector), placeholder: "key=value per line" },
+        { name: "externalName", label: t("External name"), section: "Routing", defaultValue: () => compactValue(spec.externalName), placeholder: "service.namespace.svc.cluster.local" },
         { name: "externalIPs", label: t("External IPs"), section: "Routing", defaultValue: () => csvFromList(spec.externalIPs), placeholder: "comma-separated" },
         { name: "loadBalancerIP", label: t("Load balancer IP"), section: "Routing", defaultValue: () => compactValue(spec.loadBalancerIP) },
       ],
-      patch: (values) => ({ spec: { type: values.type, selector: replaceMap(spec.selector, recordFromText(values.selector)), externalIPs: listFromCsv(values.externalIPs), loadBalancerIP: values.loadBalancerIP || null } }),
+      patch: (values) => ({ spec: { type: values.type, selector: replaceMap(spec.selector, recordFromText(values.selector)), externalName: values.type === "ExternalName" ? String(values.externalName || "").trim() : null, externalIPs: listFromCsv(values.externalIPs), loadBalancerIP: values.loadBalancerIP || null } }),
     })
   }
 
@@ -791,7 +771,15 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
       fields: [{ name: "hostnames", label: t("Hostnames"), section: "Routing", defaultValue: () => csvFromList(spec.hostnames), placeholder: "comma-separated" }],
       patch: (values) => ({ spec: { hostnames: listFromCsv(values.hostnames).length ? listFromCsv(values.hostnames) : null } }),
     })
-  } else if (config.path.includes("/networks/") && !isCalicoPolicy && !["NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"].includes(kind)) {
+  } else if (kind === "QoSPolicy") {
+    if (spec.shared !== true && asRecord(resource.status).shared !== true) add({
+      id: "edit-network-fields",
+      label: t("Edit {v0}", { v0: kind }),
+      description: t("Update bandwidth limit rules. Shared policies must be recreated."),
+      fields: [{ name: "bandwidthLimitRules", label: t("Bandwidth limit rules (JSON)"), section: "QoS", type: "textarea", defaultValue: () => JSON.stringify(spec.bandwidthLimitRules || [], null, 2) }],
+      patch: (values) => ({ spec: { bandwidthLimitRules: JSON.parse(String(values.bandwidthLimitRules || "[]")) } }),
+    })
+  } else if (config.path.includes("/networks/") && !isCalicoPolicy && !["NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy", "Endpoints", "EndpointSlice", "OvnSnatRule", "OvnDnatRule", "OvnFip"].includes(kind)) {
     add({
       id: "edit-network-fields",
       label: t("Edit {v0}", { v0: kind }),
@@ -824,7 +812,7 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
       id: "edit-config-data",
       label: t("Edit data"),
       description: t("Values are shown decoded and stored base64 encoded. Removed lines delete the key."),
-      fields: [{ name: "data", label: t("Data"), section: "Data", type: "textarea", defaultValue: () => Object.entries(decoded).map(([key, value]) => `${key}=${value}`).join("\n"), placeholder: "key=value per line" }],
+      fields: [{ name: "data", label: t("Data"), section: "Data", type: "textarea", defaultValue: () => textFromRecord(decoded), placeholder: "key=value per line" }],
       patch: (values) => {
         const next = recordFromText(values.data)
         const removed = Object.fromEntries(Object.keys(decoded).filter((key) => !(key in next)).map((key) => [key, null]))
@@ -871,14 +859,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     add({
       id: "edit-rbac-rules",
       label: t("Edit rules"),
-      description: t("Replace RBAC rules using line-oriented fields."),
-      fields: [{ name: "rules", label: t("Rules"), section: "RBAC", type: "textarea", defaultValue: () => asRecordList(resource.rules).map((rule) => `${csvFromList(rule.apiGroups)}|${csvFromList(rule.resources)}|${csvFromList(rule.verbs)}`).join("\n"), placeholder: "apiGroups|resources|verbs per line" }],
-      patch: (values) => ({
-        rules: String(values.rules || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-          const [apiGroups, resources, verbs] = line.split("|")
-          return { apiGroups: listFromCsv(apiGroups), resources: listFromCsv(resources), verbs: listFromCsv(verbs) }
-        }),
-      }),
+      description: t("Edit RBAC rules as JSON, preserving resource names and non-resource URLs."),
+      fields: [{ name: "rules", label: t("Rules"), section: "RBAC", type: "textarea", defaultValue: () => JSON.stringify(resource.rules || [], null, 2) }],
+      patch: (values) => ({ rules: parseRbacEntries(values.rules) }),
     })
   }
 
@@ -889,14 +872,9 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
       label: t("Edit subjects"),
       description: t("Bound to {v0} {v1}. roleRef is immutable; create a new binding to change it.", { v0: compactValue(roleRef.kind), v1: compactValue(roleRef.name) }),
       fields: [
-        { name: "subjects", label: t("Subjects"), section: "Subjects", type: "textarea", defaultValue: () => asRecordList(resource.subjects).map((subject) => `${compactValue(subject.kind)}|${compactValue(subject.name)}|${compactValue(subject.namespace)}`).join("\n"), placeholder: t("Kind|Name|Namespace per line") },
+        { name: "subjects", label: t("Subjects"), section: "Subjects", type: "textarea", defaultValue: () => JSON.stringify(resource.subjects || [], null, 2) },
       ],
-      patch: (values) => ({
-        subjects: String(values.subjects || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-          const [subjectKind, name, namespace] = line.split("|")
-          return { kind: subjectKind, name, ...(namespace ? { namespace } : {}) }
-        }),
-      }),
+      patch: (values) => ({ subjects: parseRbacEntries(values.subjects) }),
     })
   }
 
@@ -923,13 +901,14 @@ const inferredResourceActions = (config: ResourceConfig, resource: KubeResource)
     })
   }
 
-  if (["ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding", "APIService", "CustomResourceDefinition", "FlowSchema", "PriorityLevelConfiguration", "RuntimeClass", "PriorityClass", "Namespace", "Lease"].includes(kind)) {
+  if (["ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding", "APIService", "CustomResourceDefinition", "FlowSchema", "PriorityLevelConfiguration", "RuntimeClass", "PriorityClass", "Namespace", "Lease", "Endpoints", "EndpointSlice"].includes(kind)) {
+    const topLevel = ["RuntimeClass", "PriorityClass", "Endpoints", "EndpointSlice"].includes(kind)
     add({
       id: "edit-control-plane",
       label: t("Edit {v0}", { v0: kind }),
-      description: t("Update safe top-level spec fields for {v0}.", { v0: kind }),
-      fields: [{ name: "specFields", label: t("{v0} Spec Fields", { v0: kind }), section: "Spec", type: "textarea", defaultValue: () => "", placeholder: "topLevelSpecKey=value per line" }],
-      patch: specBasicsPatch,
+      description: topLevel ? t("Update top-level fields for {v0}.", { v0: kind }) : t("Update safe top-level spec fields for {v0}.", { v0: kind }),
+      fields: [{ name: "specFields", label: topLevel ? t("{v0} Fields", { v0: kind }) : t("{v0} Spec Fields", { v0: kind }), section: topLevel ? "Fields" : "Spec", type: "textarea", defaultValue: () => "", placeholder: topLevel ? "key=value per line" : "topLevelSpecKey=value per line" }],
+      patch: (values) => topLevel ? asRecord(specBasicsPatch(values).spec) : specBasicsPatch(values),
     })
   }
 
@@ -1017,14 +996,18 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
-  const previewResource = useMemo(
-    () => buildEffectiveCreateResource(config, values),
-    [config, values]
-  )
+  const preview = useMemo(() => {
+    try {
+      const resource = buildEffectiveCreateResource(config, values)
+      return { resources: Array.isArray(resource) ? resource : [resource], error: "" }
+    } catch (err) {
+      return { resources: [], error: err instanceof Error ? err.message : t("Unable to preview request") }
+    }
+  }, [config, values])
   const fieldGroups = useMemo(() => groupFields(createFields), [createFields])
 
-  const resources = Array.isArray(previewResource) ? previewResource : [previewResource]
-  const content = yamlEdited ? editedContent : resources.map((resource) => YAML.dump(resource, { noRefs: true, lineWidth: 120 })).join("---\n")
+  const content = yamlEdited ? editedContent : preview.resources.map((resource) => YAML.dump(resource, { noRefs: true, lineWidth: 120 })).join("---\n")
+  const formError = (!yamlEdited && preview.error) || error
   const setOpen = (next: boolean) => {
     setDialogOpen(next)
     setValues(createFieldDefaults(createFields, defaultNamespace))
@@ -1144,24 +1127,24 @@ export function ResourceCreateDialog({ config, onCreated, defaultNamespace }: { 
             />
           </div>
         </div>
-        {error && (
+        {formError && (
           <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-foreground">
             <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
-            <span className="break-words">{error}</span>
+            <span className="break-words">{formError}</span>
           </div>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
-          <Button onClick={createResource} disabled={saving}>{saving ? t("Creating...") : t("Create")}</Button>
+          <Button onClick={createResource} disabled={saving || Boolean(!yamlEdited && preview.error)}>{saving ? t("Creating...") : t("Create")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-function requestPreview(action: ResourceAction, resource: KubeResource, values: Record<string, string | boolean>) {
+async function requestPreview(action: ResourceAction, resource: KubeResource, values: Record<string, string | boolean>) {
   try {
-    const request = action.buildRequest(resource, values)
+    const request = await action.buildRequest(resource, values)
     return YAML.dump({
       url: request.url,
       method: request.options?.method || "GET",
@@ -1204,13 +1187,13 @@ function ResourceActionDialog({
     else setError("")
   }
 
-  const preview = useMemo(() => requestPreview(action, resource, values), [action, resource, values])
+  const { data: preview, loading: preparing } = useAsync(() => open ? requestPreview(action, resource, values) : Promise.resolve(""), "", [open, action, resource, values])
 
   const submit = async () => {
     setSaving(true)
     setError("")
     try {
-      const request = action.buildRequest(resource, values)
+      const request = await action.buildRequest(resource, values)
       const res = await apiFetch(request.url, request.options || {})
       if (!res.ok) throw new Error(await res.text())
       setOpen(false)
@@ -1231,7 +1214,7 @@ function ResourceActionDialog({
       )}
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{t(action.label)} {resource.kind || t("Resource")}</DialogTitle>
+          <DialogTitle>{t(action.label)} · {resource.metadata.name}</DialogTitle>
           {action.description && <DialogDescription>{t(action.description)}</DialogDescription>}
         </DialogHeader>
         <div className="grid gap-4 md:grid-cols-2">
@@ -1263,7 +1246,7 @@ function ResourceActionDialog({
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
-          <Button variant={action.variant === "destructive" ? "destructive" : "default"} onClick={submit} disabled={saving}>
+          <Button variant={action.variant === "destructive" ? "destructive" : "default"} onClick={submit} disabled={saving || preparing}>
             {saving ? t("Applying...") : t(action.confirmLabel || action.label)}
           </Button>
         </DialogFooter>
@@ -1273,6 +1256,8 @@ function ResourceActionDialog({
 }
 
 export function ResourceList({ config }: { config: ResourceConfig }) {
+  const discoveredSchema = useCrdSchema(config.schema ? "" : apiVersionFromListPath(config.listPath), config.id)
+  const schema = config.schema || discoveredSchema.schema
   const [search, setSearch] = useState("")
   const [namespaces, setNamespaces] = useState<string[]>([])
   const [namespaceFilter, setNamespaceFilter] = useState("default")
@@ -1308,24 +1293,29 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
     let lastError = ""
     const paths = await servedPaths(config)
     for (const path of paths) {
-      const res = await apiFetch(resourceListUrl(config, path, scope))
+      const url = resourceListUrl(config, path, scope)
+      let res = config.schema
+        ? await apiFetch(`${url}${url.includes("?") ? "&" : "?"}includeObject=Object`, { headers: { Accept: "application/json;as=Table;g=meta.k8s.io;v=v1, application/json" } })
+        : await apiFetch(url)
+      if (config.schema && res.status === 406) res = await apiFetch(url)
       if (res.ok) {
-        const data = await res.json()
-        return (data.items || []) as KubeResource[]
+        return resourceTable(await res.json(), (resource) => resourceStatusText(resource, config))
       }
       lastError = await res.text()
       if (res.status !== 404) break
     }
     throw new Error(lastError || t("Resource API is not served by this cluster"))
-  }, [] as KubeResource[], [config, scope])
-  const items = useMemo(() => error ? [] : data, [data, error])
+  }, { items: [] } as ResourceListData, [config, scope])
+  const items = useMemo(() => error ? [] : data.items, [data, error])
+  const columns = data.columns ?? config.extraColumns
+  const statusFor = useMemo(() => data.status ?? ((resource: KubeResource) => resourceStatusText(resource, config)), [data.status, config])
   const [selectionRows, setSelectionRows] = useState(items)
   if (items !== selectionRows) {
     setSelectionRows(items)
     setSelected({})
   }
 
-  const fields = useMemo(() => resourceFilterFields(config), [config])
+  const fields = useMemo(() => resourceFilterFields(config, columns, statusFor), [config, columns, statusFor])
   const inScope = useMemo(() => (config.namespaced ? items.filter((item) => ns.match(item.metadata.namespace)) : items), [items, ns, config.namespaced])
   const filtered = useFilteredRows(inScope, fields, search)
   const { rows: pageRows, ...paging } = usePaged(filtered)
@@ -1337,7 +1327,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
     : config.namespaced && scope !== "all"
       ? `Namespace ${scope} has none.`
       : undefined
-  const tableColumnCount = 5 + (config.namespaced ? 1 : 0) + (config.extraColumns?.length || 0)
+  const tableColumnCount = 5 + (config.namespaced ? 1 : 0) + (columns?.length || 0)
   const selectedCount = Object.values(selected).filter(Boolean).length
 
   const remove = async (item: KubeResource) => {
@@ -1359,8 +1349,8 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
       <PageHeader
         title={t(config.title)}
         badge={!loading && <span className="text-sm text-muted-foreground tabular-nums">{items.length}</span>}
-        subtitle={<span className="font-mono text-xs">{config.kind} · {config.listPath.split("/").slice(1, -1).join("/")}</span>}
-        actions={canCreateResource(config) && <ResourceCreateDialog config={config} onCreated={load} defaultNamespace={scope === "all" ? "default" : scope} />}
+        subtitle={<span className="font-mono text-xs">{config.kind} · {apiVersionFromListPath(config.listPath)}</span>}
+        actions={canCreateResource(config) && (schema ? <SchemaResourceEditor config={config} schema={schema} onSaved={(created) => { if (config.namespaced && scope !== "all" && created.metadata.namespace) setNamespaceFilter(created.metadata.namespace); load() }} defaultNamespace={scope === "all" ? "default" : scope} /> : !discoveredSchema.loading && <ResourceCreateDialog config={config} onCreated={load} defaultNamespace={scope === "all" ? "default" : scope} />)}
       />
 
       <Toolbar
@@ -1375,7 +1365,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
         {selectedCount > 0 && <span className="text-sm text-muted-foreground">{selectedCount} selected</span>}
       </Toolbar>
 
-      {error && <ErrorNote>{error}</ErrorNote>}
+      {error && <ErrorNote>{t(error)}</ErrorNote>}
 
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="max-h-[calc(100dvh-220px)] overflow-auto">
@@ -1403,7 +1393,7 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
                 <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
                 {config.namespaced && <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Namespace")}</TableHead>}
                 <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Status")}</TableHead>
-                {config.extraColumns?.map((column) => <TableHead key={column.label} className="h-9 px-3 text-xs font-medium text-muted-foreground">{t(column.label)}</TableHead>)}
+                {columns?.map((column) => <TableHead key={column.label} className="h-9 px-3 text-xs font-medium text-muted-foreground">{t(column.label)}</TableHead>)}
                 <TableHead className="h-9 px-3 text-right text-xs font-medium text-muted-foreground">{t("Age")}</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
@@ -1441,8 +1431,8 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
                     </Link>
                   </TableCell>
                   {config.namespaced && <TableCell className="h-9 px-3 py-1.5 text-sm text-muted-foreground">{item.metadata.namespace}</TableCell>}
-                  <TableCell className="h-9 px-3 py-1.5"><ResourceStatus resource={item} config={config} /></TableCell>
-                  {config.extraColumns?.map((column) => (
+                  <TableCell className="h-9 px-3 py-1.5"><StatusDot status={statusFor(item)} /></TableCell>
+                  {columns?.map((column) => (
                     <TableCell key={column.label} className="h-9 px-3 py-1.5 text-sm text-muted-foreground">{column.value(item) || "N/A"}</TableCell>
                   ))}
                   <TableCell className="h-9 px-3 py-1.5 text-right text-sm text-muted-foreground tabular-nums" title={item.metadata.creationTimestamp}>
@@ -1486,6 +1476,8 @@ export function ResourceList({ config }: { config: ResourceConfig }) {
 
 /** Long annotation values (JSON, certificates) are clamped; JSON is pretty-printed when expanded. */
 export function ResourceDetail({ config }: { config: ResourceConfig }) {
+  const discoveredSchema = useCrdSchema(config.schema ? "" : apiVersionFromListPath(config.listPath), config.id)
+  const schema = config.schema || discoveredSchema.schema
   const { namespace, name } = useParams()
   const navigate = useNavigate()
   const [resource, setResource] = useState<KubeResource | null>(null)
@@ -1571,7 +1563,7 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
   const actions = [
     ...(config.actions || []),
     ...inferredResourceActions(config, resource).filter((action) => !(config.actions || []).some((existing) => existing.id === action.id)),
-  ]
+  ].filter((action) => !schema || !action.id.startsWith("edit-"))
 
   const inlineActions = actions.length <= 3 ? actions : []
   const menuActions = actions.length <= 3 ? [] : actions
@@ -1592,6 +1584,7 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
         }
         actions={
           <>
+            {schema && config.allowUpdate !== false && <SchemaResourceEditor config={config} schema={schema} resource={resource} onSaved={() => reload()} />}
             {inlineActions.map((action) => (
               <ResourceActionDialog key={action.id} action={action} resource={resource} onComplete={reload} />
             ))}
@@ -1625,7 +1618,7 @@ export function ResourceDetail({ config }: { config: ResourceConfig }) {
 
       <DetailTabs config={config} namespace={namespace} name={name} active="overview" />
 
-      <ResourceSpecificOverview resource={resource} config={config} sections={sections} />
+      {schema ? <StructuredResourceOverview resource={resource} sections={[]} preserveEmpty /> : <ResourceSpecificOverview resource={resource} config={config} sections={sections} />}
 
       {relatedPods && (
         <RelatedPodsCard

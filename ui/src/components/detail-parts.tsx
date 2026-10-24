@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusDot } from "@/components/console"
 import { relativeTime } from "@/lib/kube"
 import { t } from "@/lib/i18n"
+import { conditionReadiness } from "@/lib/resource-status"
 import {
   asRecord,
   asRecordList,
@@ -28,14 +29,10 @@ import type { KubeResource } from "@/components/resource-management"
  * Tone for a condition: for "bad" condition types (MemoryPressure, NetworkUnavailable, ...) False
  * is the healthy state, so the color is inverted while the label still shows True / False.
  */
-const conditionTone = (condition: Record<string, unknown>) => {
-  const status = compactValue(condition.status)
-  if (!/Pressure$|Unavailable$|Failed$|Failure$|Degraded$/.test(String(condition.type))) return status
-  return status === "False" ? "Ready" : status === "True" ? "Error" : status
-}
+const conditionTone = (condition: Record<string, unknown>) => conditionReadiness({ conditions: [condition] }) || "Unknown"
 
-export function CompactKvTable({ rows }: { rows: Array<{ label: string; value: unknown }> }) {
-  const visible = rows.filter((row) => hasRenderableValue(row.value))
+export function CompactKvTable({ rows, preserveEmpty = false }: { rows: Array<{ label: string; value: unknown }>; preserveEmpty?: boolean }) {
+  const visible = rows.filter((row) => preserveEmpty ? row.value !== undefined : hasRenderableValue(row.value))
   if (visible.length === 0) return <span className="text-sm text-muted-foreground">{t("None")}</span>
   return (
     <div className="overflow-hidden rounded-lg border">
@@ -45,7 +42,7 @@ export function CompactKvTable({ rows }: { rows: Array<{ label: string; value: u
             <TableRow key={row.label} className="hover:bg-muted/50">
               <TableCell className="w-40 py-2 align-top text-xs text-muted-foreground">{/^[a-z][a-z0-9]*[A-Z]/.test(row.label) ? humanizeKey(row.label) : row.label}</TableCell>
               <TableCell className="min-w-0 py-2 text-sm whitespace-normal text-foreground">
-                <DetailValue value={row.value} depth={2} />
+                <DetailValue value={row.value} depth={2} preserveEmpty={preserveEmpty} />
               </TableCell>
             </TableRow>
           ))}
@@ -148,8 +145,9 @@ export function DetailVolumeTable({ volumes }: { volumes: Record<string, unknown
   )
 }
 
-export function DetailSimpleObjectTable({ rows }: { rows: Record<string, unknown>[] }) {
-  const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row).filter((key) => isPrimitiveDetailValue(row[key]))))).slice(0, 6)
+export function DetailSimpleObjectTable({ rows, preserveEmpty = false }: { rows: Record<string, unknown>[]; preserveEmpty?: boolean }) {
+  const allKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row).filter((key) => isPrimitiveDetailValue(row[key])))))
+  const keys = preserveEmpty ? allKeys : allKeys.slice(0, 6)
   if (keys.length === 0) return <ChipList values={rows.map((row, index) => detailObjectTitle(row, `Item ${index + 1}`))} />
   return (
     <div className="overflow-x-auto rounded-md border">
@@ -158,19 +156,21 @@ export function DetailSimpleObjectTable({ rows }: { rows: Record<string, unknown
           <TableRow>{keys.map((key) => <TableHead key={key} className="h-8 text-xs font-medium text-muted-foreground">{humanizeKey(key)}</TableHead>)}</TableRow>
         </TableHeader>
         <TableBody>
-          {rows.slice(0, 12).map((row, index) => (
+          {(preserveEmpty ? rows : rows.slice(0, 12)).map((row, index) => (
             <TableRow key={index} className="hover:bg-muted/40">
-              {keys.map((key) => <TableCell key={key} className="max-w-[260px] py-1.5 text-xs whitespace-normal break-words">{hasRenderableValue(row[key]) ? compactValue(row[key]) : <span className="text-muted-foreground">-</span>}</TableCell>)}
+              {keys.map((key) => <TableCell key={key} className="max-w-[260px] py-1.5 text-xs whitespace-normal break-words">{preserveEmpty ? <DetailValue value={row[key]} preserveEmpty /> : hasRenderableValue(row[key]) ? compactValue(row[key]) : <span className="text-muted-foreground">-</span>}</TableCell>)}
             </TableRow>
           ))}
         </TableBody>
       </Table>
-      {rows.length > 12 && <div className="border-t px-3 py-2 text-xs text-muted-foreground">+{rows.length - 12} more</div>}
+      {!preserveEmpty && rows.length > 12 && <div className="border-t px-3 py-2 text-xs text-muted-foreground">+{rows.length - 12} more</div>}
     </div>
   )
 }
 
-export function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
+export function DetailValue({ value, depth = 0, preserveEmpty = false }: { value: unknown; depth?: number; preserveEmpty?: boolean }) {
+  if (preserveEmpty && (value === null || value === "")) return <span className="font-mono">{value === null ? "null" : '""'}</span>
+  if (preserveEmpty && value && typeof value === "object" && Object.keys(value).length === 0) return <span className="font-mono">{Array.isArray(value) ? "[]" : "{}"}</span>
   if (!hasRenderableValue(value)) return <span className="text-muted-foreground">-</span>
   if (isPrimitiveDetailValue(value)) {
     if (typeof value === "string" && isoTimestamp.test(value)) return <span title={value}>{relativeTime(value)}</span>
@@ -188,8 +188,8 @@ export function DetailValue({ value, depth = 0 }: { value: unknown; depth?: numb
   if (Array.isArray(value)) {
     if (value.length === 0) return <span>{t("None")}</span>
 
-    const conditionLike = value.every((item) => isRecordValue(item) && "type" in item)
-    if (conditionLike) {
+    const conditionLike = value.every((item) => isRecordValue(item) && "type" in item && "status" in item)
+    if (conditionLike && !preserveEmpty) {
       return (
         <div className="divide-y rounded-md border">
           {value.map((item, index) => {
@@ -215,21 +215,21 @@ export function DetailValue({ value, depth = 0 }: { value: unknown; depth?: numb
     const objectLike = value.every((item) => isRecordValue(item))
     if (objectLike) {
       const records = value as Record<string, unknown>[]
-      if (records.every((item) => "image" in item && "name" in item)) {
+      if (!preserveEmpty && records.every((item) => "image" in item && "name" in item)) {
         return <DetailContainerTable containers={records} />
       }
-      if (records.every((item) => "name" in item && resourceKeys(item).length > 0) && records.some((item) => ["hostPath", "persistentVolumeClaim", "configMap", "secret", "emptyDir", "projected", "downwardAPI", "csi"].some((key) => key in item))) {
+      if (!preserveEmpty && records.every((item) => "name" in item && resourceKeys(item).length > 0) && records.some((item) => ["hostPath", "persistentVolumeClaim", "configMap", "secret", "emptyDir", "projected", "downwardAPI", "csi"].some((key) => key in item))) {
         return <DetailVolumeTable volumes={records} />
       }
-      if (records.every((item) => "key" in item || "effect" in item || "operator" in item)) {
-        return <DetailSimpleObjectTable rows={records} />
+      if (!preserveEmpty && records.every((item) => "key" in item || "effect" in item || "operator" in item)) {
+        return <DetailSimpleObjectTable rows={records} preserveEmpty={preserveEmpty} />
       }
       if (records.every((item) => Object.values(item).every((next) => isPrimitiveDetailValue(next)))) {
-        return <DetailSimpleObjectTable rows={records} />
+        return <DetailSimpleObjectTable rows={records} preserveEmpty={preserveEmpty} />
       }
       return (
         <div className="grid gap-2">
-          {value.slice(0, 12).map((item, index) => {
+          {(preserveEmpty ? value : value.slice(0, 12)).map((item, index) => {
             const record = item as Record<string, unknown>
             const entries = Object.entries(record)
             return (
@@ -237,31 +237,31 @@ export function DetailValue({ value, depth = 0 }: { value: unknown; depth?: numb
                 <div className="mb-1.5 min-w-0 break-words text-sm font-medium text-foreground">
                   {detailObjectTitle(record, `Item ${index + 1}`)}
                 </div>
-                <DetailValue value={Object.fromEntries(entries.filter(([key]) => key !== "name"))} depth={depth + 1} />
+                <DetailValue value={Object.fromEntries(entries.filter(([key]) => key !== "name"))} depth={depth + 1} preserveEmpty={preserveEmpty} />
               </div>
             )
           })}
-          {value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
+          {!preserveEmpty && value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
         </div>
       )
     }
 
     return (
       <div className="flex min-w-0 max-w-full flex-wrap gap-1.5">
-        {value.slice(0, 12).map((item, index) => (
+        {(preserveEmpty ? value : value.slice(0, 12)).map((item, index) => (
           <span key={index} className="min-w-0 max-w-full break-words rounded-md border bg-muted px-2 py-1 text-xs text-foreground">
-            {compactValue(item)}
+            {preserveEmpty ? <DetailValue value={item} preserveEmpty /> : compactValue(item)}
           </span>
         ))}
-        {value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
+        {!preserveEmpty && value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
       </div>
     )
   }
 
-  const entries = Object.entries(value as Record<string, unknown>).filter(([, nextValue]) => hasRenderableValue(nextValue))
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, nextValue]) => preserveEmpty ? nextValue !== undefined : hasRenderableValue(nextValue))
   // Flat objects read best as key=value chips (selectors, labels, resource lists).
   if (entries.every(([, nextValue]) => isPrimitiveDetailValue(nextValue))) {
-    return <ChipList values={entries.map(([key, nextValue]) => `${key}=${compactValue(nextValue)}`)} />
+    return <ChipList values={entries.map(([key, nextValue]) => `${key}=${preserveEmpty && (nextValue === null || nextValue === "") ? nextValue === null ? "null" : '""' : compactValue(nextValue)}`)} />
   }
 
   return (
@@ -270,7 +270,7 @@ export function DetailValue({ value, depth = 0 }: { value: unknown; depth?: numb
         <div key={key} className="contents">
           <dt className="min-w-0 break-words text-xs text-muted-foreground">{humanizeKey(key)}</dt>
           <dd className="min-w-0 break-words text-xs text-foreground">
-            <DetailValue value={nextValue} depth={depth + 1} />
+            <DetailValue value={nextValue} depth={depth + 1} preserveEmpty={preserveEmpty} />
           </dd>
         </div>
       ))}
@@ -313,9 +313,9 @@ export function SectionCard({ title, description, children }: { title: string; d
 }
 
 /** Section with key/value rows; hidden when every row is empty. */
-export function KvSection({ title, description, rows }: { title: string; description?: string; rows: Array<{ label: string; value: unknown }> }) {
-  if (!rows.some((row) => hasRenderableValue(row.value))) return null
-  return <SectionCard title={title} description={description}><CompactKvTable rows={rows} /></SectionCard>
+export function KvSection({ title, description, rows, preserveEmpty = false }: { title: string; description?: string; rows: Array<{ label: string; value: unknown }>; preserveEmpty?: boolean }) {
+  if (!rows.some((row) => preserveEmpty ? row.value !== undefined : hasRenderableValue(row.value))) return null
+  return <SectionCard title={title} description={description}><CompactKvTable rows={rows} preserveEmpty={preserveEmpty} /></SectionCard>
 }
 
 /** Section showing one structured value; hidden when the value is empty. */

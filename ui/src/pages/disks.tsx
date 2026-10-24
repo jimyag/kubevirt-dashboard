@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { ResourceCreateDialog } from "@/components/resource-management";
 import { Button } from "@/components/ui/button";
 import { dvCreateConfig, keyValueText, mergePatch, parseKeyValueText, stringValue } from "@/resources/configs";
-import { Combobox, DataTable, EmptyState, FilterInput, KeyValueGrid, LoadingState, PageHeader, Panel, StatusDot, Toolbar } from "@/components/console";
+import { Combobox, DataTable, EmptyState, ErrorNote, FilterInput, KeyValueGrid, LoadingState, PageHeader, Panel, StatusDot, Toolbar } from "@/components/console";
 import { namespaceScope, useFilteredRows, type FilterField } from "@/lib/filter";
 import { relativeTime, replaceMap, useAsync, useNamespaces } from "@/lib/kube";
 import { EventList } from "@/components/events";
@@ -20,27 +20,27 @@ import { ManifestPanel } from "@/components/manifest";
 import { t } from "@/lib/i18n";
 import { usePolling } from "@/lib/polling";
 import { VmActionDialog } from "@/components/vm-dialogs";
-import { apiFetch, type DV, type VM } from "@/lib/vm-pages";
+import { apiFetch, diskSize, vmRuntimeSpec, type DiskPVC, type DV, type VM, type VMI } from "@/lib/vm-pages";
 
-const dvSize = (dv: DV) => dv.spec.storage?.resources?.requests?.storage || dv.spec.pvc?.resources?.requests?.storage || "N/A";
 const dvStorageClass = (dv: DV) => dv.spec.storage?.storageClassName || dv.spec.pvc?.storageClassName || "default";
 const dvSource = (dv: DV) => dv.spec.source ? Object.keys(dv.spec.source)[0] : "blank";
 /** Instances whose volumes reference the DataVolume, keyed by namespace/name. */
-const dvAttachments = (vms: VM[]) => {
+const dvAttachments = (vms: VM[], vmis: VMI[]) => {
   const index: Record<string, string> = {};
-  vms.forEach((vm) => (vm.spec.template?.spec?.volumes || []).forEach((volume) => {
+  const running = new Map(vmis.map((vmi) => [`${vmi.metadata.namespace}/${vmi.metadata.name}`, vmi]));
+  vms.forEach((vm) => (vmRuntimeSpec(vm, running.get(`${vm.metadata.namespace}/${vm.metadata.name}`))?.volumes || []).forEach((volume) => {
     if (volume.dataVolume?.name) index[`${vm.metadata.namespace}/${volume.dataVolume.name}`] = vm.metadata.name;
   }));
   return index;
 };
 
-type DiskRow = { dv: DV; attachedTo: string }
+type DiskRow = { dv: DV; attachedTo: string; size: string }
 
 const diskFields: FilterField<DiskRow>[] = [
   { key: "name", label: "Name", value: (row) => row.dv.metadata.name },
   { key: "namespace", label: "Namespace", aliases: ["ns"], value: (row) => row.dv.metadata.namespace },
   { key: "status", label: "Status", value: (row) => row.dv.status?.phase },
-  { key: "size", label: "Size", value: (row) => dvSize(row.dv) },
+  { key: "size", label: "Size", value: (row) => row.size },
   { key: "storageclass", label: "Storage class", aliases: ["sc"], value: (row) => dvStorageClass(row.dv) },
   { key: "source", label: "Source", value: (row) => dvSource(row.dv) },
   { key: "vm", label: "Attached to", aliases: ["attached"], value: (row) => row.attachedTo },
@@ -50,20 +50,26 @@ export function DVList() {
   const [searchTerm, setSearchTerm] = useState(""); const namespaces = useNamespaces(); const [namespaceFilter, setNamespaceFilter] = useState("");
   const ns = useMemo(() => namespaceScope(namespaceFilter, namespaces), [namespaceFilter, namespaces]);
   const scope = ns.scope;
-  const { data: { dvs, vms }, loading, reload: loadDvs } = useAsync(async () => {
+  const { data: { dvs, vms, vmis, pvcs }, loading, error, reload: loadDvs } = useAsync(async () => {
     const prefix = scope === "all" ? "" : `/namespaces/${scope}`;
-    const [dvData, vmData] = await Promise.all([
+    const [dvData, vmData, vmiData, pvcData] = await Promise.all([
       apiFetch(`/apis/cdi.kubevirt.io/v1beta1${prefix}/datavolumes`).then(r => r.ok ? r.json() : { items: [] }),
       apiFetch(`/apis/kubevirt.io/v1${prefix}/virtualmachines`).then(r => r.ok ? r.json() : { items: [] }),
+      apiFetch(`/apis/kubevirt.io/v1${prefix}/virtualmachineinstances`).then(r => r.ok ? r.json() : { items: [] }),
+      apiFetch(`/api/v1${prefix}/persistentvolumeclaims`).then(async r => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
     ]);
-    return { dvs: (dvData.items || []) as DV[], vms: (vmData.items || []) as VM[] };
-  }, { dvs: [] as DV[], vms: [] as VM[] }, [scope]);
+    return { dvs: (dvData.items || []) as DV[], vms: (vmData.items || []) as VM[], vmis: (vmiData.items || []) as VMI[], pvcs: (pvcData.items || []) as DiskPVC[] };
+  }, { dvs: [] as DV[], vms: [] as VM[], vmis: [] as VMI[], pvcs: [] as DiskPVC[] }, [scope]);
   // Import and clone progress changes on its own.
   usePolling(loadDvs, 15000);
   const rows = useMemo(() => {
-    const attachedTo = dvAttachments(vms);
-    return dvs.filter((dv) => ns.match(dv.metadata.namespace)).map((dv): DiskRow => ({ dv, attachedTo: attachedTo[`${dv.metadata.namespace}/${dv.metadata.name}`] || "" }));
-  }, [dvs, vms, ns]);
+    const attachedTo = dvAttachments(vms, vmis);
+    const claims = new Map(pvcs.map((pvc) => [`${pvc.metadata.namespace}/${pvc.metadata.name}`, pvc]));
+    return dvs.filter((dv) => ns.match(dv.metadata.namespace)).map((dv): DiskRow => ({ dv, attachedTo: attachedTo[`${dv.metadata.namespace}/${dv.metadata.name}`] || "", size: diskSize(dv, claims.get(`${dv.metadata.namespace}/${dv.status?.claimName || dv.metadata.name}`)) }));
+  }, [dvs, vms, vmis, pvcs, ns]);
   const filtered = useFilteredRows(rows, diskFields, searchTerm);
   return (
     <div className="space-y-4">
@@ -73,6 +79,7 @@ export function DVList() {
         subtitle={t("CDI DataVolumes")}
         actions={<ResourceCreateDialog config={dvCreateConfig} onCreated={loadDvs} defaultNamespace={scope === "all" ? "default" : scope} />}
       />
+      {error && <ErrorNote>{error}</ErrorNote>}
       <Toolbar right={<FilterInput value={searchTerm} onChange={setSearchTerm} fields={diskFields} rows={rows} placeholder={t("Filter, e.g. status:succeeded sc:ceph")} />}>
         <Button size="sm" variant="outline" onClick={loadDvs} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
         <Combobox value={namespaceFilter} onChange={setNamespaceFilter} options={namespaces} placeholder={t("All namespaces")} aria-label={t("Namespace")} />
@@ -93,7 +100,7 @@ export function DVList() {
             ),
           },
           { header: t("Status"), cell: ({ dv }) => <StatusDot status={dv.status?.phase} label={dv.status?.phase && dv.status.progress && dv.status.phase !== "Succeeded" ? `${dv.status.phase} ${dv.status.progress}` : undefined} /> },
-          { header: t("Size"), cell: ({ dv }) => <span className="font-mono text-xs">{dvSize(dv)}</span> },
+          { header: t("Size"), cell: ({ size }) => <span className="font-mono text-xs">{size}</span> },
           { header: t("Storage class"), cell: ({ dv }) => <span className="text-sm text-muted-foreground">{dvStorageClass(dv)}</span> },
           { header: t("Source"), cell: ({ dv }) => <span className="text-sm text-muted-foreground">{dvSource(dv)}</span> },
           {
@@ -111,14 +118,18 @@ export function DVList() {
 
 export function DVDetailContent() {
   const { namespace, name, tab } = useParams(); const navigate = useNavigate(); const activeTab = tab === "yaml" ? "manifest" : tab || "overview";
-  const { data: dv, loading, reload: loadDv } = useAsync<DV | null>(async () => {
+  const { data: { dv, pvc }, loading, error, reload: loadDv } = useAsync<{ dv: DV | null; pvc: DiskPVC | null }>(async () => {
     const r = await apiFetch(`/apis/cdi.kubevirt.io/v1beta1/namespaces/${namespace}/datavolumes/${name}`);
     if (!r.ok) throw new Error(await r.text());
-    return r.json();
-  }, null, [name, namespace]);
+    const dv: DV = await r.json();
+    const claim = await apiFetch(`/api/v1/namespaces/${namespace}/persistentvolumeclaims/${dv.status?.claimName || name}`);
+    if (!claim.ok && claim.status !== 404) throw new Error(await claim.text());
+    return { dv, pvc: claim.ok ? await claim.json() as DiskPVC : null };
+  }, { dv: null, pvc: null }, [name, namespace]);
   usePolling(loadDv, 10000);
 
   if (loading && !dv) return <LoadingState />;
+  if (error) return <ErrorNote>{error}</ErrorNote>;
   if (!dv) return (
     <div className="p-12 text-center text-muted-foreground border-2 border-dashed rounded-lg mt-8">{t("DataVolume not found")}
     </div>
@@ -131,6 +142,7 @@ export function DVDetailContent() {
   ];
   const conditions = dv.status?.conditions || [];
   const labels = Object.entries(dv.metadata.labels || {});
+  const size = diskSize(dv, pvc);
 
   return (
     <div className="space-y-5">
@@ -138,13 +150,13 @@ export function DVDetailContent() {
         breadcrumbs={[{ label: t("Disks"), to: "/kubevirt/cdi/data-volumes" }, { label: dv.metadata.namespace }, { label: dv.metadata.name }]}
         title={dv.metadata.name}
         badge={<StatusDot status={dv.status?.phase} />}
-        subtitle={`${dvSize(dv)} · ${dvStorageClass(dv)}`}
+        subtitle={`${size} · ${dvStorageClass(dv)}`}
         actions={
           <>
             <VmActionDialog
               label={t("Resize")}
               description={t("Expand the PVC bound to this disk. Shrinking is not supported.")}
-              fields={[{ name: "storage", label: t("New size"), defaultValue: dvSize(dv) === "N/A" ? "10Gi" : dvSize(dv) }]}
+              fields={[{ name: "storage", label: t("New size"), defaultValue: size === "N/A" ? "10Gi" : size }]}
               buildRequest={(values) => ({
                 url: `/api/v1/namespaces/${namespace}/persistentvolumeclaims/${dv.status?.claimName || name}`,
                 options: mergePatch({ spec: { resources: { requests: { storage: stringValue(values.storage, "10Gi") } } } }),
@@ -199,7 +211,8 @@ export function DVDetailContent() {
         <div className="space-y-4">
           <Panel title={t("Details")}>
             <KeyValueGrid items={[
-              { label: t("Size"), value: <span className="font-mono">{dvSize(dv)}</span> },
+              { label: t("Requested size"), value: <span className="font-mono">{size}</span> },
+              { label: t("Capacity"), value: <span className="font-mono">{pvc?.status?.capacity?.storage || "N/A"}</span> },
               { label: t("Storage class"), value: dvStorageClass(dv) },
               { label: t("Access modes"), value: dv.spec.storage?.accessModes?.join(", ") || dv.spec.pvc?.accessModes?.join(", ") || "default" },
               { label: t("Volume mode"), value: dv.spec.storage?.volumeMode || dv.spec.pvc?.volumeMode || "default" },
