@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { StatusDot, UsageBar } from "@/components/console"
 import { listItems, relativeTime, str } from "@/lib/kube"
-import { fetchNodeUsage, formatBytes, parseBytes, parseCpuCores } from "@/lib/metrics"
+import { fetchNodeUsage, formatBytes, formatStorageSize, parseBytes, parseCpuCores } from "@/lib/metrics"
 import { t } from "@/lib/i18n"
 import {
   asRecord,
@@ -302,7 +302,7 @@ function StorageDetailOverview({ resource }: { resource: KubeResource }) {
     <div className="space-y-4">
       <SummaryRow>
         <SummaryCard label={t(resource.kind === "StorageClass" ? "Kind" : "Phase")} value={status.phase || status.status || resource.kind} variant={String(status.phase || status.status || "")} />
-        <SummaryCard label={t("Capacity")} value={asRecord(status.capacity).storage || asRecord(spec.capacity).storage || asRecord(asRecord(spec.resources).requests).storage} />
+        <SummaryCard label={t("Capacity")} value={formatStorageSize(asRecord(status.capacity).storage || asRecord(spec.capacity).storage || asRecord(asRecord(spec.resources).requests).storage)} />
         <SummaryCard label={t(resource.kind === "StorageClass" ? "Provisioner" : "Storage class")} value={spec.storageClassName || resource.storageClassName || resource.provisioner} />
         <SummaryCard label={t(resource.kind === "StorageClass" ? "Reclaim policy" : "Access modes")} value={spec.accessModes || resource.reclaimPolicy} />
       </SummaryRow>

@@ -1,4 +1,5 @@
 import type { ResourceConfig } from "@/components/resource-management";
+import { formatStorageSize } from "../../lib/metrics";
 import * as shared from "./shared";
 
 export const persistentvolumeclaimsConfig: ResourceConfig = {
@@ -45,7 +46,7 @@ export const persistentvolumeclaimsConfig: ResourceConfig = {
       { label: "Phase", value: (r) => String(shared.getRecord(r.status).phase || "N/A") },
       { label: "Storage class", value: (r) => String(shared.getRecord(r.spec).storageClassName || "N/A") },
       { label: "Volume", value: (r) => String(shared.getRecord(r.spec).volumeName || "N/A") },
-      { label: "Storage", value: (r) => String(shared.getRecord(shared.getRecord(r.status).capacity).storage || shared.getRecord(shared.getRecord(shared.getRecord(r.spec).resources).requests).storage || "N/A") },
+      { label: "Storage", value: (r) => formatStorageSize(shared.getRecord(shared.getRecord(r.status).capacity).storage || shared.getRecord(shared.getRecord(shared.getRecord(r.spec).resources).requests).storage) },
     ],
     createTemplate: `apiVersion: v1
 kind: PersistentVolumeClaim

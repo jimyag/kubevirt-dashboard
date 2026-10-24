@@ -39,6 +39,13 @@ export const formatBytes = (bytes: number) => {
 
 export const formatRate = (bytesPerSecond: number) => `${formatBytes(bytesPerSecond)}/s`
 
+/** Kubernetes storage quantities such as plain byte counts for display only. */
+export const formatStorageSize = (value: unknown) => {
+  const text = str(value).trim()
+  if (!text) return "N/A"
+  return /^\d+(?:\.\d+)?$/.test(text) ? formatBytes(parseBytes(text)) : text
+}
+
 // --- metrics-server ---
 
 export type Usage = { cpuCores: number; memoryBytes: number }

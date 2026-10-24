@@ -1,4 +1,5 @@
 import type { ResourceConfig } from "@/components/resource-management";
+import { formatStorageSize } from "../../lib/metrics";
 import * as shared from "./shared";
 
 export const persistentvolumesConfig: ResourceConfig = {
@@ -39,7 +40,7 @@ export const persistentvolumesConfig: ResourceConfig = {
     detailSections: shared.persistentVolumeDetailSections,
     extraColumns: [
       { label: "Phase", value: (r) => String(shared.getRecord(r.status).phase || "N/A") },
-      { label: "Capacity", value: (r) => String(shared.getRecord(shared.getRecord(r.spec).capacity).storage || "N/A") },
+      { label: "Capacity", value: (r) => formatStorageSize(shared.getRecord(shared.getRecord(r.spec).capacity).storage) },
       { label: "Storage class", value: (r) => String(shared.getRecord(r.spec).storageClassName || "N/A") },
       { label: "Claim", value: (r) => {
         const claimRef = shared.getRecord(shared.getRecord(r.spec).claimRef);

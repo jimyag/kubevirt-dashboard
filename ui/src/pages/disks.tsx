@@ -21,6 +21,7 @@ import { t } from "@/lib/i18n";
 import { usePolling } from "@/lib/polling";
 import { VmActionDialog } from "@/components/vm-dialogs";
 import { apiFetch, diskSize, vmRuntimeSpec, type DiskPVC, type DV, type VM, type VMI } from "@/lib/vm-pages";
+import { formatStorageSize } from "@/lib/metrics";
 
 const dvStorageClass = (dv: DV) => dv.spec.storage?.storageClassName || dv.spec.pvc?.storageClassName || "default";
 const dvSource = (dv: DV) => dv.spec.source ? Object.keys(dv.spec.source)[0] : "blank";
@@ -68,7 +69,7 @@ export function DVList() {
   const rows = useMemo(() => {
     const attachedTo = dvAttachments(vms, vmis);
     const claims = new Map(pvcs.map((pvc) => [`${pvc.metadata.namespace}/${pvc.metadata.name}`, pvc]));
-    return dvs.filter((dv) => ns.match(dv.metadata.namespace)).map((dv): DiskRow => ({ dv, attachedTo: attachedTo[`${dv.metadata.namespace}/${dv.metadata.name}`] || "", size: diskSize(dv, claims.get(`${dv.metadata.namespace}/${dv.status?.claimName || dv.metadata.name}`)) }));
+    return dvs.filter((dv) => ns.match(dv.metadata.namespace)).map((dv): DiskRow => ({ dv, attachedTo: attachedTo[`${dv.metadata.namespace}/${dv.metadata.name}`] || "", size: formatStorageSize(diskSize(dv, claims.get(`${dv.metadata.namespace}/${dv.status?.claimName || dv.metadata.name}`))) }));
   }, [dvs, vms, vmis, pvcs, ns]);
   const filtered = useFilteredRows(rows, diskFields, searchTerm);
   return (
@@ -143,6 +144,7 @@ export function DVDetailContent() {
   const conditions = dv.status?.conditions || [];
   const labels = Object.entries(dv.metadata.labels || {});
   const size = diskSize(dv, pvc);
+  const displaySize = formatStorageSize(size);
 
   return (
     <div className="space-y-5">
@@ -150,7 +152,7 @@ export function DVDetailContent() {
         breadcrumbs={[{ label: t("Disks"), to: "/kubevirt/cdi/data-volumes" }, { label: dv.metadata.namespace }, { label: dv.metadata.name }]}
         title={dv.metadata.name}
         badge={<StatusDot status={dv.status?.phase} />}
-        subtitle={`${size} · ${dvStorageClass(dv)}`}
+        subtitle={`${displaySize} · ${dvStorageClass(dv)}`}
         actions={
           <>
             <VmActionDialog
@@ -211,8 +213,8 @@ export function DVDetailContent() {
         <div className="space-y-4">
           <Panel title={t("Details")}>
             <KeyValueGrid items={[
-              { label: t("Requested size"), value: <span className="font-mono">{size}</span> },
-              { label: t("Capacity"), value: <span className="font-mono">{pvc?.status?.capacity?.storage || "N/A"}</span> },
+              { label: t("Requested size"), value: <span className="font-mono">{displaySize}</span> },
+              { label: t("Capacity"), value: <span className="font-mono">{formatStorageSize(pvc?.status?.capacity?.storage)}</span> },
               { label: t("Storage class"), value: dvStorageClass(dv) },
               { label: t("Access modes"), value: dv.spec.storage?.accessModes?.join(", ") || dv.spec.pvc?.accessModes?.join(", ") || "default" },
               { label: t("Volume mode"), value: dv.spec.storage?.volumeMode || dv.spec.pvc?.volumeMode || "default" },

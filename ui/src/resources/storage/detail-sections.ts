@@ -1,4 +1,5 @@
 import type { DetailSection } from "@/components/resource-management"
+import { formatStorageSize } from "../../lib/metrics"
 
 type KubeLikeResource = {
   metadata?: Record<string, unknown>
@@ -95,8 +96,8 @@ export const persistentVolumeClaimDetailSections = (resource: KubeLikeResource):
     {
       title: "Capacity",
       items: [
-        { label: "Requested Storage", value: getRecord(getRecord(spec.resources).requests).storage },
-        { label: "Bound Capacity", value: requests.storage },
+        { label: "Requested Storage", value: formatStorageSize(getRecord(getRecord(spec.resources).requests).storage) },
+        { label: "Bound Capacity", value: formatStorageSize(requests.storage) },
         { label: "Allocated Resources", value: status.allocatedResources, fullWidth: true },
         { label: "Allocated Resource Statuses", value: status.allocatedResourceStatuses, fullWidth: true },
       ],
@@ -125,7 +126,7 @@ export const persistentVolumeDetailSections = (resource: KubeLikeResource): Deta
       title: "Volume",
       items: [
         { label: "Phase", value: status.phase },
-        { label: "Capacity", value: getRecord(spec.capacity).storage },
+        { label: "Capacity", value: formatStorageSize(getRecord(spec.capacity).storage) },
         { label: "Storage Class", value: spec.storageClassName },
         { label: "Volume Mode", value: spec.volumeMode },
         { label: "Access Modes", value: joinList(spec.accessModes) },
