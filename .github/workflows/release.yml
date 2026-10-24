@@ -57,3 +57,18 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package Helm chart
+        run: helm package charts/kubevirt-dashboard --destination helm-dist --app-version "${GITHUB_REF_NAME#v}"
+
+      - name: Push Helm chart to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GITHUB_TOKEN}" | helm registry login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          helm push helm-dist/kubevirt-dashboard-*.tgz oci://ghcr.io/jimyag/charts
+
+      - name: Upload Helm chart to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" helm-dist/kubevirt-dashboard-*.tgz --clobber

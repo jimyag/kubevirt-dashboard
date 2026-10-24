@@ -46,7 +46,7 @@ spec:
       serviceAccountName: {{ .Release.Name }}
       containers:
         - name: dashboard
-          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+          image: {{ printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["--listen", "0.0.0.0:8080"]
           ports:

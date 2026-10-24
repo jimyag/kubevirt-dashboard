@@ -121,17 +121,23 @@ Download a release from the [Releases](https://github.com/jimyag/kubevirt-dashbo
 
 ### In cluster
 
-Install the Helm chart from this repository:
+Install the published Helm chart from GitHub Container Registry:
 
 ```bash
-helm upgrade --install kubevirt-dashboard ./charts/kubevirt-dashboard \
+helm upgrade --install kubevirt-dashboard \
+  oci://ghcr.io/jimyag/charts/kubevirt-dashboard --version 0.1.0 \
   --namespace kubevirt-dashboard --create-namespace
 kubectl port-forward -n kubevirt-dashboard svc/kubevirt-dashboard 8080:80
 ```
 
-Use `--set image.tag=<tag>` to select a built image. The chart grants cluster-wide
+The chart uses `appVersion` as its default image tag. Use
+`--set image.tag=<tag>` to select another image. The chart grants cluster-wide
 administration permissions, matching the deployment manifest; keep access local
 or protect it with an authenticating proxy as described in [Security](#security).
+
+The same chart is attached to each GitHub release and can be installed directly
+from a checkout with `helm upgrade --install kubevirt-dashboard
+./charts/kubevirt-dashboard ...`.
 
 Alternatively, use the deployment manifest:
 
