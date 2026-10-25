@@ -30,11 +30,31 @@ export type HelmReleaseDetail = HelmRelease & {
 
 export type ChartInfo = { name: string; version: string; appVersion: string; description: string; values: string; versions: string[] | null }
 
+export type HelmRepository = {
+  name: string
+  url: string
+  type: "HTTP" | "OCI"
+  username?: string
+  updatedAt?: string
+  chartCount: number
+  error?: string
+}
+
+export type RepositoryChart = {
+  repository: string
+  repositoryURL: string
+  name: string
+  version: string
+  appVersion: string
+  description: string
+  versions: string[]
+}
+
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
 const releasePath = (namespace: string, name: string) => `${HELM}/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
 
 export const helmReleasePath = (release: Pick<HelmRelease, "namespace" | "name">, tab?: string) =>
-  `/catalog/helm/${release.namespace}/${release.name}${tab ? `?tab=${tab}` : ""}`
+  `/applications/installed/${release.namespace}/${release.name}${tab ? `?tab=${tab}` : ""}`
 
 export const listReleases = async (namespace?: string): Promise<HelmRelease[]> => {
   const data = await requestJson(`${HELM}/releases${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ""}`, { method: "GET" }) as { items?: HelmRelease[] }
@@ -81,6 +101,25 @@ export const uninstallRelease = (namespace: string, name: string) => requestJson
 export const chartInfo = async (source: ChartSource) => {
   const params = new URLSearchParams({ repo: source.repo, chart: source.chart, ...(source.version ? { version: source.version } : {}) })
   return await requestJson(`${HELM}/chart?${params}`, { method: "GET" }) as ChartInfo
+}
+
+export const listRepositories = async (): Promise<HelmRepository[]> => {
+  const data = await requestJson(`${HELM}/repositories`, { method: "GET" }) as { items?: HelmRepository[] }
+  return data.items || []
+}
+
+export const saveRepository = (input: { name: string; url: string; username?: string; password?: string }) =>
+  requestJson(`${HELM}/repositories`, json("POST", input)) as Promise<HelmRepository>
+
+export const removeRepository = (name: string) =>
+  requestJson(`${HELM}/repositories/${encodeURIComponent(name)}`, { method: "DELETE" })
+
+export const refreshRepository = (name: string) =>
+  requestJson(`${HELM}/repositories/${encodeURIComponent(name)}/refresh`, { method: "POST" }) as Promise<HelmRepository>
+
+export const listRepositoryCharts = async (name: string): Promise<RepositoryChart[]> => {
+  const data = await requestJson(`${HELM}/repositories/${encodeURIComponent(name)}/charts`, { method: "GET" }) as { items?: RepositoryChart[] }
+  return data.items || []
 }
 
 /** The server answers 409 when a chart with subcharts is edited without knowing where it comes from. */

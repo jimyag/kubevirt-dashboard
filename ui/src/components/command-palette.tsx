@@ -15,10 +15,15 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { listItems, type KubeObject } from "@/lib/kube"
-import { useNavSections } from "@/lib/navigation"
+import { navItemLabel, useNavSections, type NavItem } from "@/lib/navigation"
 import { t } from "@/lib/i18n"
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+
+type PalettePage = { page: NavItem; groups: NavItem[] }
+
+const palettePages = (items: NavItem[], groups: NavItem[] = []): PalettePage[] =>
+  items.flatMap((item) => item.children ? palettePages(item.children, [...groups, item]) : [{ page: item, groups }])
 
 /** Global ⌘K palette: jump to any console page, run common actions, or open an instance. */
 export function CommandPalette() {
@@ -28,8 +33,8 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [instances, setInstances] = useState<KubeObject[]>([])
-  const exactPages = sections.flatMap((section) => section.items.flatMap((item) => item.children || [item]))
-    .filter((page) => [page.name, t(page.name)].some((name) => name.toLocaleLowerCase() === search.trim().toLocaleLowerCase()))
+  const exactPages = Array.from(new Map(sections.flatMap((section) => palettePages(section.items).map(({ page }) => [page.path, page] as const))).values())
+    .filter((page) => [page.name, navItemLabel(page)].some((name) => name.toLocaleLowerCase() === search.trim().toLocaleLowerCase()))
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -79,10 +84,10 @@ export function CommandPalette() {
           <CommandSeparator />
           {sections.map((section) => (
             <CommandGroup key={section.label} heading={t(section.label)}>
-              {section.items.flatMap((item) => (item.children || [item]).map((page) => ({ page, group: item.children ? item : undefined }))).filter(({ page }) => exactPages.length === 0 || exactPages.some((match) => page.path === match.path)).map(({ page, group }) => (
-                <CommandItem key={page.path} value={`${section.label} ${group?.name ?? ""} ${page.name} ${t(section.label)} ${group ? t(group.name) : ""} ${t(page.name)}`} onSelect={() => go(page.path)}>
-                  <page.icon />{t(page.name)}
-                  {group && <span className="ml-auto text-xs text-muted-foreground">{t(group.name)}</span>}
+              {palettePages(section.items).filter(({ page }) => exactPages.length === 0 || exactPages.some((match) => page.path === match.path)).map(({ page, groups }) => (
+                <CommandItem key={page.path} value={`${section.label} ${groups.map((group) => group.name).join(" ")} ${page.name} ${t(section.label)} ${groups.map((group) => t(group.name)).join(" ")} ${navItemLabel(page)}`} onSelect={() => go(page.path)}>
+                  <page.icon />{navItemLabel(page)}
+                  {groups.length > 0 && <span className="ml-auto truncate text-xs text-muted-foreground">{groups.map((group) => t(group.name)).join(" / ")}</span>}
                 </CommandItem>
               ))}
             </CommandGroup>

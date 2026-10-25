@@ -11,7 +11,7 @@ import { CreateIpPoolDialog, DeleteIpPoolDialog, IpPoolTable } from "@/component
 import { KubeOvnMissing } from "@/pages/vpc"
 import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { apiFetch, asRecord, listItems, str, useAsync, useNetworkProfile, type KubeObject } from "@/lib/kube"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 
 const OVN = "/apis/kubeovn.io/v1"
 
@@ -50,9 +50,9 @@ export function RouteTableListPage() {
   const filtered = useFilteredRows(rows, routeTableFields, search)
 
   return (
-    <VpcOnly title={t("Route Tables")}>
+    <VpcOnly title={resourceLabel("Route Tables")}>
       <div className="space-y-4">
-        <PageHeader title={t("Route Tables")} />
+        <PageHeader title={resourceLabel("Route Tables")} />
         <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={routeTableFields} rows={rows} placeholder={t("Filter, e.g. vpc:vpc-prod")} />}>
           <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
         </Toolbar>
@@ -93,7 +93,7 @@ export function RouteTableDetailPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        breadcrumbs={[{ label: t("Route Tables"), to: "/vpc/route-tables" }, { label: name }]}
+        breadcrumbs={[{ label: resourceLabel("Route Tables"), to: "/vpc/route-tables" }, { label: name }]}
         title={str(asRecord(vpc.status).router, name)}
         subtitle={t("VPC {vpc}", { vpc: name })}
         actions={<Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>}
@@ -148,10 +148,10 @@ export function PeeringListPage() {
   const filtered = useFilteredRows(rows, peeringFields, search)
 
   return (
-    <VpcOnly title={t("Peering Connections")}>
+    <VpcOnly title={resourceLabel("Peering Connections")}>
       <div className="space-y-4">
         <PageHeader
-          title={t("Peering Connections")}
+          title={resourceLabel("Peering Connections")}
           actions={<Button onClick={() => setAdding(true)} className="gap-1.5"><Plus className="size-4" />{t("Add peering")}</Button>}
         />
         <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={peeringFields} rows={rows} placeholder={t("Filter, e.g. vpc:vpc-prod")} />}>
@@ -210,10 +210,10 @@ export function IpPoolListPage() {
   const filtered = useFilteredRows(data.pools, poolFields, search)
 
   return (
-    <VpcOnly title={t("IP Pools")}>
+    <VpcOnly title={resourceLabel("IP Pools")}>
       <div className="space-y-4">
         <PageHeader
-          title={t("IP Pools")}
+          title={resourceLabel("IP Pools")}
           actions={<Button onClick={() => setCreating(true)} className="gap-1.5"><Plus className="size-4" />{t("Create IP pool")}</Button>}
         />
         <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={poolFields} rows={data.pools} placeholder={t("Filter, e.g. subnet:subnet-web")} />}>

@@ -6,16 +6,20 @@ package helm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -23,6 +27,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/helmpath"
 	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/releaseutil"
@@ -49,12 +54,12 @@ type RESTConfigFunc func(r *http.Request) (*rest.Config, error)
 
 type handler struct {
 	restConfig RESTConfigFunc
-	settings   *cli.EnvSettings
+	reposMu    sync.Mutex
 }
 
 // Register adds the /api/v1/helm endpoints to mux.
 func Register(mux *http.ServeMux, restConfig RESTConfigFunc) {
-	h := &handler{restConfig: restConfig, settings: newSettings()}
+	h := &handler{restConfig: restConfig}
 	mux.HandleFunc("GET /api/v1/helm/releases", h.list)
 	mux.HandleFunc("POST /api/v1/helm/releases", h.install)
 	mux.HandleFunc("GET /api/v1/helm/releases/{namespace}/{name}", h.get)
@@ -64,17 +69,81 @@ func Register(mux *http.ServeMux, restConfig RESTConfigFunc) {
 	mux.HandleFunc("GET /api/v1/helm/releases/{namespace}/{name}/resources", h.resources)
 	mux.HandleFunc("POST /api/v1/helm/releases/{namespace}/{name}/rollback", h.rollback)
 	mux.HandleFunc("GET /api/v1/helm/chart", h.chartInfo)
+	mux.HandleFunc("GET /api/v1/helm/repositories", h.listRepositories)
+	mux.HandleFunc("POST /api/v1/helm/repositories", h.saveRepository)
+	mux.HandleFunc("DELETE /api/v1/helm/repositories/{name}", h.removeRepository)
+	mux.HandleFunc("POST /api/v1/helm/repositories/{name}/refresh", h.refreshRepository)
+	mux.HandleFunc("GET /api/v1/helm/repositories/{name}/charts", h.listRepositoryCharts)
 }
 
-// newSettings keeps Helm's repository cache and registry config in a private directory, so the
-// dashboard neither needs nor touches the user's ~/.config/helm.
-func newSettings() *cli.EnvSettings {
+// newSettings keeps Helm's repository cache and registry config in a private directory per
+// cluster, so repositories and registry credentials do not leak between kube contexts.
+func newSettings(cluster string) (*cli.EnvSettings, error) {
+	root, err := os.UserConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	return newSettingsForRoot(filepath.Join(root, "kubevirt-dashboard", "helm"), cluster)
+}
+
+func newSettingsForRoot(root, cluster string) (*cli.EnvSettings, error) {
+	sum := sha256.Sum256([]byte(cluster))
+	base := filepath.Join(root, fmt.Sprintf("%x", sum[:8]))
+	cache := filepath.Join(base, "cache")
+	for _, dir := range []string{base, cache} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(dir, 0700); err != nil {
+			return nil, err
+		}
+	}
 	settings := cli.New()
-	base := filepath.Join(os.TempDir(), "kubevirt-dashboard-helm")
-	settings.RepositoryCache = filepath.Join(base, "cache")
+	settings.RepositoryCache = cache
 	settings.RepositoryConfig = filepath.Join(base, "repositories.yaml")
 	settings.RegistryConfig = filepath.Join(base, "registry.json")
-	return settings
+	return settings, nil
+}
+
+func isDNSLabel(value string) bool {
+	if len(value) == 0 || len(value) > 63 || value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func loginRegistry(settings *cli.EnvSettings, entry *repo.Entry) error {
+	parsed, err := url.Parse(entry.URL)
+	if err != nil {
+		return err
+	}
+	if parsed.Host == "" {
+		return errors.New("OCI repository has no registry host")
+	}
+	client, err := registry.NewClient(registry.ClientOptCredentialsFile(settings.RegistryConfig))
+	if err != nil {
+		return err
+	}
+	if err := client.Login(parsed.Host, registry.LoginOptBasicAuth(entry.Username, entry.Password)); err != nil {
+		return err
+	}
+	if err := os.Chmod(settings.RegistryConfig, 0600); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (h *handler) settingsFor(r *http.Request) (*cli.EnvSettings, error) {
+	config, err := h.restConfig(r)
+	if err != nil {
+		return nil, err
+	}
+	return newSettings(config.Host)
 }
 
 // --- Kubernetes access ---
@@ -118,7 +187,11 @@ func (h *handler) configuration(r *http.Request, namespace string) (*action.Conf
 	if err := cfg.Init(&restGetter{config: restConfig, namespace: namespace}, namespace, "secret", log.Printf); err != nil {
 		return nil, err
 	}
-	registryClient, err := registry.NewClient(registry.ClientOptCredentialsFile(h.settings.RegistryConfig))
+	settings, err := newSettings(restConfig.Host)
+	if err != nil {
+		return nil, err
+	}
+	registryClient, err := registry.NewClient(registry.ClientOptCredentialsFile(settings.RegistryConfig))
 	if err != nil {
 		return nil, err
 	}
@@ -509,6 +582,286 @@ type chartSource struct {
 
 func (s chartSource) isOCI() bool { return registry.IsOCI(s.Repo) }
 
+type repositoryInfo struct {
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	Type       string `json:"type"`
+	Username   string `json:"username,omitempty"`
+	UpdatedAt  string `json:"updatedAt,omitempty"`
+	ChartCount int    `json:"chartCount"`
+	Error      string `json:"error,omitempty"`
+}
+
+type repositoryRequest struct {
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type repositoryChart struct {
+	Repository    string   `json:"repository"`
+	RepositoryURL string   `json:"repositoryURL"`
+	Name          string   `json:"name"`
+	Version       string   `json:"version"`
+	AppVersion    string   `json:"appVersion"`
+	Description   string   `json:"description"`
+	Versions      []string `json:"versions"`
+}
+
+func readRepositories(settings *cli.EnvSettings) (*repo.File, error) {
+	file, err := repo.LoadFile(settings.RepositoryConfig)
+	if os.IsNotExist(err) || (err != nil && errors.Is(err, fs.ErrNotExist)) {
+		return repo.NewFile(), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if file.Repositories == nil {
+		file.Repositories = []*repo.Entry{}
+	}
+	return file, nil
+}
+
+func readRepository(settings *cli.EnvSettings, name string) *repo.Entry {
+	file, err := readRepositories(settings)
+	if err != nil {
+		return nil
+	}
+	return file.Get(name)
+}
+
+func repositoryType(url string) string {
+	if registry.IsOCI(url) {
+		return "OCI"
+	}
+	return "HTTP"
+}
+
+func refreshHTTPRepository(settings *cli.EnvSettings, entry *repo.Entry) (*repo.IndexFile, error) {
+	chartRepo, err := repo.NewChartRepository(entry, getter.All(settings))
+	if err != nil {
+		return nil, err
+	}
+	chartRepo.CachePath = settings.RepositoryCache
+	path, err := chartRepo.DownloadIndexFile()
+	if err != nil {
+		return nil, err
+	}
+	return repo.LoadIndexFile(path)
+}
+
+func cachedHTTPRepository(settings *cli.EnvSettings, entry *repo.Entry) (*repo.IndexFile, error) {
+	indexPath := filepath.Join(settings.RepositoryCache, helmpath.CacheIndexFile(entry.Name))
+	index, err := repo.LoadIndexFile(indexPath)
+	if os.IsNotExist(err) {
+		return refreshHTTPRepository(settings, entry)
+	}
+	return index, err
+}
+
+func (h *handler) listRepositories(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.settingsFor(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	h.reposMu.Lock()
+	defer h.reposMu.Unlock()
+	file, err := readRepositories(settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	items := make([]repositoryInfo, 0, len(file.Repositories))
+	for _, entry := range file.Repositories {
+		if entry == nil {
+			continue
+		}
+		item := repositoryInfo{Name: entry.Name, URL: entry.URL, Type: repositoryType(entry.URL), Username: entry.Username}
+		if registry.IsOCI(entry.URL) {
+			items = append(items, item)
+			continue
+		}
+		index, err := cachedHTTPRepository(settings, entry)
+		if err != nil {
+			item.Error = err.Error()
+		} else {
+			item.ChartCount = len(index.Entries)
+			item.UpdatedAt = index.Generated.UTC().Format(time.RFC3339)
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func (h *handler) saveRepository(w http.ResponseWriter, r *http.Request) {
+	var req repositoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.URL = strings.TrimSpace(req.URL)
+	if req.Name == "" || req.URL == "" {
+		writeError(w, http.StatusBadRequest, errors.New("repository name and URL are required"))
+		return
+	}
+	if !strings.HasPrefix(req.URL, "https://") && !strings.HasPrefix(req.URL, "http://") && !registry.IsOCI(req.URL) {
+		writeError(w, http.StatusBadRequest, errors.New("repository URL must use http://, https://, or oci://"))
+		return
+	}
+	if !isDNSLabel(req.Name) {
+		writeError(w, http.StatusBadRequest, errors.New("repository name must be a lowercase DNS label"))
+		return
+	}
+	settings, err := h.settingsFor(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	h.reposMu.Lock()
+	defer h.reposMu.Unlock()
+	existing := readRepository(settings, req.Name)
+	entry := &repo.Entry{Name: req.Name, URL: req.URL, Username: req.Username, Password: req.Password}
+	if existing != nil {
+		if req.Username == "" {
+			entry.Username = existing.Username
+		}
+		if req.Password == "" {
+			entry.Password = existing.Password
+		}
+	}
+	if !registry.IsOCI(req.URL) {
+		if _, err := refreshHTTPRepository(settings, entry); err != nil {
+			writeError(w, http.StatusBadGateway, fmt.Errorf("check repository: %w", err))
+			return
+		}
+	} else if entry.Username != "" && entry.Password != "" {
+		if err := loginRegistry(settings, entry); err != nil {
+			writeError(w, http.StatusBadGateway, fmt.Errorf("authenticate repository: %w", err))
+			return
+		}
+	}
+	file, err := readRepositories(settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	file.Update(entry)
+	if err := file.WriteFile(settings.RepositoryConfig, 0600); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, repositoryInfo{Name: entry.Name, URL: entry.URL, Type: repositoryType(entry.URL), Username: entry.Username})
+}
+
+func (h *handler) removeRepository(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	settings, err := h.settingsFor(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	h.reposMu.Lock()
+	defer h.reposMu.Unlock()
+	file, err := readRepositories(settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !file.Remove(name) {
+		writeError(w, http.StatusNotFound, errors.New("repository not found"))
+		return
+	}
+	if err := file.WriteFile(settings.RepositoryConfig, 0600); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+func (h *handler) refreshRepository(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	settings, err := h.settingsFor(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	h.reposMu.Lock()
+	defer h.reposMu.Unlock()
+	file, err := readRepositories(settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	entry := file.Get(name)
+	if entry == nil {
+		writeError(w, http.StatusNotFound, errors.New("repository not found"))
+		return
+	}
+	if registry.IsOCI(entry.URL) {
+		writeJSON(w, http.StatusOK, repositoryInfo{Name: entry.Name, URL: entry.URL, Type: "OCI", Username: entry.Username})
+		return
+	}
+	index, err := refreshHTTPRepository(settings, entry)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, repositoryInfo{Name: entry.Name, URL: entry.URL, Type: repositoryType(entry.URL), Username: entry.Username, UpdatedAt: index.Generated.UTC().Format(time.RFC3339), ChartCount: len(index.Entries)})
+}
+
+func (h *handler) listRepositoryCharts(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	settings, err := h.settingsFor(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	h.reposMu.Lock()
+	defer h.reposMu.Unlock()
+	file, err := readRepositories(settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	entry := file.Get(name)
+	if entry == nil {
+		writeError(w, http.StatusNotFound, errors.New("repository not found"))
+		return
+	}
+	if registry.IsOCI(entry.URL) {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("this OCI source does not provide a chart catalog; install it by chart reference"))
+		return
+	}
+	index, err := refreshHTTPRepository(settings, entry)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	index.SortEntries()
+	items := make([]repositoryChart, 0, len(index.Entries))
+	for name, versions := range index.Entries {
+		if len(versions) == 0 || versions[0] == nil || versions[0].Metadata == nil {
+			continue
+		}
+		item := repositoryChart{Repository: entry.Name, RepositoryURL: entry.URL, Name: name, Description: versions[0].Description, AppVersion: versions[0].AppVersion}
+		for _, version := range versions {
+			if version != nil {
+				item.Versions = append(item.Versions, version.Version)
+			}
+		}
+		if len(item.Versions) > 0 {
+			item.Version = item.Versions[0]
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
 func (s chartSource) ref() string {
 	if s.isOCI() {
 		return strings.TrimSuffix(s.Repo, "/") + "/" + s.Chart
@@ -517,18 +870,32 @@ func (s chartSource) ref() string {
 }
 
 // loadChart downloads (or reuses from the cache) and loads a chart.
-func (h *handler) loadChart(cfg *action.Configuration, source chartSource) (*chart.Chart, error) {
+func (h *handler) loadChart(cfg *action.Configuration, settings *cli.EnvSettings, source chartSource) (*chart.Chart, error) {
 	if source.Chart == "" {
 		return nil, errors.New("chart is required")
 	}
 	options := action.ChartPathOptions{Version: source.Version}
 	if !source.isOCI() {
 		options.RepoURL = source.Repo
+		if source.Repo != "" {
+			repos, err := readRepositories(settings)
+			if err != nil {
+				return nil, err
+			}
+			for _, entry := range repos.Repositories {
+				if entry == nil || strings.TrimSuffix(entry.URL, "/") != strings.TrimSuffix(source.Repo, "/") {
+					continue
+				}
+				options.Username = entry.Username
+				options.Password = entry.Password
+				break
+			}
+		}
 	}
 	install := action.NewInstall(cfg)
 	install.ChartPathOptions = options
 	install.SetRegistryClient(cfg.RegistryClient)
-	path, err := install.LocateChart(source.ref(), h.settings)
+	path, err := install.LocateChart(source.ref(), settings)
 	if err != nil {
 		return nil, err
 	}
@@ -562,7 +929,12 @@ func (h *handler) install(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	chrt, err := h.loadChart(cfg, req.chartSource)
+	settings, err := h.settingsFor(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	chrt, err := h.loadChart(cfg, settings, req.chartSource)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Errorf("load chart: %w", err))
 		return
@@ -623,7 +995,12 @@ func (h *handler) upgrade(w http.ResponseWriter, r *http.Request) {
 		if source.Version == "" && req.Chart == "" && chrt.Metadata != nil {
 			source.Version = chrt.Metadata.Version
 		}
-		if chrt, err = h.loadChart(cfg, *source); err != nil {
+		settings, settingsErr := h.settingsFor(r)
+		if settingsErr != nil {
+			writeError(w, http.StatusInternalServerError, settingsErr)
+			return
+		}
+		if chrt, err = h.loadChart(cfg, settings, *source); err != nil {
 			writeError(w, http.StatusBadGateway, fmt.Errorf("load chart: %w", err))
 			return
 		}
@@ -710,15 +1087,20 @@ func (h *handler) chartInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	settings, err := h.settingsFor(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	var versions []string
 	if !source.isOCI() && source.Repo != "" {
-		versions, err = h.repoVersions(source.Repo, source.Chart)
+		versions, err = h.repoVersions(settings, source.Repo, source.Chart)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, fmt.Errorf("read repository index: %w", err))
 			return
 		}
 	}
-	chrt, err := h.loadChart(cfg, source)
+	chrt, err := h.loadChart(cfg, settings, source)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Errorf("load chart: %w", err))
 		return
@@ -734,12 +1116,24 @@ func (h *handler) chartInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // repoVersions lists the versions of a chart in an HTTP repository, newest first.
-func (h *handler) repoVersions(repoURL, chartName string) ([]string, error) {
-	chartRepo, err := repo.NewChartRepository(&repo.Entry{Name: "dashboard", URL: repoURL}, getter.All(h.settings))
+func (h *handler) repoVersions(settings *cli.EnvSettings, repoURL, chartName string) ([]string, error) {
+	entry := &repo.Entry{Name: "dashboard", URL: repoURL}
+	repos, err := readRepositories(settings)
 	if err != nil {
 		return nil, err
 	}
-	chartRepo.CachePath = h.settings.RepositoryCache
+	for _, saved := range repos.Repositories {
+		if saved != nil && strings.TrimSuffix(saved.URL, "/") == strings.TrimSuffix(repoURL, "/") {
+			entry.Username = saved.Username
+			entry.Password = saved.Password
+			break
+		}
+	}
+	chartRepo, err := repo.NewChartRepository(entry, getter.All(settings))
+	if err != nil {
+		return nil, err
+	}
+	chartRepo.CachePath = settings.RepositoryCache
 	indexPath, err := chartRepo.DownloadIndexFile()
 	if err != nil {
 		return nil, err

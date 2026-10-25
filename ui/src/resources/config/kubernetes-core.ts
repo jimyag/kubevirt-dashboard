@@ -306,7 +306,7 @@ export const cronjobsConfig = extensionResource({
   subtitle: "Manage scheduled Kubernetes Jobs",
   kind: "CronJob",
   namespaced: true,
-  statusPath: ["spec", "schedule"],
+  statusPath: ["spec", "suspend"],
   detailSections: kubernetesCronJobDetailSections,
   createFields: [...workloadFields.filter((field) => field.name !== "replicas"), { name: "schedule", label: "Schedule", section: "Cron", defaultValue: "*/5 * * * *" }],
   buildResource: (values) => ({

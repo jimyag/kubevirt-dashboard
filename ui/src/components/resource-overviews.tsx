@@ -6,11 +6,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusDot, UsageBar } from "@/components/console"
 import { listItems, relativeTime, str } from "@/lib/kube"
 import { fetchNodeUsage, formatBytes, formatStorageSize, parseBytes, parseCpuCores } from "@/lib/metrics"
+import { conditionReadiness } from "@/lib/resource-status"
 import { t } from "@/lib/i18n"
 import {
   asRecord,
   asRecordList,
   compactValue,
+  getValue,
   hasRenderableValue,
   humanizeKey,
   joinList,
@@ -171,7 +173,7 @@ function PodDetailOverview({ resource }: { resource: KubeResource }) {
   )
 }
 
-function WorkloadDetailOverview({ resource }: { resource: KubeResource }) {
+function WorkloadDetailOverview({ resource, sections }: { resource: KubeResource; sections: DetailSection[] }) {
   const spec = asRecord(resource.spec)
   const status = asRecord(resource.status)
   const template = asRecord(spec.template)
@@ -228,6 +230,9 @@ function WorkloadDetailOverview({ resource }: { resource: KubeResource }) {
           <DetailVolumeTable volumes={volumes} />
         </SectionCard>
       )}
+      {sections.filter((section) => section.title === "StatefulSet Storage").map((section) => (
+        <KvSection key={section.title} title={t(section.title)} rows={section.items.map((item) => ({ label: t(item.label), value: item.value }))} />
+      ))}
       <ValueSection title={t("Conditions")} value={status.conditions} />
     </div>
   )
@@ -266,6 +271,35 @@ function NetworkDetailOverview({ resource }: { resource: KubeResource }) {
   const status = asRecord(resource.status)
   if (resource.kind === "Service") return <ServiceDetailOverview resource={resource} />
   const selector = spec.selector || asRecord(spec.podSelector).matchLabels || spec.podSelector
+  if (resource.kind === "NetworkPolicy") {
+    const directions = [
+      { key: "ingress", title: t("Ingress rules") },
+      { key: "egress", title: t("Egress rules") },
+    ]
+    return (
+      <div className="space-y-4">
+        <SummaryRow>
+          <SummaryCard label={t("Policy types")} value={spec.policyTypes} />
+          <SummaryCard label={t("Selector")} value={selector} />
+        </SummaryRow>
+        <div className="grid gap-4 xl:grid-cols-2">
+          {directions.map(({ key, title }) => {
+            const rules = spec[key]
+            return (
+              <SectionCard key={key} title={title}>
+                {rules === undefined
+                  ? <p className="text-sm text-muted-foreground">{t("Not specified.")}</p>
+                  : Array.isArray(rules) && rules.length === 0
+                    ? <p className="text-sm text-muted-foreground">{t("Selected with no rules: all matching traffic is denied.")}</p>
+                    : <DetailValue value={rules} />}
+              </SectionCard>
+            )
+          })}
+        </div>
+        <KvSection title={t("Additional spec")} rows={Object.entries(spec).filter(([key]) => !["podSelector", "policyTypes", "ingress", "egress"].includes(key)).map(([label, value]) => ({ label: humanizeKey(label), value }))} />
+      </div>
+    )
+  }
   return (
     <div className="space-y-4">
       <SummaryRow>
@@ -278,7 +312,7 @@ function NetworkDetailOverview({ resource }: { resource: KubeResource }) {
       <div className="grid gap-4 xl:grid-cols-2">
         <KvSection title={t("Routing and selectors")} rows={[
             { label: t("Policy types"), value: spec.policyTypes },
-            { label: t("Rules"), value: spec.rules || spec.ingress || spec.egress },
+            { label: t("Rules"), value: spec.rules },
             { label: t("Hostnames"), value: spec.hostnames },
             { label: t("Parent refs"), value: spec.parentRefs },
           ]} />
@@ -730,7 +764,7 @@ function ClusterControlDetailOverview({ resource }: { resource: KubeResource }) 
       <SummaryRow>
         <SummaryCard label={t("Kind")} value={resource.kind} />
         <SummaryCard label={t("Version")} value={resource.apiVersion || spec.version} />
-        <SummaryCard label={t("Available")} value={status.available ?? status.phase ?? asRecordList(status.conditions).find((item) => item.status === "True")?.type} />
+        <SummaryCard label={t("Available")} value={status.available ?? status.phase ?? conditionReadiness(status, getValue(resource, ["metadata", "generation"]))} />
         <SummaryCard label={t("Created")} value={resource.metadata.creationTimestamp} />
       </SummaryRow>
       <KvSection title={t("Fields")} rows={fields.map(([label, value]) => ({ label, value }))} />
@@ -769,7 +803,7 @@ export function StructuredResourceOverview({ resource, sections, preserveEmpty =
 export function ResourceSpecificOverview({ resource, config, sections }: { resource: KubeResource; config: ResourceConfig; sections: DetailSection[] }) {
   const kind = resource.kind || config.kind
   if (kind === "Pod") return <PodDetailOverview resource={resource} />
-  if (["Deployment", "StatefulSet", "ReplicaSet", "ReplicationController"].includes(kind)) return <WorkloadDetailOverview resource={resource} />
+  if (["Deployment", "StatefulSet", "ReplicaSet", "ReplicationController"].includes(kind)) return <WorkloadDetailOverview resource={resource} sections={sections} />
   if (kind === "Node") return <NodeDetailOverview resource={resource} />
   if (["MutatingWebhookConfiguration", "ValidatingWebhookConfiguration", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"].includes(kind)) return <AdmissionDetailOverview resource={resource} />
   if (["Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding", "ServiceAccount"].includes(kind)) return <RbacDetailOverview resource={resource} />

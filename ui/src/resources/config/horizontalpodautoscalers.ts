@@ -3,7 +3,7 @@ import * as shared from "./shared";
 
 export const horizontalpodautoscalersConfig: ResourceConfig = {
     id: "horizontalpodautoscalers",
-    path: "/kubevirt/operations/autoscaling",
+    path: "/kubernetes/workloads/autoscaling",
     title: "Autoscaling",
     subtitle: "Manage autoscaling policies for VM pools and related workloads",
     listPath: "/apis/autoscaling/v2/horizontalpodautoscalers",
@@ -60,10 +60,12 @@ export const horizontalpodautoscalersConfig: ResourceConfig = {
         },
       ];
     },
-    statusPath: ["status", "currentReplicas"],
+    statusPath: ["status", "conditions", "0", "type"],
     extraColumns: [
       { label: "Min", value: (r) => String((r.spec?.minReplicas as number | undefined) ?? "N/A") },
       { label: "Max", value: (r) => String((r.spec?.maxReplicas as number | undefined) ?? "N/A") },
+      { label: "Current", value: (r) => String((r.status?.currentReplicas as number | undefined) ?? "N/A") },
+      { label: "Desired", value: (r) => String((r.status?.desiredReplicas as number | undefined) ?? "N/A") },
     ],
     createTemplate: `apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

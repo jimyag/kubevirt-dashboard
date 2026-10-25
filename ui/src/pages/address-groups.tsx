@@ -19,7 +19,7 @@ import {
   type SecurityGroup,
 } from "@/lib/security-groups"
 import { isDnsLabel, parseIPv4Cidr } from "@/lib/validate"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 
 type Row = { group: AddressGroup; users: SecurityGroup[] }
 
@@ -51,7 +51,7 @@ export function AddressGroupListPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("Address Groups")}
+        title={resourceLabel("Address Groups")}
         subtitle="CiliumCIDRGroup"
         actions={<Button onClick={() => setEditing("new")} className="gap-1.5"><Plus className="size-4" />{t("Create address group")}</Button>}
       />

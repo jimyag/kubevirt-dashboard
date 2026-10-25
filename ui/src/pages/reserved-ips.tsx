@@ -10,7 +10,7 @@ import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { asList, asRecord, kubeOvnAnnotations, listItems, relativeTime, requestJson, str, useAsync, useNamespaces, useNetworkProfile, type KubeObject } from "@/lib/kube"
 import { cidrContains, ipv4Cidr, isDnsLabel } from "@/lib/validate"
 import { KubeOvnMissing } from "@/pages/vpc"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 import { reservedIpNamespace, reservedIpNamespaceAnnotation } from "@/lib/vm-network"
 
 const OVN = "/apis/kubeovn.io/v1"
@@ -63,12 +63,12 @@ export function ReservedIpListPage() {
     }), [data])
   const filtered = useFilteredRows(rows, fields, search)
 
-  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title={t("Reserved IPs")} /><KubeOvnMissing /></div>
+  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title={resourceLabel("Reserved IPs")} /><KubeOvnMissing /></div>
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("Reserved IPs")}
+        title={resourceLabel("Reserved IPs")}
         subtitle="kubeovn.io/v1 Vip"
         actions={<Button onClick={() => setCreating(true)} className="gap-1.5"><Plus className="size-4" />{t("Reserve IP")}</Button>}
       />

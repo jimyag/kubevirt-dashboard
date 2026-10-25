@@ -73,7 +73,7 @@ import {
   listAddressGroups,
 } from "@/lib/security-groups"
 import { isDnsLabel } from "@/lib/validate"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 
 const providerLabel = engineResource
 
@@ -360,7 +360,7 @@ export function SecurityGroupListPage() {
   if (!provider) {
     return (
       <div className="space-y-4">
-        <PageHeader title={t("Security Groups")} />
+        <PageHeader title={resourceLabel("Security Groups")} />
         <div className="rounded-lg border bg-card">
             <EmptyState
               icon={ShieldCheck}
@@ -381,7 +381,7 @@ export function SecurityGroupListPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("Security Groups")}
+        title={resourceLabel("Security Groups")}
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />{t("Create security group")}</Button>}
       />
       {providers.length > 1 && (
@@ -532,7 +532,7 @@ export function SecurityGroupDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: t("Security Groups"), to: provider === "kube-ovn" ? "/vpc/security-groups?engine=kube-ovn" : "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
+        breadcrumbs={[{ label: resourceLabel("Security Groups"), to: provider === "kube-ovn" ? "/vpc/security-groups?engine=kube-ovn" : "/vpc/security-groups" }, ...(sg.namespace ? [{ label: sg.namespace }] : []), { label: sg.name }]}
         title={sg.name}
         subtitle={sg.description || undefined}
         actions={

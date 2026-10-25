@@ -5,7 +5,7 @@ import * as shared from "./shared";
 export const persistentvolumeclaimsConfig: ResourceConfig = {
     id: "persistentvolumeclaims",
     path: "/storage/kubernetes/persistent-volume-claims",
-    title: "Persistent Volume Claims",
+    title: "PersistentVolumeClaims",
     subtitle: "Manage Kubernetes PersistentVolumeClaim storage requests",
     listPath: "/api/v1/persistentvolumeclaims",
     namespaced: true,

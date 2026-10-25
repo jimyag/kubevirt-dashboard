@@ -47,7 +47,7 @@ import {
   type KubeObject,
 } from "@/lib/kube"
 import { cidrContains, cidrsOverlap, ipv4Cidr, isDnsLabel, parseIPv4Cidr } from "@/lib/validate"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 import { PeeringPanel, RouteTablePanel } from "@/components/vpc-routing"
 import { SubnetIpPools } from "@/components/ip-pools"
 
@@ -303,12 +303,12 @@ export function VpcListPage() {
   }, [data.subnets])
   const rows = useFilteredRows(data.vpcs, vpcFields, search)
 
-  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title={t("VPCs")} /><KubeOvnMissing /></div>
+  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title={resourceLabel("VPCs")} /><KubeOvnMissing /></div>
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("VPCs")}
+        title={resourceLabel("VPCs")}
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />{t("Create VPC")}</Button>}
       />
       <Toolbar
@@ -403,7 +403,7 @@ export function VpcDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: t("VPCs"), to: "/vpc/vpcs" }, { label: name }]}
+        breadcrumbs={[{ label: resourceLabel("VPCs"), to: "/vpc/vpcs" }, { label: name }]}
         title={name}
         badge={<StatusDot status={asRecord(data.vpc.status).standby === true ? "Available" : "Pending"} />}
         actions={
@@ -535,12 +535,12 @@ export function SubnetListPage() {
   }, [data.subnets, vpcFilter, exactVpc])
   const rows = useFilteredRows(inVpc, subnetFields, search)
 
-  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title={t("Subnets")} /><KubeOvnMissing /></div>
+  if (profile.loaded && !profile.vpc) return <div className="space-y-4"><PageHeader title={resourceLabel("Subnets")} /><KubeOvnMissing /></div>
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("Subnets")}
+        title={resourceLabel("Subnets")}
         actions={<Button onClick={() => setCreateOpen(true)} className="gap-1.5"><Plus className="size-4" />{t("Create subnet")}</Button>}
       />
       <Toolbar
@@ -629,7 +629,7 @@ export function SubnetDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: t("Subnets"), to: "/vpc/subnets" }, { label: name }]}
+        breadcrumbs={[{ label: resourceLabel("Subnets"), to: "/vpc/subnets" }, { label: name }]}
         title={name}
         badge={<StatusDot status={subnetReady(data.subnet)} />}
         actions={<Button variant="outline" size="sm" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>}

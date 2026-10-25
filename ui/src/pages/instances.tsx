@@ -69,7 +69,7 @@ import { fetchInstanceUsage, formatBytes, useMetricsPoll } from "@/lib/metrics"
 import { cidrContains, ipv4Cidr, isDnsLabel, isQuantity } from "@/lib/validate"
 import { bandwidthProblem, bandwidthText, canUseReservedIp, listAttachableNetworks, nextNicName, type AttachableNetwork } from "@/lib/vm-network"
 import { buildVirtualMachine, vmDetailPath, vmNetworkLabel, vmShape, vmStatus, vmStatusGroup, type WizardState } from "@/lib/instances"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 import { usePolling } from "@/lib/polling"
 import { jsonPut } from "@/resources/configs"
 
@@ -214,7 +214,7 @@ export function InstanceListPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("Instances")}
+        title={resourceLabel("Virtual Machines")}
         actions={
           <Button asChild className="gap-1.5">
             <Link to="/kubevirt/virtualization/virtual-machines/create"><Plus className="size-4" />{t("Create instance")}</Link>
@@ -613,7 +613,7 @@ export function CreateInstancePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: t("Instances"), to: "/kubevirt/virtualization/virtual-machines" }, { label: t("Create") }]}
+        breadcrumbs={[{ label: resourceLabel("Virtual Machines"), to: "/kubevirt/virtualization/virtual-machines" }, { label: t("Create") }]}
         title={t("Create instance")}
       />
 
