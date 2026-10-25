@@ -91,10 +91,10 @@ func newSettingsForRoot(root, cluster string) (*cli.EnvSettings, error) {
 	base := filepath.Join(root, fmt.Sprintf("%x", sum[:8]))
 	cache := filepath.Join(base, "cache")
 	for _, dir := range []string{base, cache} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
-		if err := os.Chmod(dir, 0700); err != nil {
+		if err := os.Chmod(dir, 0o700); err != nil {
 			return nil, err
 		}
 	}
@@ -132,7 +132,7 @@ func loginRegistry(settings *cli.EnvSettings, entry *repo.Entry) error {
 	if err := client.Login(parsed.Host, registry.LoginOptBasicAuth(entry.Username, entry.Password)); err != nil {
 		return err
 	}
-	if err := os.Chmod(settings.RegistryConfig, 0600); err != nil && !os.IsNotExist(err) {
+	if err := os.Chmod(settings.RegistryConfig, 0o600); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
@@ -750,7 +750,7 @@ func (h *handler) saveRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file.Update(entry)
-	if err := file.WriteFile(settings.RepositoryConfig, 0600); err != nil {
+	if err := file.WriteFile(settings.RepositoryConfig, 0o600); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -775,7 +775,7 @@ func (h *handler) removeRepository(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errors.New("repository not found"))
 		return
 	}
-	if err := file.WriteFile(settings.RepositoryConfig, 0600); err != nil {
+	if err := file.WriteFile(settings.RepositoryConfig, 0o600); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
