@@ -3,4 +3,4 @@ name: kubevirt-dashboard
 description: Web console for Kubernetes and KubeVirt clusters
 type: application
 version: 0.1.0
-appVersion: "2.4.0"
+appVersion: "2.5.0"
