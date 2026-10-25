@@ -27,7 +27,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           [[ "${RELEASE_TAG}" =~ ^v[0-9] ]]
-          git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null
+          git ls-remote --exit-code --tags "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "refs/tags/${RELEASE_TAG}" >/dev/null
 
       - name: Checkout code
         uses: actions/checkout@v4
