@@ -9,8 +9,6 @@ import { virtualmachineinstancereplicasetsConfig } from "./config/virtualmachine
 import { kubevirtsConfig } from "./config/kubevirts";
 import { nodesConfig } from "./config/nodes";
 import { networkAttachmentDefinitionsConfig } from "./config/network-attachment-definitions";
-import { virtualmachineclusterinstancetypesConfig } from "./config/virtualmachineclusterinstancetypes";
-import { virtualmachineclusterpreferencesConfig } from "./config/virtualmachineclusterpreferences";
 import { virtualmachineinstancetypesConfig } from "./config/virtualmachineinstancetypes";
 import { virtualmachinepreferencesConfig } from "./config/virtualmachinepreferences";
 import { virtualmachinesnapshotsConfig } from "./config/virtualmachinesnapshots";
@@ -160,8 +158,6 @@ export const resourceConfigs: Record<string, ResourceConfig> = {
   kubevirts: kubevirtsConfig,
   nodes: nodesConfig,
   "network-attachment-definitions": networkAttachmentDefinitionsConfig,
-  virtualmachineclusterinstancetypes: virtualmachineclusterinstancetypesConfig,
-  virtualmachineclusterpreferences: virtualmachineclusterpreferencesConfig,
   virtualmachineinstancetypes: virtualmachineinstancetypesConfig,
   virtualmachinepreferences: virtualmachinepreferencesConfig,
   virtualmachinesnapshots: virtualmachinesnapshotsConfig,

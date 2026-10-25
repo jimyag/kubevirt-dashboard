@@ -144,7 +144,7 @@ export function SettingsPage() {
 const catalog = [
   { to: "/catalog/crds", title: "Custom resources", description: "CustomResourceDefinition · served APIs" },
   { to: "/networks/envoy-gateway", title: "Envoy Gateway", description: "gateway.envoyproxy.io" },
-  { to: "/catalog/helm", title: "Helm releases", description: "Charts installed with Helm: values, manifests, history" },
+  { to: "/applications/installed", title: "Helm releases", description: "Charts installed with Helm: values, manifests, history" },
   { to: "/kubevirt", title: "KubeVirt", description: "VMs, VMIs, pools, CDI, instance types, snapshots, migrations" },
   { to: "/storage", title: "Storage", description: "StorageClasses, PV/PVC, CSI, volume snapshots" },
   { to: "/networks", title: "Networks", description: "Services, Gateway API, Multus, Calico, Cilium, Kube-OVN" },

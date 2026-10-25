@@ -10,7 +10,7 @@ import {
   resourceNameFromListPath,
 } from "./api-paths";
 import { dvCreateConfig, resourceConfigs, vmCreateConfig } from "./configs";
-import { t } from "@/lib/i18n";
+import { resourceLabel, t } from "@/lib/i18n";
 
 const getContext = () => localStorage.getItem("kube-context") || "";
 
@@ -62,7 +62,7 @@ function useAvailableResources(resources: ResourceConfig[]) {
 
 const configFields: FilterField<ResourceConfig>[] = [
   // Match both the English and the translated title.
-  { key: "name", label: "Name", value: (config) => [config.title, t(config.title)] },
+  { key: "name", label: "Name", value: (config) => [config.title, resourceLabel(config.title)] },
   { key: "kind", label: "Kind", value: (config) => config.kind },
   { key: "api", label: "API", value: (config) => apiVersionFromListPath(config.listPath) || "v1" },
   { key: "scope", label: "Scope", value: (config) => (config.namespaced ? "Namespaced" : "Cluster") },
@@ -87,7 +87,7 @@ function ResourceConfigTable({ resources, query = "" }: { resources: ResourceCon
         minWidth={640}
         empty={<EmptyState title={t("Not served by this cluster")} />}
         columns={[
-          { header: t("Resource"), cell: (config) => <Link to={config.path} className="font-medium hover:text-primary transition-colors">{t(config.title)}</Link> },
+          { header: t("Resource"), cell: (config) => <Link to={config.path} className="font-medium hover:text-primary transition-colors">{resourceLabel(config.title)}</Link> },
           { header: t("Kind"), cell: (config) => <span className="font-mono text-xs">{config.kind}</span> },
           { header: t("API"), cell: (config) => <span className="font-mono text-xs text-muted-foreground">{apiVersionFromListPath(config.listPath) || "v1"}</span> },
           { header: t("Scope"), className: "text-right", cell: (config) => <span className="text-sm text-muted-foreground">{config.namespaced ? t("Namespaced") : t("Cluster")}</span> },
@@ -98,7 +98,7 @@ function ResourceConfigTable({ resources, query = "" }: { resources: ResourceCon
   )
 }
 
-type ResourceGroup = {
+export type ResourceGroup = {
   slug: string
   title: string
   description: string
@@ -305,8 +305,6 @@ const kubevirtResourceGroups: ResourceGroup[] = [
     title: "Templates",
     description: "KubeVirt instance type and preference resources.",
     resources: [
-      resourceConfigs.virtualmachineclusterinstancetypes,
-      resourceConfigs.virtualmachineclusterpreferences,
       resourceConfigs.virtualmachineinstancetypes,
       resourceConfigs.virtualmachinepreferences,
     ],

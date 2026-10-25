@@ -5,7 +5,7 @@ import { EventList } from "@/components/events"
 import { eventsUrl, type KubeEvent } from "@/lib/events"
 import { namespaceScope } from "@/lib/filter"
 import { useNamespaces } from "@/lib/kube"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 
 const kinds = ["VirtualMachine", "VirtualMachineInstance", "DataVolume", "Pod", "Node", "PersistentVolumeClaim", "VirtualMachineInstanceMigration"]
 
@@ -35,7 +35,7 @@ export function EventsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={t("Events")} subtitle={t("core/v1 events, refreshed every 15 seconds")} />
+      <PageHeader title={resourceLabel("Events")} subtitle={t("core/v1 events, refreshed every 15 seconds")} />
       <EventList
         url={eventsUrl({ namespace: ns.scope, kind: exactKind })}
         prefilter={prefilter}

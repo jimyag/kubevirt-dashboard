@@ -269,7 +269,11 @@ const instanceTypeActions: ResourceAction[] = [
       { name: "memory", label: "Guest memory", defaultValue: (r) => String(getRecord(getRecord(r.spec).memory).guest || "1Gi") },
     ],
     buildRequest: (resource, values) => ({
-      url: resourceRefPath("/apis/instancetype.kubevirt.io/v1beta1", "virtualmachineclusterinstancetypes", resource),
+      url: resourceRefPath(
+        "/apis/instancetype.kubevirt.io/v1beta1",
+        resource.kind === "VirtualMachineInstancetype" ? "virtualmachineinstancetypes" : "virtualmachineclusterinstancetypes",
+        resource,
+      ),
       options: mergePatch({ spec: { cpu: { guest: numberValue(values.cpu, 1) }, memory: { guest: stringValue(values.memory, "1Gi") } } }),
     }),
   },

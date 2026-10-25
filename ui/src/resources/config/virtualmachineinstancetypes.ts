@@ -1,7 +1,8 @@
 import type { ResourceConfig } from "@/components/resource-management";
 import * as shared from "./shared";
+import { virtualmachineclusterinstancetypesConfig } from "./virtualmachineclusterinstancetypes";
 
-export const virtualmachineinstancetypesConfig: ResourceConfig = shared.instancetypeResourceConfig({
+const namespacedInstanceTypesConfig = shared.instancetypeResourceConfig({
     plural: "virtualmachineinstancetypes",
     path: "/kubevirt/templates/instance-types",
     title: "Instance Types",
@@ -12,3 +13,11 @@ export const virtualmachineinstancetypesConfig: ResourceConfig = shared.instance
     buildSpec: (values) => ({ cpu: { guest: shared.numberValue(values.cpu, 1) }, memory: { guest: shared.stringValue(values.memory, "1Gi") } }),
     extraColumns: [{ label: "CPU", value: (r) => String(shared.getRecord(shared.getRecord(r.spec).cpu).guest || "N/A") }, { label: "Memory", value: (r) => String(shared.getRecord(shared.getRecord(r.spec).memory).guest || "N/A") }],
   });
+
+export const virtualmachineinstancetypesConfig: ResourceConfig = {
+  ...namespacedInstanceTypesConfig,
+  scopeVariants: [
+    { id: "cluster", label: "Cluster", config: virtualmachineclusterinstancetypesConfig },
+    { id: "namespace", label: "Namespaced", config: namespacedInstanceTypesConfig },
+  ],
+};

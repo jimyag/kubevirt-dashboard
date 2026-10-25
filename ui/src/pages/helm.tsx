@@ -2,9 +2,10 @@ import { useMemo, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import * as YAML from "js-yaml"
 import { toast } from "sonner"
-import { Package, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { GitFork, Package, PackageSearch, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -36,17 +37,24 @@ import {
   helmReleasePath,
   installRelease,
   knownRepositories,
+  listRepositories,
+  listRepositoryCharts,
   listReleases,
   needsSource,
+  refreshRepository,
   releaseHistory,
   releaseResources,
+  removeRepository,
   rollbackRelease,
+  saveRepository,
   uninstallRelease,
   upgradeRelease,
   type ChartSource,
   type HelmRelease,
   type HelmReleaseDetail,
   type HelmResource,
+  type HelmRepository,
+  type RepositoryChart,
 } from "@/lib/helm"
 import { lineDiff } from "@/lib/yaml-view"
 import { isDnsLabel } from "@/lib/validate"
@@ -65,7 +73,7 @@ const yamlProblem = (text: string) => {
 // --- Chart source fields ---
 
 /** Repository, chart and version inputs; versions load from the repository on demand. */
-export function ChartSourceFields({ source, onChange, lockChart, onDefaults }: { source: ChartSource; onChange: (source: ChartSource) => void; lockChart?: boolean; onDefaults?: (values: string) => void }) {
+export function ChartSourceFields({ source, onChange, lockChart, onDefaults, repositories = [] }: { source: ChartSource; onChange: (source: ChartSource) => void; lockChart?: boolean; onDefaults?: (values: string) => void; repositories?: HelmRepository[] }) {
   const [versions, setVersions] = useState<string[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -86,8 +94,8 @@ export function ChartSourceFields({ source, onChange, lockChart, onDefaults }: {
   return (
     <div className="space-y-3">
       <div className="grid gap-4 sm:grid-cols-[2fr_1fr_1fr]">
-        <FieldRow label={t("Repository")} hint={t("HTTP repository or oci:// registry path.")}>
-          <Combobox value={source.repo} onChange={(repo) => { onChange({ ...source, repo }); setVersions(null) }} options={knownRepositories} placeholder="https://..." aria-label={t("Repository")} className="w-full font-mono" />
+        <FieldRow label={t("Repository")} hint={t("Select a saved repository or enter an HTTP or OCI source.")}>
+          <Combobox value={source.repo} onChange={(repo) => { onChange({ ...source, repo }); setVersions(null) }} options={[...repositories.map((item) => ({ value: item.url, hint: item.name })), ...knownRepositories.filter((item) => !repositories.some((repo) => repo.url === item.value))]} placeholder="https://..." aria-label={t("Repository")} className="w-full font-mono" />
         </FieldRow>
         <FieldRow label={t("Chart")}>
           <Input value={source.chart} disabled={lockChart} onChange={(e) => { onChange({ ...source, chart: e.target.value.trim() }); setVersions(null) }} className="font-mono" />
@@ -112,6 +120,7 @@ export function InstallChartDialog({ open, onOpenChange, onInstalled, initial }:
   const blank = { repo: knownRepositories[0].value, chart: "", version: "", namespace: "default", name: "", values: "", ...initial }
   const [form, setForm] = useState(blank)
   const [defaults, setDefaults] = useState("")
+  const { data: repositories } = useAsync(listRepositories, [] as HelmRepository[], [])
   const set = (patch: Partial<typeof form>) => setForm((current) => ({ ...current, ...patch }))
   return (
     <ConfirmDialog
@@ -138,7 +147,7 @@ export function InstallChartDialog({ open, onOpenChange, onInstalled, initial }:
       }}
     >
       <div className="space-y-4">
-        <ChartSourceFields source={form} onChange={(source) => set({ ...source, name: form.name || source.chart })} onDefaults={setDefaults} />
+        <ChartSourceFields source={form} onChange={(source) => set({ ...source, name: form.name || source.chart })} onDefaults={(values) => { setDefaults(values); setForm((current) => ({ ...current, values: current.values || values })) }} repositories={repositories} />
         <div className="grid gap-4 sm:grid-cols-2">
           <FieldRow label={t("Namespace")} hint={t("Created when missing.")}>
             <Combobox value={form.namespace} onChange={(namespace) => set({ namespace })} options={namespaces} aria-label={t("Namespace")} className="w-full" />
@@ -195,8 +204,8 @@ export function HelmReleaseListPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        breadcrumbs={[{ label: t("Resource Catalog"), to: "/catalog" }, { label: t("Helm Releases") }]}
-        title={t("Helm Releases")}
+        breadcrumbs={[{ label: t("Applications") }, { label: t("Installed Applications") }]}
+        title={t("Installed Applications")}
         subtitle={t("Releases stored by Helm in the cluster")}
         actions={<Button onClick={() => setInstalling(true)} className="gap-1.5"><Plus className="size-4" />{t("Install chart")}</Button>}
       />
@@ -239,6 +248,227 @@ export function HelmReleaseListPage() {
       />
       <InstallChartDialog open={installing} onOpenChange={setInstalling} onInstalled={(release) => navigate(helmReleasePath(release))} />
       <UninstallDialog release={removing} onOpenChange={(open) => !open && setRemoving(null)} onDone={reload} />
+    </div>
+  )
+}
+
+export function InstalledApplicationsPage() {
+  return <HelmReleaseListPage />
+}
+
+const catalogFields: FilterField<RepositoryChart>[] = [
+  { key: "chart", label: "Chart", value: (chart) => chart.name },
+  { key: "repository", label: "Repository", aliases: ["repo"], value: (chart) => chart.repository },
+  { key: "version", label: "Version", value: (chart) => chart.versions },
+  { key: "app", label: "App version", value: (chart) => chart.appVersion },
+  { key: "description", label: "Description", value: (chart) => chart.description },
+]
+
+export function ApplicationCatalogPage() {
+  const navigate = useNavigate()
+  const [search, setSearch] = useState("")
+  const [installing, setInstalling] = useState<RepositoryChart | null>(null)
+  const { data, loading, error, reload } = useAsync(async () => {
+    const repositories = await listRepositories()
+    const catalogs = await Promise.all(repositories
+      .filter((repository) => repository.type === "HTTP")
+      .map(async (repository) => {
+        try {
+          return { charts: await listRepositoryCharts(repository.name), error: "" }
+        } catch (err) {
+          return { charts: [] as RepositoryChart[], error: `${repository.name}: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      }))
+    return {
+      repositories,
+      charts: catalogs.flatMap((catalog) => catalog.charts),
+      errors: catalogs.map((catalog) => catalog.error).filter(Boolean),
+    }
+  }, { repositories: [] as HelmRepository[], charts: [] as RepositoryChart[], errors: [] as string[] }, [])
+  const rows = useFilteredRows(data.charts, catalogFields, search)
+  const oci = data.repositories.filter((repository) => repository.type === "OCI")
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        breadcrumbs={[{ label: t("Applications") }, { label: t("Application Catalog") }]}
+        title={t("Application Catalog")}
+        subtitle={t("Charts available from saved repositories")}
+        actions={<Button onClick={() => navigate("/applications/repositories")} variant="outline" className="gap-1.5"><GitFork className="size-4" />{t("Manage repositories")}</Button>}
+      />
+      <Toolbar right={<FilterInput value={search} onChange={setSearch} fields={catalogFields} rows={data.charts} placeholder={t("Filter, e.g. repository:prometheus")} />}>
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
+        <span className="text-sm text-muted-foreground">{t("{count} charts", { count: data.charts.length })}</span>
+      </Toolbar>
+      {error && <ErrorNote>{error}</ErrorNote>}
+      {data.errors.map((item) => <ErrorNote key={item}>{item}</ErrorNote>)}
+      {data.repositories.length === 0 && !loading && (
+        <EmptyState icon={PackageSearch} title={t("No application repositories")} description={t("Add an HTTP repository to browse its charts, or install an OCI chart by reference.")} action={<Button size="sm" onClick={() => navigate("/applications/repositories")}>{t("Manage repositories")}</Button>} />
+      )}
+      <DataTable
+        loading={loading}
+        rows={rows}
+        rowKey={(chart) => `${chart.repository}/${chart.name}`}
+        empty={<EmptyState icon={PackageSearch} title={data.charts.length ? t("No matching charts") : t("No charts")} />}
+        columns={[
+          {
+            header: t("Chart"),
+            cell: (chart) => (
+              <div className="min-w-0">
+                <div className="font-medium">{chart.name}</div>
+                <div className="max-w-md break-words text-xs text-muted-foreground">{chart.description || "-"}</div>
+              </div>
+            ),
+          },
+          { header: t("Repository"), cell: (chart) => <span className="font-mono text-xs">{chart.repository}</span> },
+          { header: t("Latest version"), cell: (chart) => <span className="font-mono text-xs">{chart.version}</span> },
+          { header: t("App version"), cell: (chart) => <span className="font-mono text-xs text-muted-foreground">{chart.appVersion || "-"}</span> },
+          { header: t("Versions"), cell: (chart) => <span className="text-sm tabular-nums">{chart.versions.length}</span> },
+          { header: "", className: "w-24 text-right", cell: (chart) => <Button size="sm" variant="outline" onClick={() => setInstalling(chart)}>{t("Install")}</Button> },
+        ]}
+      />
+      {oci.length > 0 && (
+        <Panel title={t("OCI sources")} description={t("OCI registries do not provide a complete chart catalog. Enter the chart reference in the install dialog.")}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-wrap gap-2">
+              {oci.map((repository) => <Badge key={repository.name} variant="outline" className="font-mono">{repository.name}</Badge>)}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setInstalling({ repository: "", repositoryURL: oci[0].url, name: "", version: "", appVersion: "", description: "", versions: [] })}>{t("Install by reference")}</Button>
+          </div>
+        </Panel>
+      )}
+      {installing && (
+        <InstallChartDialog
+          key={`${installing.repository}/${installing.name}`}
+          open
+          onOpenChange={(open) => !open && setInstalling(null)}
+          onInstalled={(release) => navigate(helmReleasePath(release))}
+          initial={installing.repository ? { repo: installing.repositoryURL, chart: installing.name, version: installing.version, name: installing.name } : { repo: installing.repositoryURL }}
+        />
+      )}
+    </div>
+  )
+}
+
+type RepositoryForm = { name: string; url: string; username: string; password: string }
+const blankRepository: RepositoryForm = { name: "", url: "", username: "", password: "" }
+
+function RepositoryDialog({ open, onOpenChange, repository, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; repository: HelmRepository | null; onSaved: () => void }) {
+  const [form, setForm] = useState<RepositoryForm>(() => repository ? { name: repository.name, url: repository.url, username: repository.username || "", password: "" } : blankRepository)
+  const editing = repository !== null
+  const urlChanged = editing && form.url.replace(/\/$/, "") !== repository.url.replace(/\/$/, "")
+  const set = (patch: Partial<RepositoryForm>) => setForm((current) => ({ ...current, ...patch }))
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next)
+        if (!next) setForm(repository ? { name: repository.name, url: repository.url, username: repository.username || "", password: "" } : blankRepository)
+      }}
+      title={editing ? t("Edit repository {name}", { name: repository.name }) : t("Add repository")}
+      description={t("HTTP repositories can be browsed. OCI sources are installed by chart reference.")}
+      confirmLabel={editing ? t("Save") : t("Add")}
+      className="sm:max-w-2xl"
+      onConfirm={async () => {
+        if (!form.name) throw new Error(t("Enter a repository name."))
+        if (!isDnsLabel(form.name)) throw new Error(t("Repository name must be at most 63 lowercase letters, digits and dashes."))
+        if (!form.url) throw new Error(t("Enter a repository URL."))
+        if (urlChanged && !form.password) throw new Error(t("Enter the password for the new repository URL."))
+        await saveRepository(form)
+        toast.success(editing ? t("Updated {name}", { name: form.name }) : t("Added {name}", { name: form.name }))
+        onSaved()
+      }}
+    >
+      <div className="grid gap-4">
+        <FieldRow label={t("Name")}><Input value={form.name} disabled={editing} onChange={(event) => set({ name: event.target.value.trim() })} className="font-mono" /></FieldRow>
+        <FieldRow label={t("URL")} hint="https://... or oci://..."><Input value={form.url} onChange={(event) => set({ url: event.target.value.trim() })} className="font-mono" /></FieldRow>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FieldRow label={t("Username")}><Input value={form.username} autoComplete="username" onChange={(event) => set({ username: event.target.value })} className="font-mono" /></FieldRow>
+          <FieldRow label={t("Password")} hint={urlChanged ? t("Enter the password for the new repository URL.") : editing ? t("Leave empty to keep the saved password.") : undefined}><Input type="password" value={form.password} autoComplete="new-password" onChange={(event) => set({ password: event.target.value })} /></FieldRow>
+        </div>
+      </div>
+    </ConfirmDialog>
+  )
+}
+
+export function ApplicationRepositoriesPage() {
+  const [editing, setEditing] = useState<HelmRepository | null | undefined>(undefined)
+  const [removing, setRemoving] = useState<HelmRepository | null>(null)
+  const [refreshing, setRefreshing] = useState("")
+  const { data, loading, error, reload } = useAsync(listRepositories, [] as HelmRepository[], [])
+  const refreshOne = async (repository: HelmRepository) => {
+    setRefreshing(repository.name)
+    try {
+      await refreshRepository(repository.name)
+      toast.success(t("Refreshed {name}", { name: repository.name }))
+      reload()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRefreshing("")
+    }
+  }
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        breadcrumbs={[{ label: t("Applications") }, { label: t("Application Repositories") }]}
+        title={t("Application Repositories")}
+        subtitle={t("Chart sources available to the application catalog")}
+        actions={<Button onClick={() => setEditing(null)} className="gap-1.5"><Plus className="size-4" />{t("Add repository")}</Button>}
+      />
+      <Toolbar>
+        <Button size="sm" variant="outline" onClick={reload} className="gap-2"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />{t("Refresh")}</Button>
+        <span className="text-sm text-muted-foreground">{t("{count} repositories", { count: data.length })}</span>
+      </Toolbar>
+      {error && <ErrorNote>{error}</ErrorNote>}
+      <DataTable
+        loading={loading && data.length === 0}
+        rows={data}
+        rowKey={(repository) => repository.name}
+        empty={<EmptyState icon={GitFork} title={t("No application repositories")} action={<Button size="sm" onClick={() => setEditing(null)}>{t("Add repository")}</Button>} />}
+        columns={[
+          {
+            header: t("Name"),
+            cell: (repository) => (
+              <div className="min-w-0">
+                <div className="font-medium">{repository.name}</div>
+                {repository.username && <div className="text-xs text-muted-foreground">{repository.username}</div>}
+              </div>
+            ),
+          },
+          { header: t("URL"), cell: (repository) => <span className="block max-w-lg break-all font-mono text-xs">{repository.url}</span> },
+          { header: t("Type"), cell: (repository) => <Badge variant="outline" className="font-mono">{repository.type}</Badge> },
+          { header: t("Charts"), cell: (repository) => repository.type === "OCI" ? <span className="text-sm text-muted-foreground">{t("Not enumerable")}</span> : <span className="text-sm tabular-nums">{repository.chartCount}</span> },
+          { header: t("Status"), cell: (repository) => repository.error ? <span title={repository.error}><StatusDot status="Error" /></span> : <StatusDot status={repository.type === "OCI" ? "Configured" : "Ready"} /> },
+          { header: t("Updated"), cell: (repository) => repository.updatedAt ? <span className="text-sm text-muted-foreground tabular-nums" title={repository.updatedAt}>{relativeTime(repository.updatedAt)}</span> : <span className="text-sm text-muted-foreground">-</span> },
+          {
+            header: "",
+            className: "w-32 text-right",
+            cell: (repository) => (
+              <div className="flex justify-end">
+                <Button size="icon" variant="ghost" aria-label={t("Refresh {name}", { name: repository.name })} disabled={refreshing === repository.name} onClick={() => void refreshOne(repository)}><RefreshCw className={cn("size-4 text-muted-foreground", refreshing === repository.name && "animate-spin")} /></Button>
+                <Button size="icon" variant="ghost" aria-label={t("Edit {name}", { name: repository.name })} onClick={() => setEditing(repository)}><Pencil className="size-4 text-muted-foreground" /></Button>
+                <Button size="icon" variant="ghost" aria-label={t("Remove {name}", { name: repository.name })} onClick={() => setRemoving(repository)}><Trash2 className="size-4 text-muted-foreground" /></Button>
+              </div>
+            ),
+          },
+        ]}
+      />
+      {editing !== undefined && <RepositoryDialog key={editing?.name || "new"} open onOpenChange={(open) => !open && setEditing(undefined)} repository={editing} onSaved={reload} />}
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(open) => !open && setRemoving(null)}
+        title={t("Remove repository {name}?", { name: removing?.name })}
+        description={t("Installed applications remain in the cluster. Charts from this source will no longer appear in the catalog.")}
+        confirmLabel={t("Remove")}
+        destructive
+        onConfirm={async () => {
+          if (!removing) return
+          await removeRepository(removing.name)
+          toast.success(t("Removed {name}", { name: removing.name }))
+          reload()
+        }}
+      />
     </div>
   )
 }
@@ -289,12 +519,12 @@ export function HelmReleaseDetailPage() {
   const tab = requested && detailTabs.some((item) => item.id === requested) ? requested : "resources"
 
   if (loading && !release) return <LoadingState />
-  if (!release) return error ? <ErrorNote>{error}</ErrorNote> : <EmptyState icon={Package} title={t("Release not found")} action={<Button asChild variant="outline" size="sm"><Link to="/catalog/helm">{t("Back")}</Link></Button>} />
+  if (!release) return error ? <ErrorNote>{error}</ErrorNote> : <EmptyState icon={Package} title={t("Release not found")} action={<Button asChild variant="outline" size="sm"><Link to="/applications/installed">{t("Back")}</Link></Button>} />
 
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: t("Helm Releases"), to: "/catalog/helm" }, { label: namespace }, { label: name }]}
+        breadcrumbs={[{ label: t("Installed Applications"), to: "/applications/installed" }, { label: namespace }, { label: name }]}
         title={name}
         badge={<StatusDot status={release.status} />}
         subtitle={<span className="font-mono text-xs">{release.chart}-{release.chartVersion}</span>}
@@ -325,7 +555,7 @@ export function HelmReleaseDetailPage() {
       {tab === "manifest" && <YamlCode value={release.manifest} className="h-[calc(100dvh-320px)] min-h-[360px]" />}
       {tab === "history" && <ReleaseHistory release={release} onChanged={reload} />}
       {tab === "notes" && (release.notes ? <pre className="overflow-x-auto rounded-lg border bg-card p-4 font-mono text-xs whitespace-pre-wrap">{release.notes}</pre> : <EmptyState title={t("No notes")} />)}
-      <UninstallDialog release={removing ? release : null} onOpenChange={setRemoving} onDone={() => navigate("/catalog/helm")} />
+      <UninstallDialog release={removing ? release : null} onOpenChange={setRemoving} onDone={() => navigate("/applications/installed")} />
       <ChangeVersionDialog open={changingVersion} onOpenChange={setChangingVersion} release={release} onDone={reload} />
     </div>
   )

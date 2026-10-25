@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { getContext, setContext } from "@/lib/kube"
-import { findActiveNav, toneClasses } from "@/lib/navigation"
+import { findActiveNav, navItemLabel, toneClasses, useNavSections } from "@/lib/navigation"
 import { CommandPalette } from "./command-palette"
 import { LanguageToggle } from "./language-toggle"
 import { ModeToggle } from "./mode-toggle"
@@ -58,13 +58,14 @@ function ClusterSwitcher() {
 
 function Breadcrumbs() {
   const location = useLocation()
-  const active = findActiveNav(location.pathname)
+  const sections = useNavSections()
+  const active = findActiveNav(location.pathname, sections)
   if (!active) return null
-  const crumbs = active.section.label === "Home" ? [t(active.item.name)] : [t(active.section.label), ...(active.parent ? [t(active.parent.name)] : []), t(active.item.name)]
+  const crumbs = active.section.label === "Home" ? [navItemLabel(active.item)] : [t(active.section.label), ...active.ancestors.map((item) => t(item.name)), navItemLabel(active.item)]
   return (
     <nav className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
       {crumbs.map((crumb, index) => (
-        <span key={crumb} className="flex min-w-0 items-center gap-1.5">
+        <span key={`${crumb}-${index}`} className="flex min-w-0 items-center gap-1.5">
           {index > 0 && <ChevronRight className="size-3.5 text-muted-foreground" />}
           {index === 0 && <span className={`size-2 rounded-sm ${toneClasses[active.section.tone].dot}`} />}
           {index === crumbs.length - 1 ? (

@@ -53,15 +53,21 @@ export function CompactKvTable({ rows, preserveEmpty = false }: { rows: Array<{ 
 }
 
 export function ChipList({ values }: { values: unknown[] }) {
+  const [expanded, setExpanded] = useState(false)
   if (values.length === 0) return <span className="text-sm text-muted-foreground">-</span>
+  const visible = expanded ? values : values.slice(0, 20)
   return (
     <div className="flex min-w-0 flex-wrap gap-1.5">
-      {values.slice(0, 20).map((item, index) => (
+      {visible.map((item, index) => (
         <span key={`${compactValue(item)}-${index}`} className="min-w-0 max-w-full break-all rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-xs text-foreground">
           {compactValue(item)}
         </span>
       ))}
-      {values.length > 20 && <span className="text-xs text-muted-foreground">+{values.length - 20} more</span>}
+      {values.length > 20 && (
+        <button type="button" className="text-xs text-primary hover:underline" onClick={() => setExpanded((current) => !current)}>
+          {expanded ? t("Show less") : t("Show {count} more", { count: values.length - 20 })}
+        </button>
+      )}
     </div>
   )
 }
@@ -146,29 +152,39 @@ export function DetailVolumeTable({ volumes }: { volumes: Record<string, unknown
 }
 
 export function DetailSimpleObjectTable({ rows, preserveEmpty = false }: { rows: Record<string, unknown>[]; preserveEmpty?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
   const allKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row).filter((key) => isPrimitiveDetailValue(row[key])))))
-  const keys = preserveEmpty ? allKeys : allKeys.slice(0, 6)
+  const keys = preserveEmpty || expanded ? allKeys : allKeys.slice(0, 6)
+  const visibleRows = preserveEmpty || expanded ? rows : rows.slice(0, 12)
   if (keys.length === 0) return <ChipList values={rows.map((row, index) => detailObjectTitle(row, `Item ${index + 1}`))} />
   return (
-    <div className="overflow-x-auto rounded-md border">
-      <Table>
-        <TableHeader className="bg-muted/50">
-          <TableRow>{keys.map((key) => <TableHead key={key} className="h-8 text-xs font-medium text-muted-foreground">{humanizeKey(key)}</TableHead>)}</TableRow>
-        </TableHeader>
-        <TableBody>
-          {(preserveEmpty ? rows : rows.slice(0, 12)).map((row, index) => (
-            <TableRow key={index} className="hover:bg-muted/40">
-              {keys.map((key) => <TableCell key={key} className="max-w-[260px] py-1.5 text-xs whitespace-normal break-words">{preserveEmpty ? <DetailValue value={row[key]} preserveEmpty /> : hasRenderableValue(row[key]) ? compactValue(row[key]) : <span className="text-muted-foreground">-</span>}</TableCell>)}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {!preserveEmpty && rows.length > 12 && <div className="border-t px-3 py-2 text-xs text-muted-foreground">+{rows.length - 12} more</div>}
+    <div className="min-w-0">
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader className="bg-muted/50">
+            <TableRow>{keys.map((key) => <TableHead key={key} className="h-8 text-xs font-medium text-muted-foreground">{humanizeKey(key)}</TableHead>)}</TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleRows.map((row, index) => (
+              <TableRow key={index} className="hover:bg-muted/40">
+                {keys.map((key) => <TableCell key={key} className="max-w-[260px] py-1.5 text-xs whitespace-normal break-words">{preserveEmpty ? <DetailValue value={row[key]} preserveEmpty /> : hasRenderableValue(row[key]) ? compactValue(row[key]) : <span className="text-muted-foreground">-</span>}</TableCell>)}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      {!preserveEmpty && (rows.length > 12 || allKeys.length > 6) && (
+        <button type="button" className="mt-2 text-xs text-primary hover:underline" onClick={() => setExpanded((current) => !current)}>
+          {expanded ? t("Show less") : t("Show more")}
+        </button>
+      )}
     </div>
   )
 }
 
 export function DetailValue({ value, depth = 0, preserveEmpty = false }: { value: unknown; depth?: number; preserveEmpty?: boolean }) {
+  const [showObjects, setShowObjects] = useState(false)
+  const [showPrimitives, setShowPrimitives] = useState(false)
   if (preserveEmpty && (value === null || value === "")) return <span className="font-mono">{value === null ? "null" : '""'}</span>
   if (preserveEmpty && value && typeof value === "object" && Object.keys(value).length === 0) return <span className="font-mono">{Array.isArray(value) ? "[]" : "{}"}</span>
   if (!hasRenderableValue(value)) return <span className="text-muted-foreground">-</span>
@@ -229,7 +245,7 @@ export function DetailValue({ value, depth = 0, preserveEmpty = false }: { value
       }
       return (
         <div className="grid gap-2">
-          {(preserveEmpty ? value : value.slice(0, 12)).map((item, index) => {
+          {(preserveEmpty || showObjects ? value : value.slice(0, 12)).map((item, index) => {
             const record = item as Record<string, unknown>
             const entries = Object.entries(record)
             return (
@@ -241,19 +257,27 @@ export function DetailValue({ value, depth = 0, preserveEmpty = false }: { value
               </div>
             )
           })}
-          {!preserveEmpty && value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
+          {!preserveEmpty && value.length > 12 && (
+            <button type="button" className="w-fit text-xs text-primary hover:underline" onClick={() => setShowObjects((current) => !current)}>
+              {showObjects ? t("Show less") : t("Show {count} more", { count: value.length - 12 })}
+            </button>
+          )}
         </div>
       )
     }
 
     return (
       <div className="flex min-w-0 max-w-full flex-wrap gap-1.5">
-        {(preserveEmpty ? value : value.slice(0, 12)).map((item, index) => (
+        {(preserveEmpty || showPrimitives ? value : value.slice(0, 12)).map((item, index) => (
           <span key={index} className="min-w-0 max-w-full break-words rounded-md border bg-muted px-2 py-1 text-xs text-foreground">
             {preserveEmpty ? <DetailValue value={item} preserveEmpty /> : compactValue(item)}
           </span>
         ))}
-        {!preserveEmpty && value.length > 12 && <span className="text-xs text-muted-foreground">+{value.length - 12} more</span>}
+        {!preserveEmpty && value.length > 12 && (
+          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setShowPrimitives((current) => !current)}>
+            {showPrimitives ? t("Show less") : t("Show {count} more", { count: value.length - 12 })}
+          </button>
+        )}
       </div>
     )
   }

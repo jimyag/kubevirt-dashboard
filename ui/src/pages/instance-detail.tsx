@@ -38,7 +38,7 @@ import { VmMonitoring } from "@/components/monitoring";
 import { eventsUrl } from "@/lib/events";
 import { ManifestPanel } from "@/components/manifest";
 import { InstanceSecurityGroupsDialog } from "@/pages/security-groups";
-import { t } from "@/lib/i18n";
+import { resourceLabel, t } from "@/lib/i18n";
 import { usePolling } from "@/lib/polling";
 import { CopyableText, StatusBadge, VmActionDialog } from "@/components/vm-dialogs";
 import { apiFetch, isVm, vmPodSelectors, vmRuntimeSpec, type DV, type VM, type VMI } from "@/lib/vm-pages";
@@ -133,7 +133,7 @@ export function VMDetailContent() {
   return (
     <div className={cn("space-y-6", activeTab === "console" || activeTab === "vnc" ? "max-w-full" : "")}>
       <PageHeader
-        breadcrumbs={[{ label: t("Instances"), to: "/kubevirt/virtualization/virtual-machines" }, { label: vm.metadata.namespace }, { label: vm.metadata.name }]}
+        breadcrumbs={[{ label: resourceLabel("Virtual Machines"), to: "/kubevirt/virtualization/virtual-machines" }, { label: vm.metadata.namespace }, { label: vm.metadata.name }]}
         title={vm.metadata.name}
         badge={<StatusDot status={vm.status?.printableStatus} />}
         subtitle={[vm.metadata.namespace, vmi?.status.interfaces?.[0]?.ipAddress, vmi?.status.nodeName].filter(Boolean).join(" / ")}

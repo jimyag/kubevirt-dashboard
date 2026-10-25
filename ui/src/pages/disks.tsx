@@ -17,7 +17,7 @@ import { relativeTime, replaceMap, useAsync, useNamespaces } from "@/lib/kube";
 import { EventList } from "@/components/events";
 import { eventsUrl } from "@/lib/events";
 import { ManifestPanel } from "@/components/manifest";
-import { t } from "@/lib/i18n";
+import { resourceLabel, t } from "@/lib/i18n";
 import { usePolling } from "@/lib/polling";
 import { VmActionDialog } from "@/components/vm-dialogs";
 import { apiFetch, diskSize, vmRuntimeSpec, type DiskPVC, type DV, type VM, type VMI } from "@/lib/vm-pages";
@@ -75,7 +75,7 @@ export function DVList() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t("Disks")}
+        title={resourceLabel("DataVolumes")}
         badge={!loading && <span className="text-sm text-muted-foreground tabular-nums">{dvs.length}</span>}
         subtitle={t("CDI DataVolumes")}
         actions={<ResourceCreateDialog config={dvCreateConfig} onCreated={loadDvs} defaultNamespace={scope === "all" ? "default" : scope} />}
@@ -149,7 +149,7 @@ export function DVDetailContent() {
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: t("Disks"), to: "/kubevirt/cdi/data-volumes" }, { label: dv.metadata.namespace }, { label: dv.metadata.name }]}
+        breadcrumbs={[{ label: resourceLabel("DataVolumes"), to: "/kubevirt/cdi/data-volumes" }, { label: dv.metadata.namespace }, { label: dv.metadata.name }]}
         title={dv.metadata.name}
         badge={<StatusDot status={dv.status?.phase} />}
         subtitle={`${displaySize} · ${dvStorageClass(dv)}`}

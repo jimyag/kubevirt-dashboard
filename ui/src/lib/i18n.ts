@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-import { zh } from "./locales/zh"
+import { resourceKindLabels, resourceLabels, zh } from "./locales/zh"
 
 /**
  * Minimal i18n: UI strings are written in English and used as keys, so a missing translation
@@ -50,6 +50,16 @@ export function t(text: string | undefined, vars?: Record<string, string | numbe
   if (text === undefined) return undefined
   const template = dictionaries[current][text] ?? text
   return vars ? template.replace(/\{(\w+)\}/g, (match, key: string) => (key in vars ? String(vars[key] ?? "") : match)) : template
+}
+
+/** Resource titles add the Kubernetes Kind in Chinese while prose keeps its shorter translation. */
+export function resourceLabel(title: string): string {
+  return current === "zh" ? resourceLabels[title] ?? resourceKindLabels[title] ?? t(title) : title
+}
+
+/** Dynamic CRD pages only have a Kind, so fall back to that Kind when no localized label exists. */
+export function resourceKindLabel(kind: string): string {
+  return current === "zh" ? resourceKindLabels[kind] ?? kind : kind
 }
 
 export const setLocale = (locale: Locale) => {

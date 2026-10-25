@@ -100,13 +100,16 @@ export const formatGi = (gi: number) => gi >= 1024 ? `${(gi / 1024).toFixed(1)} 
 
 type DiscoveryData = {
   apiVersions: string[]
-  apiResources: Array<{ name: string; apiVersion: string }>
+  apiResources: DiscoveryResource[]
 }
+
+export type DiscoveryResource = { name: string; apiVersion: string; kind: string; namespaced: boolean; verbs?: string[] }
 
 export type Discovery = {
   loaded: boolean
   hasGroupVersion: (groupVersion: string) => boolean
   hasResource: (groupVersion: string, resource: string) => boolean
+  resources: DiscoveryResource[]
 }
 
 const discoveryRequests = new Map<string, Promise<DiscoveryData>>()
@@ -145,6 +148,7 @@ export function useDiscovery(): Discovery {
     loaded: data !== null,
     hasGroupVersion: (groupVersion) => versions.has(groupVersion),
     hasResource: (groupVersion, resource) => resources.has(`${groupVersion}/${resource}`),
+    resources: data?.apiResources || [],
   }
 }
 

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import { AppSidebar } from "./components/app-sidebar";
 import { ResourceDetail, ResourceEvents, ResourceList, ResourceManifest, type ResourceConfig } from "./components/resource-management";
@@ -12,7 +12,7 @@ import { EventsPage } from "./pages/events";
 import { SecurityGroupDetailPage, SecurityGroupListPage } from "./pages/security-groups";
 import { CatalogPage, SettingsPage } from "./pages/settings";
 import { MonitoringSettingsPage } from "./pages/monitoring-settings";
-import { HelmReleaseDetailPage, HelmReleaseListPage } from "./pages/helm";
+import { ApplicationCatalogPage, ApplicationRepositoriesPage, HelmReleaseDetailPage, HelmReleaseListPage } from "./pages/helm";
 import { SubnetDetailPage, SubnetListPage, VpcDetailPage, VpcListPage } from "./pages/vpc";
 import { DnatRulePage, ElasticIpPage, FloatingIpPage, NatGatewayDetailPage, NatGatewayPage, SnatRulePage } from "./pages/nat";
 import { ReservedIpListPage } from "./pages/reserved-ips";
@@ -31,6 +31,15 @@ function resourceRoutes(config: ResourceConfig) {
     <Route key={`${config.path}-manifest`} path={`${config.path}/:namespace/:name/manifest`} element={<ResourceManifest config={config} />} />,
     <Route key={`${config.path}-events`} path={`${config.path}/:namespace/:name/events`} element={<ResourceEvents config={config} />} />,
   ];
+}
+
+function QueryRedirect({ from, to, scope }: { from: string; to: string; scope?: string }) {
+  const location = useLocation();
+  const suffix = location.pathname.startsWith(from) ? location.pathname.slice(from.length) : "";
+  const params = new URLSearchParams(location.search);
+  if (scope) params.set("scope", scope);
+  const search = params.toString();
+  return <Navigate to={`${to}${suffix}${search ? `?${search}` : ""}`} replace />;
 }
 
 function App() {
@@ -56,8 +65,14 @@ function App() {
               <Route path="/events" element={<EventsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/monitoring" element={<MonitoringSettingsPage />} />
-              <Route path="/catalog/helm" element={<HelmReleaseListPage />} />
-              <Route path="/catalog/helm/:namespace/:name" element={<HelmReleaseDetailPage />} />
+              <Route path="/applications/catalog" element={<ApplicationCatalogPage />} />
+              <Route path="/applications/installed" element={<HelmReleaseListPage />} />
+              <Route path="/applications/installed/:namespace/:name" element={<HelmReleaseDetailPage />} />
+              <Route path="/applications/repositories" element={<ApplicationRepositoriesPage />} />
+              <Route path="/catalog/helm/*" element={<QueryRedirect from="/catalog/helm" to="/applications/installed" />} />
+              <Route path="/kubevirt/operations/autoscaling/*" element={<QueryRedirect from="/kubevirt/operations/autoscaling" to="/kubernetes/workloads/autoscaling" />} />
+              <Route path="/kubevirt/templates/cluster-instance-types/*" element={<QueryRedirect from="/kubevirt/templates/cluster-instance-types" to="/kubevirt/templates/instance-types" scope="cluster" />} />
+              <Route path="/kubevirt/templates/cluster-preferences/*" element={<QueryRedirect from="/kubevirt/templates/cluster-preferences" to="/kubevirt/templates/preferences" scope="cluster" />} />
               <Route path="/vpc/vpcs" element={<VpcListPage />} />
               <Route path="/vpc/vpcs/:name" element={<VpcDetailPage />} />
               <Route path="/vpc/subnets" element={<SubnetListPage />} />

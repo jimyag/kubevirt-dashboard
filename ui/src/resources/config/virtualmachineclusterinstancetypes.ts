@@ -3,8 +3,8 @@ import * as shared from "./shared";
 
 export const virtualmachineclusterinstancetypesConfig: ResourceConfig = {
     id: "virtualmachineclusterinstancetypes",
-    path: "/kubevirt/templates/cluster-instance-types",
-    title: "Cluster Instance Types",
+    path: "/kubevirt/templates/instance-types",
+    title: "Instance Types",
     subtitle: "Manage reusable KubeVirt compute shapes",
     listPath: "/apis/instancetype.kubevirt.io/v1beta1/virtualmachineclusterinstancetypes",
     namespaced: false,

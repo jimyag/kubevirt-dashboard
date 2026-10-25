@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import * as YAML from "js-yaml"
 import {
   AlertTriangle,
@@ -12,7 +12,7 @@ import {
 import { cn } from "@/lib/utils"
 import { relativeTime, replaceMap, useAsync } from "@/lib/kube"
 import { resourceTable, type ResourceListData } from "@/lib/resource-table"
-import { Combobox, ConfirmDialog, EmptyState, ErrorNote, FilterInput, LoadingState, PageHeader, Pager, StatusDot, Toolbar } from "@/components/console"
+import { Combobox, ConfirmDialog, EmptyState, ErrorNote, FilterInput, LoadingState, PageHeader, Pager, StatusDot, TabBar, Toolbar } from "@/components/console"
 import { namespaceScope, useFilteredRows, usePaged, type FilterField } from "@/lib/filter"
 import {
   DropdownMenu,
@@ -49,7 +49,7 @@ import { RelatedPodsCard, type PodSummary } from "@/components/pod-access"
 import { EventList } from "@/components/events"
 import { eventsUrl } from "@/lib/events"
 import { ManifestPanel } from "@/components/manifest"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 import { ResourceSpecificOverview, StructuredResourceOverview } from "@/components/resource-overviews"
 import { MetadataSection } from "@/components/detail-parts"
 import { asRecord, asRecordList, compactValue, getValue, hiddenAnnotations, isPrimitiveDetailValue, isRecordValue } from "@/lib/detail-values"
@@ -61,6 +61,7 @@ import { useCrdSchema } from "@/lib/crd-discovery"
 import type { StructuralSchema } from "@/lib/crd-schema"
 import { SchemaResourceEditor } from "@/components/schema-resource-editor"
 import { conditionReadiness } from "@/lib/resource-status"
+import { resolveResourceScope, withResourceScope } from "@/lib/resource-scope"
 
 export type KubeResource = {
   apiVersion?: string
@@ -142,6 +143,8 @@ export type ResourceConfig = {
     label: string
     value: (resource: KubeResource) => string
   }>
+  /** Related resource lists shown as scopes of the same page, selected by the `scope` query parameter. */
+  scopeVariants?: Array<{ id: string; label: string; config: ResourceConfig }>
 }
 
 const getContext = () => localStorage.getItem("kube-context") || ""
@@ -222,12 +225,13 @@ const createPathUrl = (config: ResourceConfig, basePath: string, resource: KubeR
     ? `${basePath}/namespaces/${resource.metadata.namespace}/${config.id}`
     : `${basePath}/${config.id}`
 
-function DetailTabs({ config, namespace, name, active }: { config: ResourceConfig; namespace?: string; name?: string; active: "overview" | "events" | "manifest" }) {
+function DetailTabs({ config, namespace, name, scope, active }: { config: ResourceConfig; namespace?: string; name?: string; scope?: string; active: "overview" | "events" | "manifest" }) {
   const scopedNamespace = namespace || "_cluster"
+  const link = (path: string) => scope ? withResourceScope(path, scope) : path
   const tabs = [
-    { id: "overview", label: t("Overview"), to: `${config.path}/${scopedNamespace}/${name}` },
-    { id: "events", label: t("Events"), to: `${config.path}/${scopedNamespace}/${name}/events` },
-    { id: "manifest", label: t("Manifest"), to: `${config.path}/${scopedNamespace}/${name}/manifest` },
+    { id: "overview", label: t("Overview"), to: link(`${config.path}/${scopedNamespace}/${name}`) },
+    { id: "events", label: t("Events"), to: link(`${config.path}/${scopedNamespace}/${name}/events`) },
+    { id: "manifest", label: t("Manifest"), to: link(`${config.path}/${scopedNamespace}/${name}/manifest`) },
   ] as const
 
   return (
@@ -345,6 +349,19 @@ const conditionsStatusPath = (path?: string[]) => Boolean(path && path[0] === "s
 const resourceStatusText = (resource: KubeResource, config: ResourceConfig) => {
   if (resource.metadata.deletionTimestamp) return "Terminating"
   if (config.kind === "CertificateSigningRequest") return certificateRequestStatus(asRecord(resource.status))
+  if (config.kind === "CronJob") return asRecord(resource.spec).suspend === true ? "Suspended" : "Active"
+  if (config.kind === "HorizontalPodAutoscaler") {
+    const conditions = asRecordList(asRecord(resource.status).conditions)
+    const blocking = conditions.some((condition) =>
+      ["AbleToScale", "ScalingActive"].includes(String(condition.type))
+      && String(condition.status).toLowerCase() === "false"
+    )
+    if (blocking) return "NotReady"
+    const active = ["AbleToScale", "ScalingActive"].every((type) =>
+      conditions.some((condition) => condition.type === type && String(condition.status).toLowerCase() === "true")
+    )
+    return active ? "Ready" : "Pending"
+  }
   // Condition-based paths (often conditions[0].type) would name a condition even when it is False.
   const status = conditionsStatusPath(config.statusPath) ? readinessText(resource) : getValue(resource, config.statusPath)
   if (typeof status === "boolean" && ["ready", "readyToUse"].includes(config.statusPath?.[1] || "")) return status ? "Ready" : "NotReady"
@@ -1255,16 +1272,22 @@ function ResourceActionDialog({
   )
 }
 
+function useResourceVariant(baseConfig: ResourceConfig, namespace?: string, list = false) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const variant = resolveResourceScope(baseConfig.scopeVariants, searchParams.get("scope"), namespace, list)
+  return { variant, selectedConfig: variant?.config ?? baseConfig, searchParams, setSearchParams }
+}
+
 export function ResourceList({ config: baseConfig }: { config: ResourceConfig }) {
-  const discoveredSchema = useCrdSchema(baseConfig)
-  const config = useMemo(() => discoveredSchema.data ? { ...baseConfig, ...discoveredSchema.data } : baseConfig, [baseConfig, discoveredSchema.data])
+  const { variant, selectedConfig, searchParams, setSearchParams } = useResourceVariant(baseConfig, undefined, true)
+  const discoveredSchema = useCrdSchema(selectedConfig)
+  const config = useMemo(() => discoveredSchema.data ? { ...selectedConfig, ...discoveredSchema.data } : selectedConfig, [selectedConfig, discoveredSchema.data])
   const schema = config.schema || discoveredSchema.schema
   const [search, setSearch] = useState("")
   const [namespaces, setNamespaces] = useState<string[]>([])
   const [namespaceFilter, setNamespaceFilter] = useState("default")
   const ns = useMemo(() => namespaceScope(namespaceFilter, namespaces), [namespaceFilter, namespaces])
   const scope = ns.scope
-  const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<KubeResource | null>(null)
 
   useEffect(() => {
@@ -1310,26 +1333,19 @@ export function ResourceList({ config: baseConfig }: { config: ResourceConfig })
   const items = useMemo(() => error ? [] : data.items, [data, error])
   const columns = data.columns ?? config.extraColumns
   const statusFor = useMemo(() => data.status ?? ((resource: KubeResource) => resourceStatusText(resource, config)), [data.status, config])
-  const [selectionRows, setSelectionRows] = useState(items)
-  if (items !== selectionRows) {
-    setSelectionRows(items)
-    setSelected({})
-  }
-
   const fields = useMemo(() => resourceFilterFields(config, columns, statusFor), [config, columns, statusFor])
   const inScope = useMemo(() => (config.namespaced ? items.filter((item) => ns.match(item.metadata.namespace)) : items), [items, ns, config.namespaced])
   const filtered = useFilteredRows(inScope, fields, search)
   const { rows: pageRows, ...paging } = usePaged(filtered)
 
   const filtering = Boolean(search.trim()) || (config.namespaced && scope === "all" && Boolean(namespaceFilter.trim()))
-  const emptyTitle = filtering ? t("No matching resources") : t("No {name} found", { name: t(config.title) })
+  const emptyTitle = filtering ? t("No matching resources") : t("No {name} found", { name: resourceLabel(config.title) })
   const emptyDescription = filtering
     ? undefined
     : config.namespaced && scope !== "all"
-      ? `Namespace ${scope} has none.`
+      ? t("Namespace {namespace} has none.", { namespace: scope })
       : undefined
-  const tableColumnCount = 5 + (config.namespaced ? 1 : 0) + (columns?.length || 0)
-  const selectedCount = Object.values(selected).filter(Boolean).length
+  const tableColumnCount = 4 + (config.namespaced ? 1 : 0) + (columns?.length || 0)
 
   const remove = async (item: KubeResource) => {
     let lastError = ""
@@ -1348,11 +1364,23 @@ export function ResourceList({ config: baseConfig }: { config: ResourceConfig })
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t(config.title)}
+        title={resourceLabel(config.title)}
         badge={!loading && <span className="text-sm text-muted-foreground tabular-nums">{items.length}</span>}
         subtitle={<span className="font-mono text-xs">{config.kind} · {apiVersionFromListPath(config.listPath)}</span>}
         actions={canCreateResource(config) && (schema ? <SchemaResourceEditor config={config} schema={schema} onSaved={(created) => { if (config.namespaced && scope !== "all" && created.metadata.namespace) setNamespaceFilter(created.metadata.namespace); load() }} defaultNamespace={scope === "all" ? "default" : scope} /> : !discoveredSchema.loading && <ResourceCreateDialog config={config} onCreated={load} defaultNamespace={scope === "all" ? "default" : scope} />)}
       />
+
+      {baseConfig.scopeVariants && (
+        <TabBar
+          tabs={baseConfig.scopeVariants.map((item) => ({ id: item.id, label: t(item.label) }))}
+          value={variant?.id || ""}
+          onChange={(id) => {
+            const next = new URLSearchParams(searchParams)
+            next.set("scope", id)
+            setSearchParams(next, { replace: true })
+          }}
+        />
+      )}
 
       <Toolbar
         right={<FilterInput value={search} onChange={setSearch} fields={fields} rows={inScope} />}
@@ -1363,7 +1391,6 @@ export function ResourceList({ config: baseConfig }: { config: ResourceConfig })
         {config.namespaced && (
           <Combobox value={namespaceFilter} onChange={setNamespaceFilter} options={namespaces} placeholder={t("All namespaces")} aria-label={t("Namespace")} />
         )}
-        {selectedCount > 0 && <span className="text-sm text-muted-foreground">{selectedCount} selected</span>}
       </Toolbar>
 
       {error && <ErrorNote>{t(error)}</ErrorNote>}
@@ -1373,24 +1400,6 @@ export function ResourceList({ config: baseConfig }: { config: ResourceConfig })
           <Table className="min-w-[760px]">
             <TableHeader className="bg-muted/60">
               <TableRow>
-                <TableHead className="w-10">
-                  <input
-                    type="checkbox"
-                    className="size-4 rounded border-border accent-primary"
-                    checked={filtered.length > 0 && filtered.every((item) => selected[item.metadata.uid || item.metadata.name])}
-                    onChange={(event) => {
-                      const checked = event.target.checked
-                      setSelected((current) => {
-                        const next = { ...current }
-                        filtered.forEach((item) => {
-                          next[item.metadata.uid || item.metadata.name] = checked
-                        })
-                        return next
-                      })
-                    }}
-                    aria-label={t("Select all rows")}
-                  />
-                </TableHead>
                 <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Name")}</TableHead>
                 {config.namespaced && <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Namespace")}</TableHead>}
                 <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">{t("Status")}</TableHead>
@@ -1414,18 +1423,9 @@ export function ResourceList({ config: baseConfig }: { config: ResourceConfig })
                 const rowKey = item.metadata.uid || `${item.metadata.namespace || "_cluster"}-${item.metadata.name}`
                 return (
                 <TableRow key={rowKey} className="hover:bg-muted/50">
-                  <TableCell className="h-10 px-3 py-1.5">
-                    <input
-                      type="checkbox"
-                      className="size-4 rounded border-border accent-primary"
-                      checked={Boolean(selected[rowKey])}
-                      onChange={(event) => setSelected((current) => ({ ...current, [rowKey]: event.target.checked }))}
-                      aria-label={t("Select {v0}", { v0: item.metadata.name })}
-                    />
-                  </TableCell>
                   <TableCell className="h-9 px-3 py-1.5">
                     <Link
-                      to={`${config.path}/${item.metadata.namespace || "_cluster"}/${item.metadata.name}`}
+                      to={variant ? withResourceScope(`${config.path}/${item.metadata.namespace || "_cluster"}/${item.metadata.name}`, variant.id) : `${config.path}/${item.metadata.namespace || "_cluster"}/${item.metadata.name}`}
                       className="font-medium hover:text-primary transition-colors"
                     >
                       {item.metadata.name}
@@ -1477,10 +1477,11 @@ export function ResourceList({ config: baseConfig }: { config: ResourceConfig })
 
 /** Long annotation values (JSON, certificates) are clamped; JSON is pretty-printed when expanded. */
 export function ResourceDetail({ config: baseConfig }: { config: ResourceConfig }) {
-  const discoveredSchema = useCrdSchema(baseConfig)
-  const config = useMemo(() => discoveredSchema.data ? { ...baseConfig, ...discoveredSchema.data } : baseConfig, [baseConfig, discoveredSchema.data])
-  const schema = config.schema || discoveredSchema.schema
   const { namespace, name } = useParams()
+  const { variant, selectedConfig } = useResourceVariant(baseConfig, namespace)
+  const discoveredSchema = useCrdSchema(selectedConfig)
+  const config = useMemo(() => discoveredSchema.data ? { ...selectedConfig, ...discoveredSchema.data } : selectedConfig, [selectedConfig, discoveredSchema.data])
+  const schema = config.schema || discoveredSchema.schema
   const navigate = useNavigate()
   const [resource, setResource] = useState<KubeResource | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1535,7 +1536,7 @@ export function ResourceDetail({ config: baseConfig }: { config: ResourceConfig 
   const annotations = Object.entries(resource.metadata.annotations || {}).filter(([key]) => !hiddenAnnotations.has(key))
   const reload = (navigateTo?: string) => {
     if (navigateTo) {
-      navigate(navigateTo)
+      navigate(variant ? withResourceScope(navigateTo, variant.id) : navigateTo)
       return
     }
     setLoading(true)
@@ -1573,7 +1574,7 @@ export function ResourceDetail({ config: baseConfig }: { config: ResourceConfig 
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: t(config.title), to: config.path }, ...(resource.metadata.namespace ? [{ label: resource.metadata.namespace }] : []), { label: resource.metadata.name }]}
+        breadcrumbs={[{ label: resourceLabel(config.title), to: variant ? withResourceScope(config.path, variant.id) : config.path }, ...(resource.metadata.namespace ? [{ label: resource.metadata.namespace }] : []), { label: resource.metadata.name }]}
         title={resource.metadata.name}
         badge={<ResourceStatus resource={resource} config={config} />}
         subtitle={
@@ -1618,7 +1619,7 @@ export function ResourceDetail({ config: baseConfig }: { config: ResourceConfig 
         }
       />
 
-      <DetailTabs config={config} namespace={namespace} name={name} active="overview" />
+      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id} active="overview" />
 
       {schema ? <StructuredResourceOverview resource={resource} sections={[]} preserveEmpty /> : <ResourceSpecificOverview resource={resource} config={config} sections={sections} />}
 
@@ -1638,24 +1639,26 @@ export function ResourceDetail({ config: baseConfig }: { config: ResourceConfig 
   )
 }
 
-export function ResourceEvents({ config }: { config: ResourceConfig }) {
+export function ResourceEvents({ config: baseConfig }: { config: ResourceConfig }) {
   const { namespace, name } = useParams()
+  const { variant, selectedConfig: config } = useResourceVariant(baseConfig, namespace)
   const scopedNamespace = namespace && namespace !== "_cluster" ? namespace : undefined
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: t(config.title), to: config.path }, ...(scopedNamespace ? [{ label: scopedNamespace }] : []), { label: name || "" }]}
+        breadcrumbs={[{ label: resourceLabel(config.title), to: variant ? withResourceScope(config.path, variant.id) : config.path }, ...(scopedNamespace ? [{ label: scopedNamespace }] : []), { label: name || "" }]}
         title={name}
         subtitle={<span className="font-mono text-xs">{config.kind}</span>}
       />
-      <DetailTabs config={config} namespace={namespace} name={name} active="events" />
+      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id} active="events" />
       <EventList url={eventsUrl({ namespace: scopedNamespace, kind: config.kind, name })} showObject={false} />
     </div>
   )
 }
 
-export function ResourceManifest({ config }: { config: ResourceConfig }) {
+export function ResourceManifest({ config: baseConfig }: { config: ResourceConfig }) {
   const { namespace, name } = useParams()
+  const { variant, selectedConfig: config } = useResourceVariant(baseConfig, namespace)
   const { data, loading, error, reload: load } = useAsync(async () => {
     let lastError = ""
     for (const path of await servedPaths(config)) {
@@ -1685,7 +1688,7 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        breadcrumbs={[{ label: t(config.title), to: config.path }, ...(namespace && namespace !== "_cluster" ? [{ label: namespace }] : []), { label: name || "" }]}
+        breadcrumbs={[{ label: resourceLabel(config.title), to: variant ? withResourceScope(config.path, variant.id) : config.path }, ...(namespace && namespace !== "_cluster" ? [{ label: namespace }] : []), { label: name || "" }]}
         title={name}
         subtitle={<span className="font-mono text-xs">{config.kind}</span>}
         actions={
@@ -1695,7 +1698,7 @@ export function ResourceManifest({ config }: { config: ResourceConfig }) {
         }
       />
 
-      <DetailTabs config={config} namespace={namespace} name={name} active="manifest" />
+      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id} active="manifest" />
 
       {error ? (
         <ErrorNote>{error}</ErrorNote>

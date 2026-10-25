@@ -30,7 +30,7 @@ import { ManifestPanel } from "@/components/manifest"
 import { useFilteredRows, type FilterField } from "@/lib/filter"
 import { isDnsLabel } from "@/lib/validate"
 import { OVN_API, natEngineLabel, natKinds, natManifest, natReady, type NatEngine, type NatKind, type NatRefs, type NatTab } from "@/lib/nat"
-import { t } from "@/lib/i18n"
+import { resourceLabel, t } from "@/lib/i18n"
 
 /** Engines whose CRDs the cluster serves; iptables first since custom VPCs use it. */
 function useNatEngines(): NatEngine[] {
@@ -285,11 +285,11 @@ function NatKindPage({ title, tab, engines: allowed }: { title: string; tab: Nat
   )
 }
 
-export const ElasticIpPage = () => <NatKindPage title={t("Elastic IPs")} tab="eips" />
-export const NatGatewayPage = () => <NatKindPage title={t("NAT Gateways")} tab="gateways" engines={["iptables"]} />
-export const SnatRulePage = () => <NatKindPage title={t("SNAT Rules")} tab="snat" />
-export const DnatRulePage = () => <NatKindPage title={t("DNAT Rules")} tab="dnat" />
-export const FloatingIpPage = () => <NatKindPage title={t("Floating IPs")} tab="fip" />
+export const ElasticIpPage = () => <NatKindPage title={resourceLabel("Elastic IPs")} tab="eips" />
+export const NatGatewayPage = () => <NatKindPage title={resourceLabel("NAT Gateways")} tab="gateways" engines={["iptables"]} />
+export const SnatRulePage = () => <NatKindPage title={resourceLabel("SNAT Rules")} tab="snat" />
+export const DnatRulePage = () => <NatKindPage title={resourceLabel("DNAT Rules")} tab="dnat" />
+export const FloatingIpPage = () => <NatKindPage title={resourceLabel("Floating IPs")} tab="fip" />
 
 type GatewayTab = "eips" | "snat" | "dnat" | "fip" | "manifest"
 
@@ -351,7 +351,7 @@ export function NatGatewayDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: t("NAT Gateways"), to: "/vpc/nat-gateways" }, { label: name }]}
+        breadcrumbs={[{ label: resourceLabel("NAT Gateways"), to: "/vpc/nat-gateways" }, { label: name }]}
         title={name}
         subtitle={<span className="font-mono text-xs">VpcNatGateway · kubeovn.io/v1</span>}
         actions={

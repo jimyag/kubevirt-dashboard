@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom"
 import { Check, ChevronLeft, ChevronRight, Inbox, Search, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { findActiveNav, toneClasses } from "@/lib/navigation"
+import { findActiveNav, toneClasses, useNavSections } from "@/lib/navigation"
 import { tokenValue, useDistinctValues, usePaged, type FilterField, type Paging } from "@/lib/filter"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,7 +39,9 @@ export function PageHeader({
   actions?: ReactNode
   badge?: ReactNode
 }) {
-  const active = findActiveNav(useLocation().pathname)
+  const pathname = useLocation().pathname
+  const sections = useNavSections()
+  const active = findActiveNav(pathname, sections)
   const tone = active ? toneClasses[active.section.tone] : null
   const Icon = active?.item.icon
   return (

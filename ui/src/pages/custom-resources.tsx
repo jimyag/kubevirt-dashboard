@@ -6,7 +6,7 @@ import { RefreshCw } from "lucide-react"
 import { ResourceDetail, ResourceEvents, ResourceList, ResourceManifest, type ResourceConfig } from "@/components/resource-management"
 import { requestJson, useAsync } from "@/lib/kube"
 import type { CrdDefinition } from "@/lib/crd-discovery"
-import { t } from "@/lib/i18n"
+import { resourceKindLabel, t } from "@/lib/i18n"
 import { useFilteredRows, usePaged, type FilterField } from "@/lib/filter"
 
 type DiscoveredResource = { name: string; apiVersion: string; kind: string; namespaced: boolean; verbs: string[] }
@@ -44,7 +44,7 @@ export function CustomResourceCatalog({ envoy = false }: { envoy?: boolean }) {
     <FilterInput value={search} onChange={setSearch} fields={catalogFields} rows={data} placeholder={t("Search resources...")} />
     {loading ? <LoadingState /> : error ? <ErrorNote>{error}</ErrorNote> : <div className="divide-y rounded-lg border bg-card">
       {pageRows.map((item) => <Link className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 hover:bg-muted/40" key={`${item.apiVersion}/${item.name}`} to={`/catalog/crds/${item.apiVersion.split("/")[0]}/${item.name}`}>
-        <div><div className="text-sm font-medium">{item.kind}</div><div className="break-all font-mono text-xs text-muted-foreground">{item.apiVersion.split("/")[0]} · {item.name}</div></div><span className="font-mono text-xs text-muted-foreground">{item.versions.join(" · ")}</span>
+        <div><div className="text-sm font-medium">{resourceKindLabel(item.kind)}</div><div className="break-all font-mono text-xs text-muted-foreground">{item.apiVersion.split("/")[0]} · {item.name}</div></div><span className="font-mono text-xs text-muted-foreground">{item.versions.join(" · ")}</span>
       </Link>)}
       {!rows.length && <p className="p-6 text-sm text-muted-foreground">{t("No resources found")}</p>}
       <Pager {...paging} />
