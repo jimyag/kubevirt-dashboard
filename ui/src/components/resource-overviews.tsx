@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusDot, UsageBar } from "@/components/console"
 import { listItems, relativeTime, str } from "@/lib/kube"
 import { fetchNodeUsage, formatBytes, formatStorageSize, parseBytes, parseCpuCores } from "@/lib/metrics"
+import { networkPolicyDirectionApplies } from "@/lib/network-policy"
 import { conditionReadiness } from "@/lib/resource-status"
 import { t } from "@/lib/i18n"
 import {
@@ -273,8 +274,8 @@ function NetworkDetailOverview({ resource }: { resource: KubeResource }) {
   const selector = spec.selector || asRecord(spec.podSelector).matchLabels || spec.podSelector
   if (resource.kind === "NetworkPolicy") {
     const directions = [
-      { key: "ingress", title: t("Ingress rules") },
-      { key: "egress", title: t("Egress rules") },
+      { key: "ingress", title: t("Ingress rules"), applies: networkPolicyDirectionApplies(spec, "ingress") },
+      { key: "egress", title: t("Egress rules"), applies: networkPolicyDirectionApplies(spec, "egress") },
     ]
     return (
       <div className="space-y-4">
@@ -283,13 +284,13 @@ function NetworkDetailOverview({ resource }: { resource: KubeResource }) {
           <SummaryCard label={t("Selector")} value={selector} />
         </SummaryRow>
         <div className="grid gap-4 xl:grid-cols-2">
-          {directions.map(({ key, title }) => {
+          {directions.map(({ key, title, applies }) => {
             const rules = spec[key]
             return (
               <SectionCard key={key} title={title}>
-                {rules === undefined
+                {rules === undefined && !applies
                   ? <p className="text-sm text-muted-foreground">{t("Not specified.")}</p>
-                  : Array.isArray(rules) && rules.length === 0
+                  : rules === undefined || (Array.isArray(rules) && rules.length === 0)
                     ? <p className="text-sm text-muted-foreground">{t("Selected with no rules: all matching traffic is denied.")}</p>
                     : <DetailValue value={rules} />}
               </SectionCard>

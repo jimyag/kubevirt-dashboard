@@ -118,9 +118,23 @@ test("resource label falls back to a known Kind for dynamic pages", () => {
     expect(resourceLabel("EnvoyProxy")).toBe("EnvoyProxy")
     expect(resourceKindLabel("EnvoyProxy")).toBe("EnvoyProxy")
     expect(resourceLabel("VirtualMachine")).toBe("虚拟机（VM）")
+    expect(resourceKindLabel("Secret")).toBe("Secret")
+    expect(resourceKindLabel("IPPool")).toBe("IPPool")
+    expect(resourceLabel("Secrets")).toBe("保密字典（Secret）")
   } finally {
     setLocale("en")
   }
+})
+
+test("navigation prefers the exact page path when prefixes tie", () => {
+  const sections = buildNavSections(profile, discovery([
+    ...networkResources,
+    { name: "virtualmachineinstances", apiVersion: "kubevirt.io/v1", kind: "VirtualMachineInstance", namespaced: true },
+    { name: "ciliumnetworkpolicies", apiVersion: "cilium.io/v2", kind: "CiliumNetworkPolicy", namespaced: true },
+  ]))
+
+  expect(findActiveNav("/kubevirt/virtualization/virtual-machine-instances", sections)?.item.name).toBe("Running instances")
+  expect(findActiveNav("/networks/cilium/network-policies", sections)?.item.name).toBe("Cilium Network Policies")
 })
 
 test("navigation groups keep ordinary translations instead of resource labels", () => {

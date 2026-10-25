@@ -65,7 +65,7 @@ function Breadcrumbs() {
   return (
     <nav className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
       {crumbs.map((crumb, index) => (
-        <span key={crumb} className="flex min-w-0 items-center gap-1.5">
+        <span key={`${crumb}-${index}`} className="flex min-w-0 items-center gap-1.5">
           {index > 0 && <ChevronRight className="size-3.5 text-muted-foreground" />}
           {index === 0 && <span className={`size-2 rounded-sm ${toneClasses[active.section.tone].dot}`} />}
           {index === crumbs.length - 1 ? (

@@ -53,9 +53,11 @@ function NavNestedGroup({ item, active }: { item: NavItem; active?: string }) {
     <Collapsible asChild open={open} onOpenChange={setUserOpen} className="group/nested">
       <SidebarMenuSubItem>
         <CollapsibleTrigger asChild>
-          <SidebarMenuSubButton isActive={containsActive && !open} className="w-full" title={navItemLabel(item)}>
-            <span>{navItemLabel(item)}</span>
-            <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-data-[state=open]/nested:rotate-90" />
+          <SidebarMenuSubButton asChild isActive={containsActive && !open}>
+            <button type="button" className="w-full" title={navItemLabel(item)}>
+              <span>{navItemLabel(item)}</span>
+              <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-data-[state=open]/nested:rotate-90" />
+            </button>
           </SidebarMenuSubButton>
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -80,9 +82,11 @@ function NavSubGroup({ item, active }: { item: NavItem; active?: string }) {
     <Collapsible asChild open={open} onOpenChange={setUserOpen} className="group/subcollapsible">
       <SidebarMenuSubItem>
         <CollapsibleTrigger asChild>
-          <SidebarMenuSubButton isActive={containsActive && !open} className="w-full" title={navItemLabel(item)}>
-            <span>{navItemLabel(item)}</span>
-            <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-data-[state=open]/subcollapsible:rotate-90" />
+          <SidebarMenuSubButton asChild isActive={containsActive && !open}>
+            <button type="button" className="w-full" title={navItemLabel(item)}>
+              <span>{navItemLabel(item)}</span>
+              <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-data-[state=open]/subcollapsible:rotate-90" />
+            </button>
           </SidebarMenuSubButton>
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -154,7 +158,7 @@ function NavGroup({ item, active, iconClass }: { item: NavItem; active?: string;
 export function AppSidebar() {
   const location = useLocation()
   const sections = useNavSections()
-  const active = findActiveNav(location.pathname)?.item.path
+  const active = findActiveNav(location.pathname, sections)?.item.path
 
   return (
     <Sidebar collapsible="icon">

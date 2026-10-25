@@ -45,6 +45,15 @@ func TestRepositoryNamesCannotEscapeCache(t *testing.T) {
 	}
 }
 
+func TestRepositoryURLCredentialsRequireSameURL(t *testing.T) {
+	if !sameRepositoryURL("https://charts.example/stable/", "https://charts.example/stable") {
+		t.Fatal("a trailing slash should not make the same repository URL different")
+	}
+	if sameRepositoryURL("https://charts.example/stable", "https://attacker.example/stable") {
+		t.Fatal("a different repository URL must not reuse saved credentials")
+	}
+}
+
 func TestCachedHTTPRepositoryDoesNotFetchIndex(t *testing.T) {
 	settings, err := newSettingsForRoot(t.TempDir(), "https://cluster.example")
 	if err != nil {

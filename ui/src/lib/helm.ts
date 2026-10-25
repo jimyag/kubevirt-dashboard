@@ -54,7 +54,7 @@ const json = (method: string, body: unknown): RequestInit => ({ method, headers:
 const releasePath = (namespace: string, name: string) => `${HELM}/releases/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
 
 export const helmReleasePath = (release: Pick<HelmRelease, "namespace" | "name">, tab?: string) =>
-  `/applications/installed/${release.namespace}/${release.name}${tab ? `?tab=${tab}` : ""}`
+  `/applications/installed/${encodeURIComponent(release.namespace)}/${encodeURIComponent(release.name)}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`
 
 export const listReleases = async (namespace?: string): Promise<HelmRelease[]> => {
   const data = await requestJson(`${HELM}/releases${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ""}`, { method: "GET" }) as { items?: HelmRelease[] }

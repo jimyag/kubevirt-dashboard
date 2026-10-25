@@ -57,6 +57,21 @@ type handler struct {
 	reposMu    sync.Mutex
 }
 
+const repositoryRequestTimeout = 30 * time.Second
+
+func repositoryGetters(settings *cli.EnvSettings) getter.Providers {
+	providers := getter.All(settings)
+	for index := range providers {
+		if providers[index].Provides("https") {
+			providers[index].New = func(options ...getter.Option) (getter.Getter, error) {
+				return getter.NewHTTPGetter(append(options, getter.WithTimeout(repositoryRequestTimeout))...)
+			}
+			break
+		}
+	}
+	return providers
+}
+
 // Register adds the /api/v1/helm endpoints to mux.
 func Register(mux *http.ServeMux, restConfig RESTConfigFunc) {
 	h := &handler{restConfig: restConfig}
@@ -118,24 +133,48 @@ func isDNSLabel(value string) bool {
 }
 
 func loginRegistry(settings *cli.EnvSettings, entry *repo.Entry) error {
-	parsed, err := url.Parse(entry.URL)
+	host, err := registryHost(entry.URL)
 	if err != nil {
 		return err
-	}
-	if parsed.Host == "" {
-		return errors.New("OCI repository has no registry host")
 	}
 	client, err := registry.NewClient(registry.ClientOptCredentialsFile(settings.RegistryConfig))
 	if err != nil {
 		return err
 	}
-	if err := client.Login(parsed.Host, registry.LoginOptBasicAuth(entry.Username, entry.Password)); err != nil {
+	if err := client.Login(host, registry.LoginOptBasicAuth(entry.Username, entry.Password)); err != nil {
 		return err
 	}
 	if err := os.Chmod(settings.RegistryConfig, 0o600); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
+}
+
+func registryHost(repositoryURL string) (string, error) {
+	parsed, err := url.Parse(repositoryURL)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Host == "" {
+		return "", errors.New("OCI repository has no registry host")
+	}
+	return parsed.Host, nil
+}
+
+func repositoryHostUsed(file *repo.File, repositoryURL, except string) bool {
+	host, err := registryHost(repositoryURL)
+	if err != nil {
+		return false
+	}
+	for _, entry := range file.Repositories {
+		if entry == nil || entry.Name == except || !registry.IsOCI(entry.URL) {
+			continue
+		}
+		if savedHost, err := registryHost(entry.URL); err == nil && savedHost == host {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *handler) settingsFor(r *http.Request) (*cli.EnvSettings, error) {
@@ -468,8 +507,8 @@ func (h *handler) resources(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	getter := &restGetter{config: restConfig, namespace: namespace}
-	mapper, err := getter.ToRESTMapper()
+	restMapperGetter := &restGetter{config: restConfig, namespace: namespace}
+	mapper, err := restMapperGetter.ToRESTMapper()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -623,14 +662,6 @@ func readRepositories(settings *cli.EnvSettings) (*repo.File, error) {
 	return file, nil
 }
 
-func readRepository(settings *cli.EnvSettings, name string) *repo.Entry {
-	file, err := readRepositories(settings)
-	if err != nil {
-		return nil
-	}
-	return file.Get(name)
-}
-
 func repositoryType(url string) string {
 	if registry.IsOCI(url) {
 		return "OCI"
@@ -638,8 +669,12 @@ func repositoryType(url string) string {
 	return "HTTP"
 }
 
+func sameRepositoryURL(first, second string) bool {
+	return strings.TrimSuffix(first, "/") == strings.TrimSuffix(second, "/")
+}
+
 func refreshHTTPRepository(settings *cli.EnvSettings, entry *repo.Entry) (*repo.IndexFile, error) {
-	chartRepo, err := repo.NewChartRepository(entry, getter.All(settings))
+	chartRepo, err := repo.NewChartRepository(entry, repositoryGetters(settings))
 	if err != nil {
 		return nil, err
 	}
@@ -667,8 +702,8 @@ func (h *handler) listRepositories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.reposMu.Lock()
-	defer h.reposMu.Unlock()
 	file, err := readRepositories(settings)
+	h.reposMu.Unlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -722,10 +757,18 @@ func (h *handler) saveRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.reposMu.Lock()
-	defer h.reposMu.Unlock()
-	existing := readRepository(settings, req.Name)
+	file, err := readRepositories(settings)
+	var existing *repo.Entry
+	if err == nil {
+		existing = file.Get(req.Name)
+	}
+	h.reposMu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	entry := &repo.Entry{Name: req.Name, URL: req.URL, Username: req.Username, Password: req.Password}
-	if existing != nil {
+	if existing != nil && sameRepositoryURL(existing.URL, req.URL) {
 		if req.Username == "" {
 			entry.Username = existing.Username
 		}
@@ -744,7 +787,9 @@ func (h *handler) saveRepository(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	file, err := readRepositories(settings)
+	h.reposMu.Lock()
+	defer h.reposMu.Unlock()
+	file, err = readRepositories(settings)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -765,19 +810,42 @@ func (h *handler) removeRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.reposMu.Lock()
-	defer h.reposMu.Unlock()
 	file, err := readRepositories(settings)
 	if err != nil {
+		h.reposMu.Unlock()
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	entry := file.Get(name)
+	if entry == nil {
+		h.reposMu.Unlock()
+		writeError(w, http.StatusNotFound, errors.New("repository not found"))
+		return
+	}
+	isOCI := registry.IsOCI(entry.URL)
+	host, hostErr := registryHost(entry.URL)
+	credentialShared := hostErr == nil && repositoryHostUsed(file, entry.URL, name)
 	if !file.Remove(name) {
+		h.reposMu.Unlock()
 		writeError(w, http.StatusNotFound, errors.New("repository not found"))
 		return
 	}
 	if err := file.WriteFile(settings.RepositoryConfig, 0o600); err != nil {
+		h.reposMu.Unlock()
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	h.reposMu.Unlock()
+	if isOCI && hostErr == nil && !credentialShared {
+		client, err := registry.NewClient(registry.ClientOptCredentialsFile(settings.RegistryConfig))
+		if err == nil {
+			err = client.Logout(host)
+		}
+		if err != nil {
+			log.Printf("clear OCI credentials for %s: %v", name, err)
+		}
+	} else if isOCI && hostErr != nil {
+		log.Printf("clear OCI credentials for %s: %v", name, hostErr)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
@@ -790,8 +858,8 @@ func (h *handler) refreshRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.reposMu.Lock()
-	defer h.reposMu.Unlock()
 	file, err := readRepositories(settings)
+	h.reposMu.Unlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -821,8 +889,8 @@ func (h *handler) listRepositoryCharts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.reposMu.Lock()
-	defer h.reposMu.Unlock()
 	file, err := readRepositories(settings)
+	h.reposMu.Unlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -836,7 +904,7 @@ func (h *handler) listRepositoryCharts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("this OCI source does not provide a chart catalog; install it by chart reference"))
 		return
 	}
-	index, err := refreshHTTPRepository(settings, entry)
+	index, err := cachedHTTPRepository(settings, entry)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -883,7 +951,7 @@ func (h *handler) loadChart(cfg *action.Configuration, settings *cli.EnvSettings
 				return nil, err
 			}
 			for _, entry := range repos.Repositories {
-				if entry == nil || strings.TrimSuffix(entry.URL, "/") != strings.TrimSuffix(source.Repo, "/") {
+				if entry == nil || !sameRepositoryURL(entry.URL, source.Repo) {
 					continue
 				}
 				options.Username = entry.Username
@@ -1123,13 +1191,13 @@ func (h *handler) repoVersions(settings *cli.EnvSettings, repoURL, chartName str
 		return nil, err
 	}
 	for _, saved := range repos.Repositories {
-		if saved != nil && strings.TrimSuffix(saved.URL, "/") == strings.TrimSuffix(repoURL, "/") {
+		if saved != nil && sameRepositoryURL(saved.URL, repoURL) {
 			entry.Username = saved.Username
 			entry.Password = saved.Password
 			break
 		}
 	}
-	chartRepo, err := repo.NewChartRepository(entry, getter.All(settings))
+	chartRepo, err := repo.NewChartRepository(entry, repositoryGetters(settings))
 	if err != nil {
 		return nil, err
 	}

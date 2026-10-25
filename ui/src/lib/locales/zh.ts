@@ -561,6 +561,7 @@ export const zh: Record<string, string> = {
   "Enter an http(s) URL.": "请填写 http(s) URL。",
   "Enter the chart repository, then apply again.": "请输入 Chart 仓库后再次应用。",
   "Enter the chart repository.": "请输入 Chart 仓库。",
+  "Enter the password for the new repository URL.": "请输入新仓库地址对应的密码。",
   "Ephemeral": "临时盘",
   "ephemeral": "临时",
   "Equivalent": "等价匹配",
@@ -2019,6 +2020,9 @@ export const resourceLabels: Record<string, string> = Object.fromEntries(
 )
 
 /** Kind-only lookup for dynamic CRD pages where no static resource title is available. */
+const kindCounts = new Map<string, number>()
+for (const [, kind] of resourceLabelEntries) kindCounts.set(kind, (kindCounts.get(kind) ?? 0) + 1)
+
 export const resourceKindLabels: Record<string, string> = Object.fromEntries(
-  resourceLabelEntries.map(([, kind, label]) => [kind, label]),
+  resourceLabelEntries.filter(([, kind]) => kindCounts.get(kind) === 1).map(([, kind, label]) => [kind, label]),
 )

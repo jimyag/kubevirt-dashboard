@@ -167,7 +167,7 @@ export const navSections: NavSection[] = [
         path: "",
         icon: Cpu,
         children: [
-          { name: "Instances", path: "/kubevirt/virtualization/virtual-machines", icon: Cpu, match: ["/kubevirt/virtualization/virtual-machine-instances"] },
+          { name: "Instances", path: "/kubevirt/virtualization/virtual-machines", icon: Cpu },
           { name: "Running instances", path: "/kubevirt/virtualization/virtual-machine-instances", icon: Activity, requires: ["kubevirt.io/v1", "virtualmachineinstances"] },
           { name: "Instance Pools", path: "/kubevirt/virtualization/vm-pools", icon: Boxes, requires: ["pool.kubevirt.io/v1beta1", "virtualmachinepools"] },
           { name: "Instance ReplicaSets", path: "/kubevirt/virtualization/vmi-replica-sets", icon: Layers3, requires: ["kubevirt.io/v1", "virtualmachineinstancereplicasets"] },
@@ -513,7 +513,8 @@ export const findActiveNav = (pathname: string, sections: NavSection[] = navSect
   let bestLength = 0
   for (const entry of allNavItems.slice(1)) {
     for (const prefix of [entry.item.path, ...(entry.item.match || [])]) {
-      if ((pathname === prefix || pathname.startsWith(`${prefix}/`)) && prefix.length > bestLength) {
+      if ((pathname === prefix || pathname.startsWith(`${prefix}/`))
+        && (prefix.length > bestLength || (prefix.length === bestLength && prefix === entry.item.path))) {
         best = entry
         bestLength = prefix.length
       }

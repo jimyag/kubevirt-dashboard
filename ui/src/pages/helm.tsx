@@ -343,7 +343,7 @@ export function ApplicationCatalogPage() {
           open
           onOpenChange={(open) => !open && setInstalling(null)}
           onInstalled={(release) => navigate(helmReleasePath(release))}
-          initial={installing.repository ? { repo: installing.repositoryURL, chart: installing.name, version: installing.version, name: installing.name } : undefined}
+          initial={installing.repository ? { repo: installing.repositoryURL, chart: installing.name, version: installing.version, name: installing.name } : { repo: installing.repositoryURL }}
         />
       )}
     </div>
@@ -356,6 +356,7 @@ const blankRepository: RepositoryForm = { name: "", url: "", username: "", passw
 function RepositoryDialog({ open, onOpenChange, repository, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; repository: HelmRepository | null; onSaved: () => void }) {
   const [form, setForm] = useState<RepositoryForm>(() => repository ? { name: repository.name, url: repository.url, username: repository.username || "", password: "" } : blankRepository)
   const editing = repository !== null
+  const urlChanged = editing && form.url.replace(/\/$/, "") !== repository.url.replace(/\/$/, "")
   const set = (patch: Partial<RepositoryForm>) => setForm((current) => ({ ...current, ...patch }))
   return (
     <ConfirmDialog
@@ -372,6 +373,7 @@ function RepositoryDialog({ open, onOpenChange, repository, onSaved }: { open: b
         if (!form.name) throw new Error(t("Enter a repository name."))
         if (!isDnsLabel(form.name)) throw new Error(t("Repository name must be at most 63 lowercase letters, digits and dashes."))
         if (!form.url) throw new Error(t("Enter a repository URL."))
+        if (urlChanged && !form.password) throw new Error(t("Enter the password for the new repository URL."))
         await saveRepository(form)
         toast.success(editing ? t("Updated {name}", { name: form.name }) : t("Added {name}", { name: form.name }))
         onSaved()
@@ -382,7 +384,7 @@ function RepositoryDialog({ open, onOpenChange, repository, onSaved }: { open: b
         <FieldRow label={t("URL")} hint="https://... or oci://..."><Input value={form.url} onChange={(event) => set({ url: event.target.value.trim() })} className="font-mono" /></FieldRow>
         <div className="grid gap-4 sm:grid-cols-2">
           <FieldRow label={t("Username")}><Input value={form.username} autoComplete="username" onChange={(event) => set({ username: event.target.value })} className="font-mono" /></FieldRow>
-          <FieldRow label={t("Password")} hint={editing ? t("Leave empty to keep the saved password.") : undefined}><Input type="password" value={form.password} autoComplete="new-password" onChange={(event) => set({ password: event.target.value })} /></FieldRow>
+          <FieldRow label={t("Password")} hint={urlChanged ? t("Enter the password for the new repository URL.") : editing ? t("Leave empty to keep the saved password.") : undefined}><Input type="password" value={form.password} autoComplete="new-password" onChange={(event) => set({ password: event.target.value })} /></FieldRow>
         </div>
       </div>
     </ConfirmDialog>

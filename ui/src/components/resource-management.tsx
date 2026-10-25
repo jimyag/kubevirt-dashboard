@@ -225,12 +225,13 @@ const createPathUrl = (config: ResourceConfig, basePath: string, resource: KubeR
     ? `${basePath}/namespaces/${resource.metadata.namespace}/${config.id}`
     : `${basePath}/${config.id}`
 
-function DetailTabs({ config, namespace, name, scope, active }: { config: ResourceConfig; namespace?: string; name?: string; scope: string; active: "overview" | "events" | "manifest" }) {
+function DetailTabs({ config, namespace, name, scope, active }: { config: ResourceConfig; namespace?: string; name?: string; scope?: string; active: "overview" | "events" | "manifest" }) {
   const scopedNamespace = namespace || "_cluster"
+  const link = (path: string) => scope ? withResourceScope(path, scope) : path
   const tabs = [
-    { id: "overview", label: t("Overview"), to: withResourceScope(`${config.path}/${scopedNamespace}/${name}`, scope) },
-    { id: "events", label: t("Events"), to: withResourceScope(`${config.path}/${scopedNamespace}/${name}/events`, scope) },
-    { id: "manifest", label: t("Manifest"), to: withResourceScope(`${config.path}/${scopedNamespace}/${name}/manifest`, scope) },
+    { id: "overview", label: t("Overview"), to: link(`${config.path}/${scopedNamespace}/${name}`) },
+    { id: "events", label: t("Events"), to: link(`${config.path}/${scopedNamespace}/${name}/events`) },
+    { id: "manifest", label: t("Manifest"), to: link(`${config.path}/${scopedNamespace}/${name}/manifest`) },
   ] as const
 
   return (
@@ -1618,7 +1619,7 @@ export function ResourceDetail({ config: baseConfig }: { config: ResourceConfig 
         }
       />
 
-      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id || "cluster"} active="overview" />
+      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id} active="overview" />
 
       {schema ? <StructuredResourceOverview resource={resource} sections={[]} preserveEmpty /> : <ResourceSpecificOverview resource={resource} config={config} sections={sections} />}
 
@@ -1649,7 +1650,7 @@ export function ResourceEvents({ config: baseConfig }: { config: ResourceConfig 
         title={name}
         subtitle={<span className="font-mono text-xs">{config.kind}</span>}
       />
-      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id || "cluster"} active="events" />
+      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id} active="events" />
       <EventList url={eventsUrl({ namespace: scopedNamespace, kind: config.kind, name })} showObject={false} />
     </div>
   )
@@ -1697,7 +1698,7 @@ export function ResourceManifest({ config: baseConfig }: { config: ResourceConfi
         }
       />
 
-      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id || "cluster"} active="manifest" />
+      <DetailTabs config={config} namespace={namespace} name={name} scope={variant?.id} active="manifest" />
 
       {error ? (
         <ErrorNote>{error}</ErrorNote>
