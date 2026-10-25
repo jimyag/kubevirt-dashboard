@@ -40,6 +40,9 @@ changelog:
       - '^docs:'
       - '^test:'
 
+release:
+  replace_existing_artifacts: true
+
 dockers:
   - image_templates:
       - "ghcr.io/jimyag/kubevirt-dashboard:{{ .Tag }}"
